@@ -115,16 +115,24 @@ class TrajectoryInterpolator:
         new_steps = np.linspace(0, 1, self._interpolation_length)
 
         # Interpolate each dimension separately
-        resampled = np.empty((self._interpolation_length, trajectory.shape[1]))
-        for i in range(trajectory.shape[1]):
-            if i == (trajectory.shape[1] - 1):  # gripper opening
-                interpolator = interp1d(old_steps, trajectory[:, i])
-            else:
-                interpolator = CubicSpline(old_steps, trajectory[:, i])
+        # resampled = np.empty((self._interpolation_length, trajectory.shape[1]))
+        # for i in range(trajectory.shape[1]):
+        #     if i == (trajectory.shape[1] - 1):  # gripper opening
+        #         interpolator = interp1d(old_steps, trajectory[:, i])
+        #     else:
+        #         interpolator = CubicSpline(old_steps, trajectory[:, i])
 
-            resampled[:, i] = interpolator(new_steps)
+        #     resampled[:, i] = interpolator(new_steps)
+        resampled = np.empty((self._interpolation_length, trajectory.shape[1]))
+        interpolator = CubicSpline(old_steps, trajectory[:, :-1])
+        resampled[:, :-1] = interpolator(new_steps)
+        last_interpolator = interp1d(old_steps, trajectory[:, -1])
+        resampled[:, -1] = last_interpolator(new_steps)
 
         resampled = torch.tensor(resampled)
         if trajectory.shape[1] == 8:
             resampled[:, 3:7] = normalise_quat(resampled[:, 3:7])
+        elif trajectory.shape[1] == 16:
+            resampled[:, 3:7] = normalise_quat(resampled[:, 3:7])
+            resampled[:, 11:15] = normalise_quat(resampled[:, 11:15])
         return resampled

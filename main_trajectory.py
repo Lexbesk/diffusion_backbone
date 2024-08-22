@@ -16,7 +16,7 @@ from torch.nn import functional as F
 
 from datasets.dataset_engine import RLBenchDataset
 from engine import BaseTrainTester
-from diffuser_actor import DiffuserActor
+from diffuser_actor import DiffuserActor, BiManualDiffuserActor
 
 from utils.common_utils import (
     load_instructions, count_parameters, get_gripper_loc_bounds
@@ -37,6 +37,7 @@ class Arguments(tap.Tap):
     gripper_loc_bounds: Optional[str] = None
     gripper_loc_bounds_buffer: float = 0.04
     eval_only: int = 0
+    bimanual: int = 0
 
     # Training and validation datasets
     dataset: Path
@@ -119,7 +120,8 @@ class TrainTester(BaseTrainTester):
             ),
             return_low_lvl_trajectory=True,
             dense_interpolation=bool(self.args.dense_interpolation),
-            interpolation_length=self.args.interpolation_length
+            interpolation_length=self.args.interpolation_length,
+            bimanual=bool(self.args.bimanual)
         )
         test_dataset = RLBenchDataset(
             root=self.args.valset,
@@ -135,14 +137,19 @@ class TrainTester(BaseTrainTester):
             ),
             return_low_lvl_trajectory=True,
             dense_interpolation=bool(self.args.dense_interpolation),
-            interpolation_length=self.args.interpolation_length
+            interpolation_length=self.args.interpolation_length,
+            bimanual=bool(self.args.bimanual)
         )
         return train_dataset, test_dataset
 
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        _model = DiffuserActor(
+        if bool(self.args.bimanual):
+            model_class = BiManualDiffuserActor
+        else:
+            model_class = DiffuserActor
+        _model = model_class(
             backbone=self.args.backbone,
             image_size=tuple(int(x) for x in self.args.image_size.split(",")),
             embedding_dim=self.args.embedding_dim,
@@ -272,7 +279,7 @@ class TrainTester(BaseTrainTester):
                 self.writer.add_image(viz_key, viz, step_id)
 
         # Log all statistics
-        values = self.synchronize_between_processes(values)
+        # values = self.synchronize_between_processes(values)
         values = {k: v.mean().item() for k, v in values.items()}
         if dist.get_rank() == 0:
             if step_id > -1:
@@ -346,9 +353,14 @@ class TrajectoryCriterion:
         }
 
         # Keypose metrics
-        pos_l2 = ((pred[:, -1, :3] - gt[:, -1, :3]) ** 2).sum(-1).sqrt()
-        quat_l1 = (pred[:, -1, 3:7] - gt[:, -1, 3:7]).abs().sum(-1)
-        quat_l1_ = (pred[:, -1, 3:7] + gt[:, -1, 3:7]).abs().sum(-1)
+        if pred.ndim == gt.ndim == 3:
+            pos_l2 = ((pred[:, -1, :3] - gt[:, -1, :3]) ** 2).sum(-1).sqrt()
+            quat_l1 = (pred[:, -1, 3:7] - gt[:, -1, 3:7]).abs().sum(-1)
+            quat_l1_ = (pred[:, -1, 3:7] + gt[:, -1, 3:7]).abs().sum(-1)
+        else:
+            pos_l2 = ((pred[:, -1, :, :3] - gt[:, -1, :, :3]) ** 2).sum(-1).sqrt()
+            quat_l1 = (pred[:, -1, :, 3:7] - gt[:, -1, :, 3:7]).abs().sum(-1)
+            quat_l1_ = (pred[:, -1, :, 3:7] + gt[:, -1, :, 3:7]).abs().sum(-1)
         select_mask = (quat_l1 < quat_l1_).float()
         quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
         ret_1.update({
@@ -385,16 +397,37 @@ def generate_visualizations(pred, gt, mask, box_size=0.3):
 
     fig = plt.figure(figsize=(10, 10))
     ax = plt.axes(projection='3d')
-    ax.scatter3D(
-        pred[~mask][:, 0], pred[~mask][:, 1], pred[~mask][:, 2],
-        color='red', label='pred'
-    )
-    ax.scatter3D(
-        gt[~mask][:, 0], gt[~mask][:, 1], gt[~mask][:, 2],
-        color='blue', label='gt'
-    )
+    if pred.ndim == 2 and gt.ndim == 2:
+        ax.scatter3D(
+            pred[~mask][:, 0], pred[~mask][:, 1], pred[~mask][:, 2],
+            color='red', label='pred'
+        )
+        ax.scatter3D(
+            gt[~mask][:, 0], gt[~mask][:, 1], gt[~mask][:, 2],
+            color='blue', label='gt'
+        )
+        center = gt[~mask].mean(0)
+    elif pred.ndim == 3 and gt.ndim == 3:
+        ax.scatter3D(
+            pred[~mask][:, 0, 0], pred[~mask][:, 0, 1], pred[~mask][:, 0, 2],
+            color='red', label='pred-left'
+        )
+        ax.scatter3D(
+            pred[~mask][:, 1, 0], pred[~mask][:, 1, 1], pred[~mask][:, 1, 2],
+            color='magenta', label='pred-right'
+        )
+        ax.scatter3D(
+            gt[~mask][:, 0, 0], gt[~mask][:, 0, 1], gt[~mask][:, 0, 2],
+            color='blue', label='gt-left'
+        )
+        ax.scatter3D(
+            gt[~mask][:, 1, 0], gt[~mask][:, 1, 1], gt[~mask][:, 1, 2],
+            color='cyan', label='gt-right'
+        )
+        center = np.reshape(gt[~mask], (-1, gt.shape[-1])).mean(0)
+    else:
+        raise ValueError("Invalid dimensions")
 
-    center = gt[~mask].mean(0)
     ax.set_xlim(center[0] - box_size, center[0] + box_size)
     ax.set_ylim(center[1] - box_size, center[1] + box_size)
     ax.set_zlim(center[2] - box_size, center[2] + box_size)
