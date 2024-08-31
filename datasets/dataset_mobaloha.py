@@ -1,134 +1,14 @@
-from collections import defaultdict, Counter
-import itertools
 import math
 import random
-from pathlib import Path
-from time import time
 
 import torch
-from torch.utils.data import Dataset
 
-from .utils import loader, Resize, TrajectoryInterpolator
+from utils.utils_with_mobaloha import to_relative_action
+from .dataset_engine import RLBenchDataset
 
 
-class RLBenchDataset(Dataset):
-    """RLBench dataset."""
-
-    def __init__(
-        self,
-        # required
-        root,
-        instructions=None,
-        # dataset specification
-        taskvar=[('close_door', 0)],
-        max_episode_length=5,
-        cache_size=0,
-        max_episodes_per_task=100,
-        num_iters=None,
-        cameras=("wrist", "left_shoulder", "right_shoulder"),
-        # for augmentations
-        training=True,
-        image_rescale=(1.0, 1.0),
-        # for trajectories
-        return_low_lvl_trajectory=False,
-        dense_interpolation=False,
-        interpolation_length=100,
-        relative_action=False,
-        bimanual=False
-    ):
-        self._cache = {}
-        self._cache_size = cache_size
-        self._cameras = cameras
-        self._max_episode_length = max_episode_length
-        self._num_iters = num_iters
-        self._training = training
-        self._taskvar = taskvar
-        self._return_low_lvl_trajectory = return_low_lvl_trajectory
-        if isinstance(root, (Path, str)):
-            root = [Path(root)]
-        self._root = [Path(r).expanduser() for r in root]
-        self._relative_action = relative_action
-        self._bimanual = bimanual
-
-        # For trajectory optimization, initialize interpolation tools
-        if return_low_lvl_trajectory:
-            assert dense_interpolation
-            self._interpolate_traj = TrajectoryInterpolator(
-                use=dense_interpolation,
-                interpolation_length=interpolation_length
-            )
-
-        # Keep variations and useful instructions
-        self._instructions = defaultdict(dict)
-        self._num_vars = Counter()  # variations of the same task
-        for root, (task, var) in itertools.product(self._root, taskvar):
-            data_dir = root / f"{task}+{var}"
-            if data_dir.is_dir():
-                if instructions is not None:
-                    self._instructions[task][var] = instructions[task][var]
-                self._num_vars[task] += 1
-
-        # If training, initialize augmentation classes
-        if self._training:
-            self._resize = Resize(scales=image_rescale)
-
-        # File-names of episodes per task and variation
-        episodes_by_task = defaultdict(list)  # {task: [(task, var, filepath)]}
-        for root, (task, var) in itertools.product(self._root, taskvar):
-            data_dir = root / f"{task}+{var}"
-            if not data_dir.is_dir():
-                print(f"Can't find dataset folder {data_dir}")
-                continue
-            npy_episodes = [(task, var, ep) for ep in data_dir.glob("*.npy")]
-            dat_episodes = [(task, var, ep) for ep in data_dir.glob("*.dat")]
-            pkl_episodes = [(task, var, ep) for ep in data_dir.glob("*.pkl")]
-            episodes = npy_episodes + dat_episodes + pkl_episodes
-            # Split episodes equally into task variations
-            if max_episodes_per_task > -1:
-                episodes = episodes[
-                    :max_episodes_per_task // self._num_vars[task] + 1
-                ]
-            if len(episodes) == 0:
-                print(f"Can't find episodes at folder {data_dir}")
-                continue
-            episodes_by_task[task] += episodes
-
-        # Collect and trim all episodes in the dataset
-        self._episodes = []
-        self._num_episodes = 0
-        for task, eps in episodes_by_task.items():
-            if len(eps) > max_episodes_per_task and max_episodes_per_task > -1:
-                eps = random.sample(eps, max_episodes_per_task)
-            episodes_by_task[task] = sorted(
-                eps, key=lambda t: int(str(t[2]).split('/')[-1][2:-4])
-            )
-            self._episodes += eps
-            self._num_episodes += len(eps)
-        print(f"Created dataset from {root} with {self._num_episodes}")
-        self._episodes_by_task = episodes_by_task
-
-    def read_from_cache(self, args):
-        if self._cache_size == 0:
-            return loader(args)
-
-        if args in self._cache:
-            return self._cache[args]
-
-        value = loader(args)
-
-        if len(self._cache) == self._cache_size:
-            key = list(self._cache.keys())[int(time()) % self._cache_size]
-            del self._cache[key]
-
-        if len(self._cache) < self._cache_size:
-            self._cache[args] = value
-
-        return value
-
-    @staticmethod
-    def _unnormalize_rgb(rgb):
-        # (from [-1, 1] to [0, 1]) to feed RGB to pre-trained backbone
-        return rgb / 2 + 0.5
+class MobileAlohaDataset(RLBenchDataset):
+    """Dataset class for Mobile Aloha."""
 
     def __getitem__(self, episode_id):
         """
@@ -210,11 +90,14 @@ class RLBenchDataset(Dataset):
         traj, traj_lens = None, 0
         if self._return_low_lvl_trajectory:
             if len(episode) > 5:
-                traj_items = [
-                    # self._interpolate_traj(torch.from_numpy(episode[5][i]))
-                    self._interpolate_traj(episode[5][i].flatten(1, -1))
-                    for i in frame_ids
-                ]
+                try:
+                    traj_items = [
+                        # self._interpolate_traj(torch.from_numpy(episode[5][i]))
+                        self._interpolate_traj(episode[5][i].flatten(1, -1))
+                        for i in frame_ids
+                    ]
+                except:
+                    import ipdb; ipdb.set_trace()
             else:
                 traj_items = [
                     self._interpolate_traj(
@@ -244,6 +127,16 @@ class RLBenchDataset(Dataset):
             rgbs = modals["rgbs"]
             pcds = modals["pcds"]
 
+        # Compute relative action
+        if self._relative_action and traj is not None:
+            rel_traj = torch.zeros_like(traj)
+            for i in range(traj.shape[0]):
+                for j in range(traj.shape[1]):
+                    rel_traj[i, j] = torch.as_tensor(to_relative_action(
+                        traj[i, j], traj[i, 0]
+                    ))
+            traj = rel_traj
+
         ret_dict = {
             "task": [task for _ in frame_ids],
             "rgbs": rgbs,  # e.g. tensor (n_frames, n_cam, 3+1, H, W)
@@ -266,8 +159,3 @@ class RLBenchDataset(Dataset):
             ret_dict['trajectory'] = ret_dict['trajectory'].unflatten(-1, (2, -1))
 
         return ret_dict
-
-    def __len__(self):
-        if self._num_iters is not None:
-            return self._num_iters
-        return self._num_episodes

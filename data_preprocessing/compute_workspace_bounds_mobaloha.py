@@ -17,7 +17,7 @@ import numpy as np
 from tqdm import tqdm
 import blosc
 
-from datasets.dataset_engine_bak import RLBenchDataset
+from datasets.dataset_mobaloha import MobileAlohaDataset
 
 
 class Arguments(tap.Tap):
@@ -51,7 +51,7 @@ if __name__ == "__main__":
         ]
         max_episode_length = 200
 
-        dataset = RLBenchDataset(
+        dataset = MobileAlohaDataset(
             root=args.dataset,
             instructions=None,
             taskvar=taskvar,
@@ -75,15 +75,14 @@ if __name__ == "__main__":
         stats = []
         for i in tqdm(range(len(dataset))):
             ep = dataset[i]
-            from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
-            k = 10
-            visualize_actions_and_point_clouds_video(
-                ep['pcds'][[k]].expand(26, -1, -1, -1,  -1),
-                ep['rgbs'][[k]].expand(26, -1, -1, -1, -1),
-                ep['trajectory'][k, :, 0],
-                ep['trajectory'][k, :, 1]
-            )
-            import ipdb; ipdb.set_trace()
+            # from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
+            # k = 10
+            # visualize_actions_and_point_clouds_video(
+            #     ep['pcds'][[k]].expand(26, -1, -1, -1,  -1),
+            #     ep['rgbs'][[k]].expand(26, -1, -1, -1, -1),
+            #     ep['trajectory'][k, :, 0],
+            #     ep['trajectory'][k, :, 1]
+            # )
             bounds[task].append(ep["trajectory"][..., :3].reshape([-1, 3]))
 
     bounds = {
