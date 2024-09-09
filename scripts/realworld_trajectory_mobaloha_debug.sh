@@ -1,7 +1,7 @@
 main_dir=BiManualActor_MobileAloha
 
-dataset=/ws/data/mobile_aloha
-valset=/ws/data/mobile_aloha
+dataset=/home/tsungwek/data/mobile_aloha
+valset=/home/tsungwek/data/mobile_aloha
 
 lr=1e-4
 wd=5e-3
@@ -20,7 +20,7 @@ run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpola
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_trajectory_mobaloha.py \
+    mobaloha_debug.py \
     --tasks 20240827_plate \
     --dataset $dataset \
     --valset $valset \
