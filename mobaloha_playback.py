@@ -69,8 +69,8 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-
-        self.episode = np.load("/ws/data/mobile_aloha/20240827_plate+0/ep1.npy")
+        self.file_dir = "/ws/data/mobile_aloha/20240827_plate+0/ep1.npy"
+        self.episode = np.load( self.file_dir, allow_pickle=True)
         self.frame_idx = -1
         self.inference_action = []
 
@@ -312,8 +312,8 @@ class bi_3dda_node(Node):
     def SyncCallback(self, bgr, depth):
         self.frame_idx += 1
         if(self.frame_idx >= len(self.episode[0])):
-            self.episode.append(self.inference_action)
-            np.save('debug_result', self.episode)
+            # self.episode.append(self.inference_action)
+            np.save('debug_result', self.inference_action)
             return
         
         obs = self.episode[1][ self.frame_idx ].numpy()
@@ -324,8 +324,12 @@ class bi_3dda_node(Node):
         rgbs = torch.from_numpy(obs[0:,0])
         pcds = torch.from_numpy(obs[0:,1])
 
-        curr_gripper = self.episode[4][ self.frame_idx ]
+        rgbs = rgbs[None, :,:,:,:]
+        pcds = pcds[None, :,:,:,:]
 
+        curr_gripper = self.episode[4][ self.frame_idx ]
+        curr_gripper = curr_gripper[None, None, :,:]
+        # print("rgbs: ",rgbs.shape)
         action = self.network.run( rgbs, pcds, curr_gripper, instr)
         
         self.inference_action.append(action)
