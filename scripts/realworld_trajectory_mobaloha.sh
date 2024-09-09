@@ -20,10 +20,11 @@ run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpola
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_trajectory_mobaloha.py \
+    mobaloha.py \
     --tasks 20240827_plate \
     --dataset $dataset \
     --valset $valset \
+    --eval_only 1 \
     --gripper_loc_bounds tasks/mobaloha_tasks_rel_location_bounds.json \
     --gripper_loc_bounds_buffer $gripper_loc_bounds_buffer \
     --num_workers 4 \
