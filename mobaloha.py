@@ -376,6 +376,8 @@ class bi_3dda_node(Node):
 
         resized_img_data = np.transpose(rgb, (2, 0, 1) ).astype(float)
         resized_img_data = (resized_img_data / 255.0 ).astype(float)
+        resized_img_data = resized_img_data / 2 + 0.5
+        
         # print("resized_img_data: ", resized_img_data.shape)
         resized_xyz = np.transpose(xyz, (2, 0, 1) ).astype(float)
         # print("resized_xyz: ", resized_xyz.shape)

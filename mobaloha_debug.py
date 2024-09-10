@@ -336,30 +336,16 @@ class bi_3dda_node(Node):
                                         self.resized_intrinsic_o3d.intrinsic_matrix,
                                         self.resized_image_size 
                                         )
-        # print("rgb: ", type(rgb))
-        im_color = o3d.geometry.Image(rgb)
-        im_depth = o3d.geometry.Image(depth)
-        rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-            im_color, im_depth, depth_scale=1000, depth_trunc=2000, convert_rgb_to_intensity=False)
-        
-        # original_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-        #         rgbd,
-        #         o3d_intrinsic
-        #         # resized_intrinsic
-        #     )
-        # original_pcd = original_pcd.transform(cam_extrinsic)
-        # xyz = np.array(original_pcd.points)
-        # rgb = np.array(original_pcd.colors)
-        # valid_xyz, valid_rgb, valid_label, cropped_pcd = cropping( xyz, rgb, bound_box )
-        
-        # left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
-        # right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
+        # im_color = o3d.geometry.Image(rgb)
+        # im_depth = o3d.geometry.Image(depth)
+        # rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+        #     im_color, im_depth, depth_scale=1000, depth_trunc=2000, convert_rgb_to_intensity=False)
 
-        all_valid_resized_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-                rgbd,
-                self.resized_intrinsic_o3d,
-        )
-        all_valid_resized_pcd.transform( self.cam_extrinsic )
+        # all_valid_resized_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+        #         rgbd,
+        #         self.resized_intrinsic_o3d,
+        # )
+        # all_valid_resized_pcd.transform( self.cam_extrinsic )
 
         # visualize_pcd(all_valid_resized_pcd)
         xyz = self.xyz_from_depth(depth, self.resized_intrinsic_o3d.intrinsic_matrix, self.cam_extrinsic )
@@ -376,6 +362,7 @@ class bi_3dda_node(Node):
 
         resized_img_data = np.transpose(rgb, (2, 0, 1) ).astype(float)
         resized_img_data = (resized_img_data / 255.0 ).astype(float)
+        resized_img_data = resized_img_data / 2 + 0.5
         # print("resized_img_data: ", resized_img_data.shape)
         resized_xyz = np.transpose(xyz, (2, 0, 1) ).astype(float)
         # print("resized_xyz: ", resized_xyz.shape)
