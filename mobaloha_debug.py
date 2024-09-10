@@ -31,12 +31,16 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 from sensor_msgs.msg import Joy, PointCloud2, PointField
-from geometry_msgs.msg import PointStamped, TwistStamped, Quaternion, Vector3, TransformStamped
+from sensor_msgs.msg import Image, JointState
+from nav_msgs.msg import Path
+
+from geometry_msgs.msg import PoseStamped, PointStamped, TwistStamped, Quaternion, Vector3, TransformStamped
+
 from std_msgs.msg import String, Float32, Int8, UInt8, Bool, UInt32MultiArray, Int32, Header, Float32MultiArray, MultiArrayDimension
 import numpy as np 
 import time
 
-from sensor_msgs.msg import Image, JointState
+
 from cv_bridge import CvBridge
 import cv2 
 from rclpy.qos import QoSProfile
@@ -51,7 +55,6 @@ import open3d as o3d
 import torch
 from numpy.linalg import inv
 from scipy.spatial.transform import Rotation
-
 
 # from utils.ros2_np_utils import *
 
@@ -111,9 +114,6 @@ class bi_3dda_node(Node):
 
         self.last_data_time = time.time()
 
-
-
-
         queue_size = 1000
         max_delay = 0.01 #10ms
         self.time_diff = 0.05
@@ -126,7 +126,8 @@ class bi_3dda_node(Node):
 
         self.bimanual_ee_publisher = self.create_publisher(Float32MultiArray, "bimanual_ee_cmd", 1)
 
-
+        self.left_hand_ee_publisher = self.create_publisher(Path, "left_ee_goal", 1)
+        self.right_hand_ee_publisher = self.create_publisher(Path, "right_ee_goal", 1)
 
         self.bgr_sub = Subscriber(self, Image, "/camera_1/left_image")
         self.depth_sub = Subscriber(self, Image, "/camera_1/depth")
@@ -187,21 +188,11 @@ class bi_3dda_node(Node):
         master_cam_t.transform.rotation.z = -0.31162288
         master_cam_t.transform.rotation.w = 0.2819945
 
-        # cam_t.header.frame_id = 'master_camera'
-        # cam_t.child_frame_id = "zed_left_camera_frame"
-        # cam_t.transform.translation.x = 0.0
-        # cam_t.transform.translation.y = 0.0
-        # cam_t.transform.translation.z = 0.0
-        # cam_t.transform.rotation.x = -0.4996018
-        # cam_t.transform.rotation.y =  -0.4999998
-        # cam_t.transform.rotation.z = 0.4999998
-        # cam_t.transform.rotation.w = 0.5003982
-
         # # Send the transformation
         self.tf_broadcaster.sendTransform(left_t)
         self.tf_broadcaster.sendTransform(right_t)
         self.tf_broadcaster.sendTransform(master_cam_t)
-        # self.tf_broadcaster.sendTransform(cam_t)
+
     def get_transform(self, transf_7D):
         trans = transf_7D[0:3]
         quat = transf_7D[3:7]
@@ -238,20 +229,12 @@ class bi_3dda_node(Node):
         xyz = np.stack([X, Y, depth_image / depth_scale], axis=2)
         xyz[depth_image == 0] = 0.0
 
-        # print("xyz: ", xyz.shape)
-        # print("ones: ", ones.shape)
-        # print("depth_extrinsic: ", depth_extrinsic.shape)
         xyz = np.concatenate([xyz, ones], axis=2)
         xyz =  xyz @ np.transpose( depth_extrinsic)
         xyz = xyz[:,:,0:3]
         return xyz
 
     def image_process(self, bgr, depth, intrinsic_np, original_img_size, resized_intrinsic_np, resized_img_size):
-
-        # print("bgr: ", bgr.shape)
-        # print("depth: ", depth.shape)
-        # print("intrinsic_np: ", intrinsic_np)
-        # print("resized_intrinsic_np: ", resized_intrinsic_np)
         
         cx = intrinsic_np[0,2]
         cy = intrinsic_np[1,2]
@@ -277,14 +260,6 @@ class bi_3dda_node(Node):
         cropped_depth = depth[round(cy-half_height) : round(cy + half_height), round(cx - half_width) : round(cx + half_width)]
         processed_depth = cv2.resize(cropped_depth, resized_img_size, interpolation =cv2.INTER_NEAREST)
 
-        # print("processed_rgb: ", processed_rgb.shape)
-        # print("width: ", width)
-        # print("height: ", height)
-        # print("raw_fx: ", raw_fx)
-        # print("raw_fy: ", raw_fy)
-        # print("raw_cx: ", raw_cx)
-        # print("raw_cy: ", raw_cy)
-
         return processed_rgb, processed_depth
 
     def xyz_rgb_validation(self, rgb, xyz):
@@ -296,36 +271,52 @@ class bi_3dda_node(Node):
         valid_pcd.colors = o3d.utility.Vector3dVector( rgb )
         # visualize_pcd(valid_pcd)
 
-    # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
-    def SyncCallback(self, bgr, depth):
-        # print("in call back")
-        # try:
-        #     self.left_hand_transform = self.tf_buffer.lookup_transform(
-        #             self.left_base_frame,
-        #             self.left_hand_frame,
-        #             bgr.header.stamp,
-        #             timeout=rclpy.duration.Duration(seconds=0.01)
-        #         )
-        # except TransformException as ex:
-        #     self.get_logger().info(
-        #         f'Could not transform {self.left_base_frame} to {self.left_hand_frame}: {ex}'
-        #     )
-        #     return
-        # self.left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
-        # try:
-        #     self.right_hand_transform = self.tf_buffer.lookup_transform(
-        #             self.right_base_frame,
-        #             self.right_hand_frame,
-        #             bgr.header.stamp,
-        #             timeout=rclpy.duration.Duration(seconds=0.01)
-        #         )
-        # except TransformException as ex:
-        #     self.get_logger().info(
-        #         f'Could not transform {self.right_base_frame} to {self.right_hand_frame}: {ex}'
-        #     )
-        #     return
-        # self.right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
+    def print_action(self, action):
+        action = action.reshape(-1, 2, 8)
+        left_path_np = action[:, 0, :]
+        right_path_np = action[:, 1, :]
+        start = time.time()
+
+        header = Header()
+        header.frame_id = "world"
+        ros_time = self.get_clock().now()
+        header.stamp = ros_time.to_msg()
+
+        left_path = Path()
+        left_path.header = header
+        for i in range(action.shape[0]):
+            pose = PoseStamped()
+            pose.header = header
+            pose.pose.position.x = float(action[i,0,0])
+            pose.pose.position.y = float(action[i,0,1])
+            pose.pose.position.z = float(action[i,0,2])
+            pose.pose.orientation.x = float(action[i,0,3])
+            pose.pose.orientation.y = float(action[i,0,4])
+            pose.pose.orientation.z = float(action[i,0,5])
+            pose.pose.orientation.w = float(action[i,0,6])
+            left_path.poses.append(pose)
+
+        right_path = Path()
+        right_path.header = header
+        for i in range(action.shape[0]):
+            pose = PoseStamped()
+            pose.header = header
+            pose.pose.position.x = float(action[i,1,0])
+            pose.pose.position.y = float(action[i,1,1])
+            pose.pose.position.z = float(action[i,1,2])
+            pose.pose.orientation.x = float(action[i,1,3])
+            pose.pose.orientation.y = float(action[i,1,4])
+            pose.pose.orientation.z = float(action[i,1,5])
+            pose.pose.orientation.w = float(action[i,1,6])
+            right_path.poses.append(pose)
+
+        end = time.time()
+        self.left_hand_ee_publisher.publish(left_path)
+        self.right_hand_ee_publisher.publish(right_path)
+        print( "took: ", end - start)
         
+    # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
+    def SyncCallback(self, bgr, depth):        
         bgr_np = np.array(self.br.imgmsg_to_cv2(bgr))[:,:,:3]
         depth_np = np.array(self.br.imgmsg_to_cv2(depth, desired_encoding="mono16"))
 
@@ -336,18 +327,6 @@ class bi_3dda_node(Node):
                                         self.resized_intrinsic_o3d.intrinsic_matrix,
                                         self.resized_image_size 
                                         )
-        # im_color = o3d.geometry.Image(rgb)
-        # im_depth = o3d.geometry.Image(depth)
-        # rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-        #     im_color, im_depth, depth_scale=1000, depth_trunc=2000, convert_rgb_to_intensity=False)
-
-        # all_valid_resized_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-        #         rgbd,
-        #         self.resized_intrinsic_o3d,
-        # )
-        # all_valid_resized_pcd.transform( self.cam_extrinsic )
-
-        # visualize_pcd(all_valid_resized_pcd)
         xyz = self.xyz_from_depth(depth, self.resized_intrinsic_o3d.intrinsic_matrix, self.cam_extrinsic )
 
         if( len( np.where( np.isnan(xyz))[0] ) >0 ):
@@ -370,11 +349,7 @@ class bi_3dda_node(Node):
         obs = np.zeros( (1, n_cam, 2, 3, 256, 256) ).astype(float)
         obs[0][0][0] = resized_img_data
         obs[0][0][1] = resized_xyz
-        np.save("debug", obs)
-        # print("rgb_shape: ", obs[0:,0:,0].shape)
-        
-        # left_pos = np.array(left_hand_joints.position) 
-        # right_pos = np.array(right_hand_joints.position) 
+        # np.save("debug", obs)
 
         left_min_joint = 0.638
         left_max_joint = 1.626
@@ -403,8 +378,9 @@ class bi_3dda_node(Node):
         action = self.network.run( rgbs, pcds, curr_gripper, instr)
         end = time.time()
         print("3dda took: ", end - start)
+        self.print_action(action)
         # print("action: ", action.shape)
-        print(action)
+        # print(action)
         array_msg = Float32MultiArray()
         
         array_msg.layout.dim.append(MultiArrayDimension())
@@ -421,8 +397,6 @@ class bi_3dda_node(Node):
         array_msg.layout.data_offset = 0
 
         array_msg.data = action.reshape([1, -1])[0].tolist();
-        # array_msg.layout.dim[0].stride = width*height
-        # array_msg.layout.dim[1].stride = width
         self.bimanual_ee_publisher.publish(array_msg)
         print()
         # self.left_hand_transform_7D
