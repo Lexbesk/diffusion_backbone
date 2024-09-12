@@ -380,7 +380,7 @@ class bi_3dda_node(Node):
         print("3dda took: ", end - start)
         self.print_action(action)
         # print("action: ", action.shape)
-        # print(action)
+        print(action)
         array_msg = Float32MultiArray()
         
         array_msg.layout.dim.append(MultiArrayDimension())
@@ -391,9 +391,9 @@ class bi_3dda_node(Node):
         array_msg.layout.dim[1].label = "hands"
         array_msg.layout.dim[2].label = "pose"
 
-        array_msg.layout.dim[0].size = action.shape[1]
+        array_msg.layout.dim[0].size = action.shape[0]
+        array_msg.layout.dim[1].size = action.shape[1]
         array_msg.layout.dim[1].size = action.shape[2]
-        array_msg.layout.dim[1].size = action.shape[3]
         array_msg.layout.data_offset = 0
 
         array_msg.data = action.reshape([1, -1])[0].tolist();

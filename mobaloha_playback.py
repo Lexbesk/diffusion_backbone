@@ -69,7 +69,7 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-        self.file_dir = "/ws/data/mobile_aloha/20240827_plate+0/ep1.npy"
+        self.file_dir = "/ws/data/mobile_aloha/20240827_plate+0/ep11.npy"
         self.episode = np.load( self.file_dir, allow_pickle=True)
         self.frame_idx = -1
         self.inference_action = []
@@ -322,6 +322,8 @@ class bi_3dda_node(Node):
  
         instr = torch.zeros((1, 53, 512))
         rgbs = torch.from_numpy(obs[0:,0])
+        # rgbs = rgbs / 2 + 0.5
+
         pcds = torch.from_numpy(obs[0:,1])
 
         rgbs = rgbs[None, :,:,:,:]
@@ -336,25 +338,29 @@ class bi_3dda_node(Node):
 
         end = time.time()
         print("3dda took: ", end - start)
+        #print("gripper: ", self.episode[4][ self.frame_idx ].numpy())
+        print("traj: ", self.episode[5][ self.frame_idx ].numpy()[ 0:3,:,:] )
+        print("action: ", action[0:3, :,:])
+        print("diff: ", self.episode[5][ self.frame_idx ].numpy()[0:10,:,:] - action[0:10, :, :])
 
-        print(action)
-        # array_msg = Float32MultiArray()
+        array_msg = Float32MultiArray()
         
-        # array_msg.layout.dim.append(MultiArrayDimension())
-        # array_msg.layout.dim.append(MultiArrayDimension())
-        # array_msg.layout.dim.append(MultiArrayDimension())
+        array_msg.layout.dim.append(MultiArrayDimension())
+        array_msg.layout.dim.append(MultiArrayDimension())
+        array_msg.layout.dim.append(MultiArrayDimension())
 
-        # array_msg.layout.dim[0].label = "steps"
-        # array_msg.layout.dim[1].label = "hands"
-        # array_msg.layout.dim[2].label = "pose"
+        array_msg.layout.dim[0].label = "steps"
+        array_msg.layout.dim[1].label = "hands"
+        array_msg.layout.dim[2].label = "pose"
 
-        # array_msg.layout.dim[0].size = action.shape[1]
-        # array_msg.layout.dim[1].size = action.shape[2]
-        # array_msg.layout.dim[1].size = action.shape[3]
-        # array_msg.layout.data_offset = 0
+        array_msg.layout.dim[0].size = action.shape[0]
+        array_msg.layout.dim[1].size = action.shape[1]
+        array_msg.layout.dim[1].size = action.shape[2]
+        array_msg.layout.data_offset = 0
 
-        # array_msg.data = action.reshape([1, -1])[0].tolist();
-        # self.bimanual_ee_publisher.publish(array_msg)
+        array_msg.data = action.reshape([1, -1])[0].tolist();
+        self.bimanual_ee_publisher.publish(array_msg)
+        time.sleep(3)
         # print()
 
 

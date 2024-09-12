@@ -352,6 +352,10 @@ class bi_3dda_node(Node):
                                         self.resized_image_size 
                                         )
         # print("rgb: ", type(rgb))
+
+        print("left hand pose: ", self.left_hand_transform_7D)
+        print("right hand pose: ", self.right_hand_transform_7D)
+
         im_color = o3d.geometry.Image(rgb)
         im_depth = o3d.geometry.Image(depth)
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
@@ -391,7 +395,7 @@ class bi_3dda_node(Node):
 
         resized_img_data = np.transpose(rgb, (2, 0, 1) ).astype(float)
         resized_img_data = (resized_img_data / 255.0 ).astype(float)
-        resized_img_data = resized_img_data / 2 + 0.5
+        # resized_img_data = resized_img_data / 2 + 0.5
 
         # print("resized_img_data: ", resized_img_data.shape)
         resized_xyz = np.transpose(xyz, (2, 0, 1) ).astype(float)
@@ -429,6 +433,7 @@ class bi_3dda_node(Node):
         end = time.time()
         print("3dda took: ", end - start)
         # print("action: ", action.shape)
+        print("action: ", action[0,0:5, :,:])
         self.print_action(action)
         
         array_msg = Float32MultiArray()
@@ -441,9 +446,9 @@ class bi_3dda_node(Node):
         array_msg.layout.dim[1].label = "hands"
         array_msg.layout.dim[2].label = "pose"
 
-        array_msg.layout.dim[0].size = action.shape[1]
+        array_msg.layout.dim[0].size = action.shape[0]
+        array_msg.layout.dim[1].size = action.shape[1]
         array_msg.layout.dim[1].size = action.shape[2]
-        array_msg.layout.dim[1].size = action.shape[3]
         array_msg.layout.data_offset = 0
 
         array_msg.data = action.reshape([1, -1])[0].tolist();
