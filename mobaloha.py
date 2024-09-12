@@ -37,6 +37,9 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped, PointStamped, TwistStamped, Quaternion, Vector3, TransformStamped
 
 from std_msgs.msg import String, Float32, Int8, UInt8, Bool, UInt32MultiArray, Int32, Header, Float32MultiArray, MultiArrayDimension
+from sensor_msgs.msg import PointCloud2, PointField
+import sensor_msgs.point_cloud2 as pc2
+
 import numpy as np 
 import time
 
@@ -57,7 +60,7 @@ from numpy.linalg import inv
 from scipy.spatial.transform import Rotation
 
 
-# from utils.ros2_np_utils import *
+# from utils.ros2_o3d_utils import *
 
 
 ####################################################################
@@ -141,6 +144,31 @@ class bi_3dda_node(Node):
         self.time_sync.registerCallback(self.SyncCallback)
 
         print("init finished !!!!!!!!!!!")
+
+    # Convert the datatype of point cloud from Open3D to ROS PointCloud2 (XYZRGB only)
+    def convertCloudFromOpen3dToRos(open3d_cloud, frame_id="world"):
+        # Set "header"
+
+        ros_time = self.get_clock().now()
+        header = Header()
+        header.stamp = ros_time.to_msg()
+        header.frame_id = frame_id
+
+        # Set "fields" and "cloud_data"
+        points=np.asarray(open3d_cloud.points)
+        if not open3d_cloud.colors: # XYZ only
+            fields=FIELDS_XYZ
+            cloud_data=points
+        else: # XYZ + RGB
+            fields=FIELDS_XYZRGB
+            # -- Change rgb color from "three float" to "one 24-byte int"
+            # 0x00FFFFFF is white, 0x00000000 is black.
+            colors = np.floor(np.asarray(open3d_cloud.colors)*255) # nx3 matrix
+            colors = colors[:,0] * BIT_MOVE_16 +colors[:,1] * BIT_MOVE_8 + colors[:,2]  
+            cloud_data=np.c_[points, colors]
+        
+        # create ros_cloud
+        return pc2.create_cloud(header, fields, cloud_data)
 
     def print_action(self, action):
         action = action.reshape(-1, 2, 8)
@@ -433,7 +461,7 @@ class bi_3dda_node(Node):
         end = time.time()
         print("3dda took: ", end - start)
         # print("action: ", action.shape)
-        print("action: ", action[0,0:5, :,:])
+        print("action: ", action[0:5, :,:])
         self.print_action(action)
         
         array_msg = Float32MultiArray()
