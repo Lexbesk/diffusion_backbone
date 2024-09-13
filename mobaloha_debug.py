@@ -81,10 +81,10 @@ class bi_3dda_node(Node):
 
         self.left_hand_gripper_frames = ["follower_left/left_finger_link", "follower_left/right_finger_link"]
         self.right_hand_gripper_frames = ["follower_right/left_finger_link", "follower_right/right_finger_link"]
-        # self.left_base_frame = "follower_left/base_link"
-        # self.right_base_frame = "follower_right/base_link"
-        self.left_base_frame = "world"
-        self.right_base_frame = "world"
+        self.left_base_frame = "follower_left/base_link"
+        self.right_base_frame = "follower_right/base_link"
+        # self.left_base_frame = "world"
+        # self.right_base_frame = "world"
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)

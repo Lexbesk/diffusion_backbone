@@ -85,8 +85,12 @@ class bi_3dda_node(Node):
 
         self.left_hand_gripper_frames = ["follower_left/left_finger_link", "follower_left/right_finger_link"]
         self.right_hand_gripper_frames = ["follower_right/left_finger_link", "follower_right/right_finger_link"]
-        self.left_base_frame = "world"
-        self.right_base_frame = "world"
+
+        self.left_base_frame = "follower_left/base_link"
+        self.right_base_frame = "follower_right/base_link"
+
+        # self.left_base_frame = "world"
+        # self.right_base_frame = "world"
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -324,12 +328,15 @@ class bi_3dda_node(Node):
                     bgr.header.stamp,
                     timeout=rclpy.duration.Duration(seconds=0.01)
                 )
+            self.left_hand_transform[1,3] += 0.315
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {self.left_base_frame} to {self.left_hand_frame}: {ex}'
             )
             return
+        
         self.left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
+
         try:
             self.right_hand_transform = self.tf_buffer.lookup_transform(
                     self.right_base_frame,
@@ -337,11 +344,13 @@ class bi_3dda_node(Node):
                     bgr.header.stamp,
                     timeout=rclpy.duration.Duration(seconds=0.01)
                 )
+            self.right_hand_transform -= 0.315
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {self.right_base_frame} to {self.right_hand_frame}: {ex}'
             )
             return
+        
         self.right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
         
         bgr_np = np.array(self.br.imgmsg_to_cv2(bgr))[:,:,:3]
@@ -364,16 +373,6 @@ class bi_3dda_node(Node):
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
             im_color, im_depth, depth_scale=1000, depth_trunc=2000, convert_rgb_to_intensity=False)
         
-        # original_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-        #         rgbd,
-        #         o3d_intrinsic
-        #         # resized_intrinsic
-        #     )
-        # original_pcd = original_pcd.transform(cam_extrinsic)
-        # xyz = np.array(original_pcd.points)
-        # rgb = np.array(original_pcd.colors)
-        # valid_xyz, valid_rgb, valid_label, cropped_pcd = cropping( xyz, rgb, bound_box )
-        
         left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
         right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
 
@@ -386,21 +385,15 @@ class bi_3dda_node(Node):
         # visualize_pcd(all_valid_resized_pcd)
         xyz = self.xyz_from_depth(depth, self.resized_intrinsic_o3d.intrinsic_matrix, self.cam_extrinsic )
 
-        if( len( np.where( np.isnan(xyz))[0] ) >0 ):
+        if( len( np.where( np.isnan(xyz))[0] ) > 0 ):
             print(np.where( np.isnan(xyz)))
             print(" x y z has invalid point !!!!!")
             print(" x y z has invalid point !!!!!")
             print(" x y z has invalid point !!!!!")
             raise
-        # print("rgb: ", rgb.shape)
-        # print("xyz: ", xyz.shape)
-        # self.xyz_rgb_validation(rgb, xyz)
 
         resized_img_data = np.transpose(rgb, (2, 0, 1) ).astype(float)
         resized_img_data = (resized_img_data / 255.0 ).astype(float)
-        # resized_img_data = resized_img_data / 2 + 0.5
-
-        # print("resized_img_data: ", resized_img_data.shape)
         resized_xyz = np.transpose(xyz, (2, 0, 1) ).astype(float)
         # print("resized_xyz: ", resized_xyz.shape)
         n_cam = 1
