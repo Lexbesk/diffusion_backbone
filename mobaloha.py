@@ -121,7 +121,7 @@ class bi_3dda_node(Node):
         self.last_data_time = time.time()
 
 
-        queue_size = 1000
+        queue_size = 1
         max_delay = 0.01 #10ms
         self.time_diff = 0.05
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -138,16 +138,26 @@ class bi_3dda_node(Node):
 
         self.bgr_sub = Subscriber(self, Image, "/camera_1/left_image")
         self.depth_sub = Subscriber(self, Image, "/camera_1/depth")
-        self.left_hand_sub = Subscriber(self, JointState, "/follower_left/joint_states")
-        self.right_hand_sub = Subscriber(self, JointState, "/follower_right/joint_states")
 
-        self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
-                                                     queue_size, max_delay)
-        # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
+        self.left_hand_joints = None
+        self.right_hand_joints = None
+
+        self.left_hand_sub = self.create_subscription(JointState, "/follower_left/joint_states",self.left_hand_callback,1)
+        self.right_hand_sub = self.create_subscription(JointState, "/follower_right/joint_states",self.right_hand_callback,1)
+
+        # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
                                                     #  queue_size, max_delay)
+        self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
+                                                     queue_size, max_delay)
         self.time_sync.registerCallback(self.SyncCallback)
 
         print("init finished !!!!!!!!!!!")
+
+    def left_hand_callback(self, JointState_msg):
+        self.left_hand_joints = JointState_msg
+
+    def right_hand_callback(self, JointState_msg):
+        self.right_hand_joints = JointState_msg
 
     def print_action(self, action):
         action = action.reshape(-1, 2, 8)
@@ -318,9 +328,13 @@ class bi_3dda_node(Node):
         valid_pcd.colors = o3d.utility.Vector3dVector( rgb )
         # visualize_pcd(valid_pcd)
 
-    def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
-    # def SyncCallback(self, bgr, depth):
+    # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
+    def SyncCallback(self, bgr, depth):
         # print("in call back")
+        if(self.left_hand_joints is None):
+            return 
+        if(self.right_hand_joints is None):
+            return 
         try:
             self.left_hand_transform = self.tf_buffer.lookup_transform(
                     self.left_base_frame,
@@ -328,7 +342,7 @@ class bi_3dda_node(Node):
                     bgr.header.stamp,
                     timeout=rclpy.duration.Duration(seconds=0.01)
                 )
-            self.left_hand_transform[1,3] += 0.315
+            self.left_hand_transform.transform.translation.y += 0.315
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {self.left_base_frame} to {self.left_hand_frame}: {ex}'
@@ -344,7 +358,7 @@ class bi_3dda_node(Node):
                     bgr.header.stamp,
                     timeout=rclpy.duration.Duration(seconds=0.01)
                 )
-            self.right_hand_transform -= 0.315
+            self.right_hand_transform.transform.translation.y -= 0.315
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {self.right_base_frame} to {self.right_hand_frame}: {ex}'
@@ -364,7 +378,11 @@ class bi_3dda_node(Node):
                                         self.resized_image_size 
                                         )
         # print("rgb: ", type(rgb))
-
+        print("now: ", time.time())
+        print("joint time: ", self.left_hand_joints.header.stamp)
+        print("joint time: ", self.right_hand_joints.header.stamp)
+        print("image_time: ", bgr.header.stamp)        
+        # print("image_time: ", bgr.header.stamp)
         print("left hand pose: ", self.left_hand_transform_7D)
         print("right hand pose: ", self.right_hand_transform_7D)
 
@@ -401,9 +419,9 @@ class bi_3dda_node(Node):
         obs[0][0][0] = resized_img_data
         obs[0][0][1] = resized_xyz
         # print("rgb_shape: ", obs[0:,0:,0].shape)
-        
-        left_pos = np.array(left_hand_joints.position) 
-        right_pos = np.array(right_hand_joints.position) 
+
+        left_pos = np.array(self.left_hand_joints.position) 
+        right_pos = np.array(self.right_hand_joints.position) 
 
         left_min_joint = 0.638
         left_max_joint = 1.626
