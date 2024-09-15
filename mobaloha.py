@@ -126,7 +126,7 @@ class bi_3dda_node(Node):
         self.time_diff = 0.05
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        
+        self.step_idx = 0        
 
         timer_period = 0.01 #100hz
         # self.timer = self.create_timer(timer_period, self.publish_tf)
@@ -145,6 +145,9 @@ class bi_3dda_node(Node):
         self.left_hand_sub = self.create_subscription(JointState, "/follower_left/joint_states",self.left_hand_callback,1)
         self.right_hand_sub = self.create_subscription(JointState, "/follower_right/joint_states",self.right_hand_callback,1)
 
+        self.low_level_finsihed = True
+        self.controller_sub = self.create_subscription(Bool, "controller_finished",self.controller_callback,1)
+
         # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
                                                     #  queue_size, max_delay)
         self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
@@ -158,6 +161,9 @@ class bi_3dda_node(Node):
 
     def right_hand_callback(self, JointState_msg):
         self.right_hand_joints = JointState_msg
+
+    def controller_callback(self, bool_msg):
+        self.low_level_finsihed = True
 
     def print_action(self, action):
         action = action.reshape(-1, 2, 8)
@@ -331,10 +337,12 @@ class bi_3dda_node(Node):
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
     def SyncCallback(self, bgr, depth):
         # print("in call back")
+        if(self.low_level_finsihed == False):
+            return
         if(self.left_hand_joints is None):
             return 
         if(self.right_hand_joints is None):
-            return 
+            return
         try:
             self.left_hand_transform = self.tf_buffer.lookup_transform(
                     self.left_base_frame,
@@ -429,19 +437,19 @@ class bi_3dda_node(Node):
         right_min_joint = 0.625
         right_max_joint = 1.610
 
-        curr_gripper = np.zeros( (1,1,2,8)).astype(float)
-        curr_gripper[0,0,0,0:7] = left_hand_transform_7D
-        curr_gripper[0,0,0,7] = (left_pos[6] - left_min_joint ) / (left_max_joint -  left_min_joint)
+        curr_gripper_np = np.zeros( (1,1,2,8)).astype(float)
+        curr_gripper_np[0,0,0,0:7] = left_hand_transform_7D
+        curr_gripper_np[0,0,0,7] = (left_pos[6] - left_min_joint ) / (left_max_joint -  left_min_joint)
 
-        curr_gripper[0,0,1,0:7] = right_hand_transform_7D
-        curr_gripper[0,0,1,7] = (right_pos[6] - right_min_joint ) / (right_max_joint -  right_min_joint)
+        curr_gripper_np[0,0,1,0:7] = right_hand_transform_7D
+        curr_gripper_np[0,0,1,7] = (right_pos[6] - right_min_joint ) / (right_max_joint -  right_min_joint)
 
         start = time.time()
  
         instr = torch.zeros((1, 53, 512))
         rgbs = torch.from_numpy(obs[0:,0:,0])
         pcds = torch.from_numpy(obs[0:,0:,1])
-        curr_gripper = torch.from_numpy(curr_gripper)
+        curr_gripper = torch.from_numpy(curr_gripper_np)
 
         action = self.network.run( rgbs, pcds, curr_gripper, instr)
         end = time.time()
@@ -449,7 +457,18 @@ class bi_3dda_node(Node):
         # print("action: ", action.shape)
         print("action: ", action[0:5, :,:])
         self.print_action(action)
-        
+
+        current_data = {}
+        current_data['rgb'] = rgb
+        current_data['xyz'] = xyz
+        current_data['curr_gripper'] = curr_gripper_np
+        current_data['left_joints'] = left_pos
+        current_data['right_joints'] = right_pos
+        current_data['action'] = action
+        np.save('step_{}'.format(self.step_idx), current_data, allow_pickle = True)
+        self.step_idx += 1
+
+
         array_msg = Float32MultiArray()
         
         array_msg.layout.dim.append(MultiArrayDimension())
@@ -468,7 +487,9 @@ class bi_3dda_node(Node):
         array_msg.data = action.reshape([1, -1])[0].tolist();
         # array_msg.layout.dim[0].stride = width*height
         # array_msg.layout.dim[1].stride = width
+        self.low_level_finsihed = False
         self.bimanual_ee_publisher.publish(array_msg)
+
         print()
         # self.left_hand_transform_7D
         # self.right_hand_transform_7D

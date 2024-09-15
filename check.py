@@ -150,7 +150,7 @@ def get_cube_corners( bound_box ):
 
     return corners
 
-def visualize_pcd(pcd, lefts = None, rights = None):
+def visualize_pcd(pcd, lefts = None, rights = None, curr_pose = None):
     coor_frame = o3d.geometry.TriangleMesh.create_coordinate_frame()
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window()
@@ -173,6 +173,13 @@ def visualize_pcd(pcd, lefts = None, rights = None):
         for right in rights:
             right_mesh = copy.deepcopy(mesh).transform(right)
             vis.add_geometry(right_mesh)
+
+    if(curr_pose is not None):
+        for pose in curr_pose:
+            curr_mesh = o3d.geometry.TriangleMesh.create_coordinate_frame()
+            curr_mesh.scale(0.2, center=(0., 0., 0.) )
+            curr_mesh = curr_mesh.transform(pose)
+            vis.add_geometry(curr_mesh)
 
     view_ctl.set_up((1, 0, 0))  # set the positive direction of the x-axis as the up direction
     view_ctl.set_front((-0.3, 0.0, 0.2))  # set the positive direction of the x-axis toward you
@@ -221,64 +228,51 @@ def visualize_pcd_delta_transform(pcd, start_t, delta_transforms, object_pcd = N
 def main():
     
     # data = np.load("./2arms_open_pen/1.npy", allow_pickle = True)
-    task = ""
+    task = "" 
     # data_idxs = [1, 4, 31, 32, 33, 34, 35]
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
-    idx =  0
-    sample = np.load("./debug_{}.npy".format(idx) , allow_pickle = True)
-    rgbs = sample[1].numpy()
-    xyzs = sample[2].numpy()
-    actions = sample[3].numpy()
-    # print(actions.shape)
-    for data_idx in range(rgbs.shape[0]):
-        rgb = rgbs[data_idx,0]
-        xyz = xyzs[data_idx,0]
-        action = actions[data_idx]
-
-        print("rgb: ", rgb.shape)
-        resized_img_data = np.transpose(rgb, (1, 2, 0) ).astype(float) # (0,1)
-        resized_img_data = resized_img_data
- 
+    # idx =  2
+    file_dir = "case5"
+    length = 25
+    for idx in range(length):
+        print("idx: ", idx)
+        sample = np.load("./{}/step_{}.npy".format(file_dir, idx) , allow_pickle = True)
+        # print("sample: ", sample)
+        # print(sample.item())
+        sample = sample.item()
+        rgb = sample["rgb"]
+        xyz = sample["xyz"]
+        action = sample['action']
+        curr_gripper = sample['curr_gripper'][0,0]
         
-        resized_xyz = np.transpose(xyz, (1, 2, 0) ).astype(float) # (0,1)
-
-        pcd_rgb = resized_img_data.reshape(-1, 3)
-        pcd_xyz = resized_xyz.reshape(-1, 3)
-    
-        # print("pcd_rgb: ", pcd_rgb.shape)
-        # print("pcd_xyz: ", pcd_xyz.shape)
+        pcd_rgb = rgb.reshape(-1, 3)/255.0
+        pcd_xyz = xyz.reshape(-1, 3)
+        
 
         pcd = o3d.geometry.PointCloud()
         pcd.colors = o3d.utility.Vector3dVector( pcd_rgb )
         pcd.points = o3d.utility.Vector3dVector( pcd_xyz )
+        # visualize_pcd(pcd)
+        right = []
+        left = []
+        curr_pose = []
+        print("curr_gripper: ", get_transform2(curr_gripper[0,0:7]))
+        curr_pose.append( get_transform2(curr_gripper[0,0:7]) )
+        curr_pose.append( get_transform2(curr_gripper[1,0:7]) )
 
-            
-        ######################################################
-        # ground truth
-        ######################################################
-        # trajectory = episode[5][idx].numpy()
+        # print("action: ", action.shape)
+        trajectory = action
+        # print("trajectory: ", trajectory.shape)
+        left.append( get_transform2( trajectory[-1,0,0:7]))
+        right.append( get_transform2( trajectory[-1,1,0:7]))
+
+        # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
+        print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
         # for action_idx in range(trajectory.shape[0]):
         #     left.append( get_transform2( trajectory[action_idx,0,0:7]))
         # for action_idx in range(trajectory.shape[0]):
         #     right.append( get_transform2( trajectory[action_idx,1,0:7]))
-        # print(left)
-        # visualize_pcd(pcd, left, right)
-
-        ######################################################
-        # inference result
-        ######################################################
-        right = []
-        left = []
-
-        print("action: ", action.shape)
-        trajectory = action
-        print("trajectory: ", trajectory.shape)
-        for action_idx in range(trajectory.shape[0]):
-            left.append( get_transform2( trajectory[action_idx,0,0:7]))
-        for action_idx in range(trajectory.shape[0]):
-            right.append( get_transform2( trajectory[action_idx,1,0:7]))
-        visualize_pcd(pcd, left, right)
-        # print("traj: ", episode[5])
+        visualize_pcd(pcd, left, right, curr_pose)
 
 
 if __name__ == "__main__":
