@@ -59,6 +59,7 @@ import torch
 from numpy.linalg import inv
 from scipy.spatial.transform import Rotation
 
+from math_tools import *
 
 # from utils.ros2_o3d_utils import *
 
@@ -76,9 +77,6 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-
-
-
 
         self.left_hand_frame = "follower_left/ee_gripper_link"
         self.right_hand_frame = "follower_right/ee_gripper_link"
@@ -208,53 +206,6 @@ class bi_3dda_node(Node):
         self.left_hand_ee_publisher.publish(left_path)
         self.right_hand_ee_publisher.publish(right_path)
         print( "took: ", end - start)
-    
-    def publish_tf(self):
-        left_t = TransformStamped()
-        right_t = TransformStamped()
-        master_cam_t = TransformStamped()
-        
-        # # Read message content and assign it to
-        # # corresponding tf variables
-        ros_time = self.get_clock().now()
-        left_t.header.stamp = ros_time.to_msg()
-        right_t.header.stamp = ros_time.to_msg()
-        master_cam_t.header.stamp = ros_time.to_msg()
-
-        left_t.header.frame_id = 'world'
-        left_t.child_frame_id = "follower_left/base_link"
-        left_t.transform.translation.x = 0.0
-        left_t.transform.translation.y = 0.315
-        left_t.transform.translation.z = 0.0
-        left_t.transform.rotation.x = 0.0
-        left_t.transform.rotation.y = 0.0
-        left_t.transform.rotation.z = 0.0
-        left_t.transform.rotation.w = 1.0
-
-        right_t.header.frame_id = 'world'
-        right_t.child_frame_id = "follower_right/base_link"
-        right_t.transform.translation.x = 0.0
-        right_t.transform.translation.y = -0.315
-        right_t.transform.translation.z = 0.0
-        right_t.transform.rotation.x = 0.0
-        right_t.transform.rotation.y = 0.0
-        right_t.transform.rotation.z = 0.0
-        right_t.transform.rotation.w = 1.0
-
-        master_cam_t.header.frame_id = 'world'
-        master_cam_t.child_frame_id = "master_camera"
-        master_cam_t.transform.translation.x = -0.1393031
-        master_cam_t.transform.translation.y = 0.0539
-        master_cam_t.transform.translation.z = 0.43911375
-
-        master_cam_t.transform.rotation.x = -0.61860094
-        master_cam_t.transform.rotation.y = 0.66385477
-        master_cam_t.transform.rotation.z = -0.31162288
-        master_cam_t.transform.rotation.w = 0.2819945
-
-        self.tf_broadcaster.sendTransform(left_t)
-        self.tf_broadcaster.sendTransform(right_t)
-        self.tf_broadcaster.sendTransform(master_cam_t)
 
     def get_transform(self, transf_7D):
         trans = transf_7D[0:3]
@@ -263,6 +214,13 @@ class bi_3dda_node(Node):
         t[:3, :3] = Rotation.from_quat( quat ).as_matrix()
         t[:3, 3] = trans
         return t
+
+    def get_7D_transform(self, transf):
+        trans = transf[0:3,3]
+        trans = trans.reshape(3)
+        quat = Rotation.from_matrix( transf[0:3,0:3] ).as_quat()
+        quat = quat.reshape(4)
+        return np.concatenate( [trans, quat])
 
     def transform_to_numpy(self, ros_transformation):
         x = ros_transformation.transform.translation.x
@@ -343,37 +301,10 @@ class bi_3dda_node(Node):
             return 
         if(self.right_hand_joints is None):
             return
-        try:
-            self.left_hand_transform = self.tf_buffer.lookup_transform(
-                    self.left_base_frame,
-                    self.left_hand_frame,
-                    bgr.header.stamp,
-                    timeout=rclpy.duration.Duration(seconds=0.01)
-                )
-            self.left_hand_transform.transform.translation.y += 0.315
-        except TransformException as ex:
-            self.get_logger().info(
-                f'Could not transform {self.left_base_frame} to {self.left_hand_frame}: {ex}'
-            )
-            return
-        
-        self.left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
-
-        try:
-            self.right_hand_transform = self.tf_buffer.lookup_transform(
-                    self.right_base_frame,
-                    self.right_hand_frame,
-                    bgr.header.stamp,
-                    timeout=rclpy.duration.Duration(seconds=0.01)
-                )
-            self.right_hand_transform.transform.translation.y -= 0.315
-        except TransformException as ex:
-            self.get_logger().info(
-                f'Could not transform {self.right_base_frame} to {self.right_hand_frame}: {ex}'
-            )
-            return
-        
-        self.right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
+        print("now: ", time.time())
+        print("joint time: ", self.left_hand_joints.header.stamp)
+        print("joint time: ", self.right_hand_joints.header.stamp)
+        print("image_time: ", bgr.header.stamp) 
         
         bgr_np = np.array(self.br.imgmsg_to_cv2(bgr))[:,:,:3]
         depth_np = np.array(self.br.imgmsg_to_cv2(depth, desired_encoding="mono16"))
@@ -386,21 +317,16 @@ class bi_3dda_node(Node):
                                         self.resized_image_size 
                                         )
         # print("rgb: ", type(rgb))
-        print("now: ", time.time())
-        print("joint time: ", self.left_hand_joints.header.stamp)
-        print("joint time: ", self.right_hand_joints.header.stamp)
-        print("image_time: ", bgr.header.stamp)        
+   
         # print("image_time: ", bgr.header.stamp)
-        print("left hand pose: ", self.left_hand_transform_7D)
-        print("right hand pose: ", self.right_hand_transform_7D)
+        # print("left hand pose: ", self.left_hand_transform_7D)
+
+        # print("right hand pose: ", self.right_hand_transform_7D)
 
         im_color = o3d.geometry.Image(rgb)
         im_depth = o3d.geometry.Image(depth)
         rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
             im_color, im_depth, depth_scale=1000, depth_trunc=2000, convert_rgb_to_intensity=False)
-        
-        left_hand_transform_7D = self.transform_to_numpy( self.left_hand_transform )
-        right_hand_transform_7D = self.transform_to_numpy( self.right_hand_transform )
 
         all_valid_resized_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
                 rgbd,
@@ -427,10 +353,20 @@ class bi_3dda_node(Node):
         obs[0][0][0] = resized_img_data
         obs[0][0][1] = resized_xyz
         # print("rgb_shape: ", obs[0:,0:,0].shape)
-
+        
         left_pos = np.array(self.left_hand_joints.position) 
         right_pos = np.array(self.right_hand_joints.position) 
 
+        left_hand_transform_7D = self.get_7D_transform( FwdKin(left_pos[0:6]) )
+        left_hand_transform_7D[1] += 0.315
+        right_hand_transform_7D = self.get_7D_transform( FwdKin(right_pos[0:6]) )
+        right_hand_transform_7D[1] -= 0.315
+
+        # trans = FwdKin(left_pos[0:6])
+        # trans[1,3] += 0.315
+        # left_fk = self.get_7D_transform( trans)
+        # print("left_fk: ", left_fk)
+        # print("diff: ", left_fk - self.left_hand_transform_7D)
         left_min_joint = 0.638
         left_max_joint = 1.626
 
@@ -455,7 +391,7 @@ class bi_3dda_node(Node):
         end = time.time()
         print("3dda took: ", end - start)
         # print("action: ", action.shape)
-        print("action: ", action[0:5, :,:])
+        # print("action: ", action[0:5, :,:])
         self.print_action(action)
 
         current_data = {}
