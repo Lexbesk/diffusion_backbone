@@ -179,7 +179,7 @@ class RLBenchDataset(Dataset):
         # Split RGB and XYZ
         rgbs = states[:, :, 0]
         pcds = states[:, :, 1]
-        # rgbs = self._unnormalize_rgb(rgbs)
+        rgbs = self._unnormalize_rgb(rgbs)
 
         # Get action tensors for respective frame ids
         action = torch.cat([torch.from_numpy(episode[2][i]) for i in frame_ids])

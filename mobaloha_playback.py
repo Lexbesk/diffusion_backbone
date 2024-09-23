@@ -341,7 +341,7 @@ class bi_3dda_node(Node):
         #print("gripper: ", self.episode[4][ self.frame_idx ].numpy())
         print("traj: ", self.episode[5][ self.frame_idx ].numpy()[ 0:3,:,:] )
         print("action: ", action[0:3, :,:])
-        print("diff: ", self.episode[5][ self.frame_idx ].numpy()[0:10,:,:] - action[0:10, :, :])
+        print("diff: ", self.episode[5][ self.frame_idx ].numpy()[0:15,:,:] - action[0:15, :, :])
 
         array_msg = Float32MultiArray()
         
