@@ -46,12 +46,60 @@ class BiManualDiffuserActor(DiffuserActor):
             nhist=nhist * 2,
             lang_enhanced=lang_enhanced
         )
+        self.camera_tokens = nn.Embedding(5, embedding_dim)
 
+    # def encode_inputs(self, visible_rgb, visible_pcd, instruction,
+    #                   curr_gripper):
+    #     return super().encode_inputs(
+    #         visible_rgb, visible_pcd, instruction, curr_gripper.flatten(1, 2)
+    #     )
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,
                       curr_gripper):
-        return super().encode_inputs(
-            visible_rgb, visible_pcd, instruction, curr_gripper.flatten(1, 2)
+        curr_gripper = curr_gripper.flatten(1, 2)
+        # Compute visual features/positional embeddings at different scales
+        rgb_feats_pyramid, pcd_pyramid = self.encoder.encode_images(
+            visible_rgb, visible_pcd
         )
+        # Keep only low-res scale
+        context_feats = (
+            rgb_feats_pyramid[0] + self.camera_tokens.weight[None, :, :, None, None]
+        )
+        context_feats = einops.rearrange(
+            # rgb_feats_pyramid[0],
+            context_feats,
+            "b ncam c h w -> b (ncam h w) c"
+        )
+        context = pcd_pyramid[0]
+
+        # Encode instruction (B, 53, F)
+        instr_feats = None
+        if self.use_instruction:
+            instr_feats, _ = self.encoder.encode_instruction(instruction)
+
+        # Cross-attention vision to language
+        if self.use_instruction:
+            # Attention from vision to language
+            context_feats = self.encoder.vision_language_attention(
+                context_feats, instr_feats
+            )
+
+        # Encode gripper history (B, nhist, F)
+        adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(
+            curr_gripper, context_feats, context
+        )
+
+        # FPS on visual features (N, B, F) and (B, N, F, 2)
+        fps_feats, fps_pos = self.encoder.run_fps(
+            context_feats.transpose(0, 1),
+            self.encoder.relative_pe_layer(context)
+        )
+        return (
+            context_feats, context,  # contextualized visual features
+            instr_feats,  # language features
+            adaln_gripper_feats,  # gripper history features
+            fps_feats, fps_pos  # sampled visual features
+        )
+
 
     def compute_trajectory(
         self,

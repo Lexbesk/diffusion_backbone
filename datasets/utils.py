@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as transforms_f
 
 from diffuser_actor.utils.utils import normalise_quat
+from utils.pytorch3d_transforms import euler_angles_to_matrix
 
 
 def loader(file):
@@ -136,3 +137,53 @@ class TrajectoryInterpolator:
             resampled[:, 3:7] = normalise_quat(resampled[:, 3:7])
             resampled[:, 11:15] = normalise_quat(resampled[:, 11:15])
         return resampled
+
+def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
+                             translate_range):
+    """Apply random rotation and translation to the given pcd
+
+    Args:
+        pcd: A tensor of shape (B, ..., 3)
+        roll_range: An integer or a list indicates the (min, max) of the roll
+        pitch_range: An integer or a list indicates the (min, max) of the pitch
+        yaw_range: An integer or a list indicates the (min, max) of the yaw
+        translate_range: An integer or a list indicates the (min, max) of the
+            tranlation
+    
+    Returns:
+        pcd: A tensor of shape (B, ...., 3)
+    """
+    if isinstance(roll_range, int):
+        roll_range = [min(-roll_range, roll_range),
+                      max(-roll_range, roll_range)]
+
+    if isinstance(pitch_range, int):
+        pitch_range = [min(-pitch_range, pitch_range),
+                       max(-pitch_range, pitch_range)]
+
+    if isinstance(yaw_range, int):
+        yaw_range = [min(-yaw_range, yaw_range),
+                     max(-yaw_range, yaw_range)]
+
+    if isinstance(translate_range, int):
+        translate_range = [min(-translate_range, translate_range),
+                           max(-translate_range, translate_range)]
+    
+    bs = pcd.shape[0]
+    euler_angles = torch.rand((bs, 3), dtype=pcd.dtype, device=pcd.device)
+    euler_angles *= torch.Tensor([
+        sum(roll_range), sum(pitch_range), sum(yaw_range)
+    ], device=pcd.device)
+    euler_angles -= torch.Tensor([
+        roll_range[0], pitch_range[0], yaw_range[0]
+    ], device=pcd.device)
+
+    R = euler_angles_to_matrix(euler_angles, convention='XYZ')
+    T = torch.rand((bs, 1, 3), dtype=pcd.dtype, device=pcd.device)
+    T = T * sum(translate_range) - translate_range[0]
+
+    flat_pcd = pcd.reshape(bs, -1, 3)
+    flat_pcd = flat_pcd @ R + T
+    pcd = flat_pcd.reshape(pcd.shape)
+
+    return pcd
