@@ -172,15 +172,18 @@ def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
     bs = pcd.shape[0]
     euler_angles = torch.rand((bs, 3), dtype=pcd.dtype, device=pcd.device)
     euler_angles *= torch.Tensor([
-        sum(roll_range), sum(pitch_range), sum(yaw_range)
+        roll_range[1] - roll_range[0],
+        pitch_range[1] - pitch_range[0],
+        yaw_range[1] - yaw_range[0]
     ], device=pcd.device)
-    euler_angles -= torch.Tensor([
+    euler_angles += torch.Tensor([
         roll_range[0], pitch_range[0], yaw_range[0]
     ], device=pcd.device)
 
     R = euler_angles_to_matrix(euler_angles, convention='XYZ')
     T = torch.rand((bs, 1, 3), dtype=pcd.dtype, device=pcd.device)
-    T = T * sum(translate_range) - translate_range[0]
+    T = T * (translate_range[1] - translate_range[0])
+    T = T + translate_range[0]
 
     flat_pcd = pcd.reshape(bs, -1, 3)
     flat_pcd = flat_pcd @ R + T

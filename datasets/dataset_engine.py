@@ -196,7 +196,7 @@ class RLBenchDataset(Dataset):
                 aug_index = list(range(pcds.shape[1]))
 
             pcds[:, aug_index] = calibration_augmentation(
-                pcds[:, aug_index], [-10 ,10], [-10, 10], [-10, 10], [-0.05, 0.05]
+                pcds[:, aug_index], [-10 ,10], [-10, 10], [-10, 10], [-0.2, 0.2]
             )
 
         # Get action tensors for respective frame ids
