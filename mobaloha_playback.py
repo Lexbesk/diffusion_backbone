@@ -69,7 +69,7 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-        self.file_dir = "/ws/data/mobile_aloha/20240827_plate+0/ep11.npy"
+        self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
         self.episode = np.load( self.file_dir, allow_pickle=True)
         self.frame_idx = -1
         self.inference_action = []
@@ -333,8 +333,15 @@ class bi_3dda_node(Node):
         curr_gripper = curr_gripper[None, None, :,:]
         # print("rgbs: ",rgbs.shape)
         action = self.network.run( rgbs, pcds, curr_gripper, instr)
-        
-        self.inference_action.append(action)
+
+        current_data = {}
+        current_data['rgb'] = rgbs
+        current_data['xyz'] = pcds
+        current_data['curr_gripper'] = curr_gripper
+        current_data['action'] = action
+        current_data['gt'] = self.episode[5][ self.frame_idx ].numpy()       
+        np.save('step_{}'.format(self.frame_idx), current_data, allow_pickle = True)
+        # self.step_idx += 1
 
         end = time.time()
         print("3dda took: ", end - start)

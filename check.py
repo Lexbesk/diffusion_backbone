@@ -187,44 +187,6 @@ def visualize_pcd(pcd, lefts = None, rights = None, curr_pose = None):
     vis.run()
     vis.destroy_window()
 
-def visualize_pcd_delta_transform(pcd, start_t, delta_transforms, object_pcd = None):
-
-    coor_frame = o3d.geometry.TriangleMesh.create_coordinate_frame()
-    vis = o3d.visualization.VisualizerWithKeyCallback()
-    vis.create_window()
-    coor_frame.scale(0.2, center=(0., 0., 0.) )
-    vis.add_geometry(coor_frame)
-    vis.get_render_option().background_color = np.asarray([255, 255, 255])
-
-    view_ctl = vis.get_view_control()
-
-    vis.add_geometry(pcd)
-
-    mesh = o3d.geometry.TriangleMesh.create_coordinate_frame()
-    mesh.scale(0.1, center=(0., 0., 0.))
-
-    new_mesh = copy.deepcopy(mesh).transform( get_transform(start_t[0:3], start_t[3:7]) )
-    vis.add_geometry(new_mesh)
-    last_trans = get_transform( start_t[0:3], start_t[3:7] )
-    new_object_pcd = copy.deepcopy(object_pcd).transform(last_trans)
-    vis.add_geometry(new_object_pcd)
-
-    for delta_t in delta_transforms:
-        last_trans = get_transform( delta_t[0:3], delta_t[3:7] ) @ get_transform(start_t[0:3], start_t[3:7])
-
-        new_object_pcd = copy.deepcopy(object_pcd).transform(last_trans)
-        vis.add_geometry(new_object_pcd)
-
-        new_mesh = copy.deepcopy(mesh).transform(last_trans)
-        vis.add_geometry(new_mesh)
-
-    view_ctl.set_up((1, 0, 0))  # set the positive direction of the x-axis as the up direction
-    view_ctl.set_front((-0.3, 0.0, 0.2))  # set the positive direction of the x-axis toward you
-    view_ctl.set_lookat((0.0, 0.0, 0.3))  # set the original point as the center point of the window
-    vis.run()
-    vis.destroy_window()
-    return last_trans
-
 def main():
     
     # data = np.load("./2arms_open_pen/1.npy", allow_pickle = True)
@@ -232,7 +194,7 @@ def main():
     # data_idxs = [1, 4, 31, 32, 33, 34, 35]
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
-    file_dir = "case5"
+    file_dir = "test4"
     length = 25
     for idx in range(length):
         print("idx: ", idx)
@@ -241,11 +203,19 @@ def main():
         # print(sample.item())
         sample = sample.item()
         rgb = sample["rgb"]
-        xyz = sample["xyz"]
+        print("rgb: ", rgb.shape)
+        rgb = rgb[0,0].numpy()
+        rgb = np.transpose(rgb, (1, 2, 0) ).astype(float) # (0,1)
+            
+        
+        xyz = sample["xyz"][0][0].numpy()
+        xyz = np.transpose(xyz, (1, 2, 0) ).astype(float) # (0,1)
         action = sample['action']
+       
+        print("action: ", action.shape)
         curr_gripper = sample['curr_gripper'][0,0]
         
-        pcd_rgb = rgb.reshape(-1, 3)/255.0
+        pcd_rgb = rgb.reshape(-1, 3)
         pcd_xyz = xyz.reshape(-1, 3)
         
 
@@ -267,14 +237,27 @@ def main():
         right.append( get_transform2( trajectory[-1,1,0:7]))
 
         # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
-        print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
-        # for action_idx in range(trajectory.shape[0]):
-        #     left.append( get_transform2( trajectory[action_idx,0,0:7]))
-        # for action_idx in range(trajectory.shape[0]):
-        #     right.append( get_transform2( trajectory[action_idx,1,0:7]))
+        # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
+        for action_idx in range(trajectory.shape[0]):
+            left.append( get_transform2( trajectory[action_idx,0,0:7]))
+        for action_idx in range(trajectory.shape[0]):
+            right.append( get_transform2( trajectory[action_idx,1,0:7]))
         visualize_pcd(pcd, left, right, curr_pose)
 
-
+        right = []
+        left = []
+        action = sample['gt'] 
+        for action_idx in range(trajectory.shape[0]):
+            left.append( get_transform2( trajectory[action_idx,0,0:7]))
+        for action_idx in range(trajectory.shape[0]):
+            right.append( get_transform2( trajectory[action_idx,1,0:7]))
+        visualize_pcd(pcd, left, right, curr_pose)
+        # print("action: ", action.shape)
+        trajectory = action
+        # print("trajectory: ", trajectory.shape)
+        left.append( get_transform2( trajectory[-1,0,0:7]))
+        right.append( get_transform2( trajectory[-1,1,0:7]))
+        
 if __name__ == "__main__":
     main()
 

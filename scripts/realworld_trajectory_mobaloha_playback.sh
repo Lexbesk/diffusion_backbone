@@ -16,7 +16,7 @@ quaternion_format=xyzw
 bimanual=1
 relative_action=1
 gripper_loc_bounds_buffer=0.08
-run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix
+run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix-cleanbg
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -52,6 +52,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --max_episodes_per_task -1 \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
-    --checkpoint train_logs/$main_dir/$run_log_dir/last.pth \
+    --checkpoint train_logs/$main_dir/$run_log_dir/best.pth \
     --run_log_dir ${run_log_dir}
 
