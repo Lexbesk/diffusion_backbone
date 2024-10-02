@@ -53,9 +53,6 @@ from numpy.linalg import inv
 from scipy.spatial.transform import Rotation
 
 
-# from utils.ros2_np_utils import *
-
-
 ####################################################################
 #
 # everything is in robot frame, (middle point of two robot arm base)
@@ -69,7 +66,7 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-        self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
+        self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep42.npy"
         self.episode = np.load( self.file_dir, allow_pickle=True)
         self.frame_idx = -1
         self.inference_action = []
@@ -311,6 +308,7 @@ class bi_3dda_node(Node):
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
     def SyncCallback(self, bgr, depth):
         self.frame_idx += 1
+        print("in callback")
         if(self.frame_idx >= len(self.episode[0])):
             # self.episode.append(self.inference_action)
             np.save('debug_result', self.inference_action)

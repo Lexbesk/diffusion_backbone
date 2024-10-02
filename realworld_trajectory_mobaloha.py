@@ -25,6 +25,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from scipy.spatial.transform import Rotation
+from utils.utils_with_mobaloha import to_absolute_action
 
 class Arguments(BaseArguments):
     instructions: Optional[Path] = None
@@ -151,26 +152,14 @@ class Tester(BaseTrainTester):
             curr_gripper = curr_gripper,
             run_inference=True
         )
+        print("action: ", action.shape)
+        if(self.args.relative_action):
+            action = to_absolute_action(action, curr_gripper)
+
         action_np = action.cpu().numpy()
         action_np = action_np.reshape(-1,2,8)
-        if(self.args.relative_action):
-            curr_gripper_np = curr_gripper.cpu().numpy()
-            # print("curr_gripper_np: ", curr_gripper_np.shape)
-            left_7D = curr_gripper_np[0, 0, 0:1, 0:7]
-            # print("left_7D: ", left_7D.shape)
-            right_7D = curr_gripper_np[0, 0, 1:2, 0:7]
-            left_transforms = self.get_transform(action_np[:,0,:]) @ self.get_transform(left_7D)
-            right_transforms = self.get_transform(action_np[:,1,:]) @ self.get_transform(right_7D)
-            left_7D_transforms = self.get_7D_tranform(left_transforms)
-            right_7D_transforms = self.get_7D_tranform(right_transforms)
-            left_7D_transforms = left_7D_transforms.reshape(-1,1,7)
-            right_7D_transforms = right_7D_transforms.reshape(-1,1,7)
-            postion_np = np.concatenate( [left_7D_transforms, right_7D_transforms], axis = 1 )
-            gripper_np = action_np[:,:,7:8]
-            # print("postion_np: ", postion_np.shape)
-            # print("gripper_np: ", gripper_np.shape)
-            action_np = np.concatenate( [postion_np, gripper_np], axis = 2)
-        print("action_np: ", action_np.shape)
+
+        # print("action_np: ", action_np.shape)
         return action_np
 
 
