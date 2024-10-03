@@ -66,7 +66,7 @@ class bi_3dda_node(Node):
         ########################################################## 3dda model
         self.network = Tester(args)
         ##########################################################
-        self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep42.npy"
+        self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
         self.episode = np.load( self.file_dir, allow_pickle=True)
         self.frame_idx = -1
         self.inference_action = []
