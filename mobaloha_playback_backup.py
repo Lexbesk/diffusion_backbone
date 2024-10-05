@@ -68,13 +68,9 @@ class bi_3dda_node(Node):
         ##########################################################
         # self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
         self.file_dir = "./trained_model.npy"
-        self.sample = np.load( self.file_dir, allow_pickle=True)
-        self.sample = self.sample.item()
-
-        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep41.npy"
-        self.episode = np.load( self.file_dir2, allow_pickle=True)
+        self.episode = np.load( self.file_dir, allow_pickle=True)
         # self.episode = self.episode.item()
-
+        
         self.frame_idx = -1
         self.inference_action = []
 
@@ -123,7 +119,10 @@ class bi_3dda_node(Node):
 
         timer_period = 0.01 #100hz
         self.timer = self.create_timer(timer_period, self.publish_tf)
+
         self.bimanual_ee_publisher = self.create_publisher(Float32MultiArray, "bimanual_ee_cmd", 1)
+
+
 
         self.bgr_sub = Subscriber(self, Image, "/camera_1/left_image")
         self.depth_sub = Subscriber(self, Image, "/camera_1/depth")
@@ -132,10 +131,13 @@ class bi_3dda_node(Node):
 
         # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
                                                     #  queue_size, max_delay)
+
         self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
                                                      queue_size, max_delay)
         self.time_sync.registerCallback(self.SyncCallback)
+
         print("init finished !!!!!!!!!!!")
+
 
     
     def publish_tf(self):
@@ -304,40 +306,29 @@ class bi_3dda_node(Node):
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
     def SyncCallback(self, bgr, depth):
         self.frame_idx += 1
-        length = self.sample["rgbs"].shape[0]
-
         print("in callback")
-        if(self.frame_idx >= length):
+        if(self.frame_idx >= len(self.episode[0])):
             # self.episode.append(self.inference_action)
             np.save('debug_result', self.inference_action)
             return
         
+        obs = self.episode[1][ self.frame_idx ].numpy()
+        
         start = time.time()
  
         instr = torch.zeros((1, 53, 512))
-        rgbs = self.sample["rgbs"][self.frame_idx]
-        pcds = self.sample["pcds"][self.frame_idx]
-
-        rgbs = rgbs[None, :,:,:,:]
-        pcds = pcds[None, :,:,:,:]
-
-        curr_gripper = self.sample['curr_gripper'][self.frame_idx]
-        curr_gripper = curr_gripper[None, None, :,:]
-        print("rgbs: ",rgbs.shape)
-        print("curr_gripper: ", curr_gripper.shape)
-        action = self.network.run( rgbs, pcds, curr_gripper, instr)
-        checked_action = self.sample["abs_action"][self.frame_idx].numpy()
-        # print("diff", np.abs(checked_action - action[1:]))
-
-        obs = self.episode[1][ self.frame_idx ].numpy()
         rgbs = torch.from_numpy(obs[0:,0])
+        # rgbs = rgbs / 2 + 0.5
+
         pcds = torch.from_numpy(obs[0:,1])
+
         rgbs = rgbs[None, :,:,:,:]
         pcds = pcds[None, :,:,:,:]
+
         curr_gripper = self.episode[4][ self.frame_idx ]
         curr_gripper = curr_gripper[None, None, :,:]
-        action2 = self.network.run( rgbs, pcds, curr_gripper, instr)
-        print("diff", np.abs(action - action2))
+        # print("rgbs: ",rgbs.shape)
+        action = self.network.run( rgbs, pcds, curr_gripper, instr)
 
         current_data = {}
         current_data['rgb'] = rgbs
@@ -350,6 +341,30 @@ class bi_3dda_node(Node):
 
         end = time.time()
         print("3dda took: ", end - start)
+        #print("gripper: ", self.episode[4][ self.frame_idx ].numpy())
+        # print("traj: ", self.episode[5][ self.frame_idx ].numpy()[ 0:3,:,:] )
+        # print("action: ", action[0:3, :,:])
+        # print("diff: ", self.episode[5][ self.frame_idx ].numpy()[0:15,:,:] - action[0:15, :, :])
+
+        array_msg = Float32MultiArray()
+        
+        array_msg.layout.dim.append(MultiArrayDimension())
+        array_msg.layout.dim.append(MultiArrayDimension())
+        array_msg.layout.dim.append(MultiArrayDimension())
+
+        array_msg.layout.dim[0].label = "steps"
+        array_msg.layout.dim[1].label = "hands"
+        array_msg.layout.dim[2].label = "pose"
+
+        array_msg.layout.dim[0].size = action.shape[0]
+        array_msg.layout.dim[1].size = action.shape[1]
+        array_msg.layout.dim[1].size = action.shape[2]
+        array_msg.layout.data_offset = 0
+
+        array_msg.data = action.reshape([1, -1])[0].tolist();
+        self.bimanual_ee_publisher.publish(array_msg)
+        time.sleep(3)
+        # print()
 
 
 class Arguments(BaseArguments):

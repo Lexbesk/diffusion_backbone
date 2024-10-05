@@ -138,7 +138,7 @@ class Tester(BaseTrainTester):
         instruction = instruction.to(torch.float32)
         instruction = instruction.to(device)
 
-        traj_mask = torch.zeros( (1, self.args.interpolation_length) ).to(torch.float32)
+        traj_mask = torch.zeros( (1, self.args.interpolation_length - 1) ).to(torch.float32)
         traj_mask = traj_mask.to(device)      
 
         # gt_trajectory = torch.zeros( (1, self.args.interpolation_length) )
@@ -152,7 +152,7 @@ class Tester(BaseTrainTester):
             curr_gripper = curr_gripper,
             run_inference=True
         )
-        print("action: ", action.shape)
+        # print("action: ", action.shape)
         if(self.args.relative_action):
             action = to_absolute_action(action, curr_gripper)
 

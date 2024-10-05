@@ -22,6 +22,7 @@ from utils.common_utils import (
     load_instructions, count_parameters, get_gripper_loc_bounds
 )
 
+from utils.utils_with_mobaloha import to_absolute_action
 
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("wrist", "left_shoulder", "right_shoulder")
@@ -245,6 +246,12 @@ class TrainTester(BaseTrainTester):
                 curr_gripper.to(device),
                 run_inference=True
             )
+            sample["action"] = action.cpu()
+            if(self.args.relative_action):
+                abs_action = to_absolute_action( action, curr_gripper.to(device) )
+                sample["abs_action"] = abs_action.cpu()
+
+            np.save("trained_model", sample, allow_pickle = True)
             losses, losses_B = criterion.compute_metrics(
                 action,
                 sample["trajectory"].to(device),
