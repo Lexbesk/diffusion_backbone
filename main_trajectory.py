@@ -62,6 +62,7 @@ class Arguments(tap.Tap):
     train_iters: int = 200_000
     val_iters: int = -1  # -1 means heuristically-defined
     max_episode_length: int = 5  # -1 for no limit
+    camera_calibration_aug: int = 1
 
     # Data augmentations
     image_rescale: str = "0.75,1.25"  # (min, max), "1.0,1.0" for no rescaling
@@ -122,7 +123,8 @@ class TrainTester(BaseTrainTester):
             return_low_lvl_trajectory=True,
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
-            bimanual=bool(self.args.bimanual)
+            bimanual=bool(self.args.bimanual),
+            calibration_augmentation=bool(self.args.camera_calibration_aug)
         )
         test_dataset = RLBenchDataset(
             root=self.args.valset,
@@ -139,7 +141,8 @@ class TrainTester(BaseTrainTester):
             return_low_lvl_trajectory=True,
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
-            bimanual=bool(self.args.bimanual)
+            bimanual=bool(self.args.bimanual),
+            calibration_augmentation=bool(self.args.camera_calibration_aug)
         )
         return train_dataset, test_dataset
 
@@ -252,6 +255,24 @@ class TrainTester(BaseTrainTester):
                 sample["abs_action"] = abs_action.cpu()
 
             np.save("trained_model", sample, allow_pickle = True)
+
+            #import ipdb; ipdb.set_trace()
+            #from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
+            #from utils.utils_with_mobaloha import to_absolute_action
+            #k = 0
+            #abs_sample_trajectory = to_absolute_action(
+            #    sample['trajectory'][k].flatten(-2, -1), sample["curr_gripper"][[k]].flatten(-2, -1)).unflatten(-1, (2, 8))
+            #abs_action = to_absolute_action(
+            #    action[k].flatten(-2, -1).cpu(), sample["curr_gripper"][[k]].flatten(-2, -1)).unflatten(-1, (2, 8))
+            #visualize_actions_and_point_clouds_video(
+            #    sample['pcds'][[k]].expand(25, -1, -1, -1,  -1),
+            #    sample['rgbs'][[k]].expand(25, -1, -1, -1, -1),
+            #    abs_sample_trajectory[:, 0],
+            #    abs_sample_trajectory[:, 1],
+            #    abs_action[:, 0],
+            #    abs_action[:, 1],
+            #)
+
             losses, losses_B = criterion.compute_metrics(
                 action,
                 sample["trajectory"].to(device),

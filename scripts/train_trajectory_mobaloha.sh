@@ -1,7 +1,7 @@
 main_dir=BiManualActor_MobileAloha
 
-dataset=/ws/data/mobile_aloha_debug
-valset=/ws/data/mobile_aloha_debug
+dataset=/home/tsungwek/data/mobile_aloha/train
+valset=/home/tsungwek/data/mobile_aloha/eval
 
 lr=1e-4
 wd=5e-3
@@ -53,6 +53,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --max_episode_length 100 \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
-    --checkpoint train_logs/$main_dir/$run_log_dir/last.pth \
-    --run_log_dir ${run_log_dir}
-
+    --eval_only 1 \
+    --run_log_dir ${run_log_dir} \
+    --checkpoint train_logs/$main_dir/$run_log_dir/last.pth

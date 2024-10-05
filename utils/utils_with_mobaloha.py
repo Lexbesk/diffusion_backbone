@@ -23,22 +23,22 @@ def to_relative_action(actions, robot_obs):
 
     return rel_actions
 
-def to_absolute_action(actions, robot_obs):
-    assert actions.shape[-1] == 8 and robot_obs.shape[-1] == 8
 
-    # actions = actions.unflatten(-1, (2, 8))
-    # robot_obs = robot_obs.unflatten(-1, (2, 8))
+def to_absolute_action(rel_actions, robot_obs):
 
-    abs_pos = actions[..., :3] + robot_obs[..., :3]
+    rel_actions = rel_actions.unflatten(-1, (2, 8))
+    robot_obs = robot_obs.unflatten(-1, (2, 8))
+
+    pos = rel_actions[..., :3] + robot_obs[..., :3]
 
     # pytorch3d takes wxyz quaternion, the input is xyzw
-    abs_orn = pytorch3d_transforms.quaternion_multiply(
-        actions[..., [6, 3, 4, 5]],
+    orn = pytorch3d_transforms.quaternion_multiply(
+        rel_actions[..., [6, 3, 4, 5]],
         robot_obs[..., [6,3,4,5]]
     )[..., [1, 2, 3, 0]]
 
-    gripper = actions[..., -1:]
-    abs_actions = torch.concat([abs_pos, abs_orn, gripper], dim=-1)
-    abs_actions = abs_actions.flatten(-2)
+    gripper = rel_actions[..., -1:]
+    actions = torch.concat([pos, orn, gripper], dim=-1)
+    actions = actions.flatten(-2, -1)
 
-    return abs_actions
+    return actions

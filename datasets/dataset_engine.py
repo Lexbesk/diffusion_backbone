@@ -8,7 +8,7 @@ from time import time
 import torch
 from torch.utils.data import Dataset
 
-from .utils import loader, Resize, TrajectoryInterpolator
+from .utils import loader, Resize, TrajectoryInterpolator, calibration_augmentation
 
 
 class RLBenchDataset(Dataset):
@@ -34,7 +34,9 @@ class RLBenchDataset(Dataset):
         dense_interpolation=False,
         interpolation_length=100,
         relative_action=False,
-        bimanual=False
+        bimanual=False,
+        calibration_augmentation=True,
+        calaug_cameras=("wrist_left", "wrist_right"),
     ):
         self._cache = {}
         self._cache_size = cache_size
@@ -49,6 +51,8 @@ class RLBenchDataset(Dataset):
         self._root = [Path(r).expanduser() for r in root]
         self._relative_action = relative_action
         self._bimanual = bimanual
+        self._calibration_augmentation = calibration_augmentation
+        self._calaug_cameras = calaug_cameras
 
         # For trajectory optimization, initialize interpolation tools
         if return_low_lvl_trajectory:
@@ -180,6 +184,20 @@ class RLBenchDataset(Dataset):
         rgbs = states[:, :, 0]
         pcds = states[:, :, 1]
         rgbs = self._unnormalize_rgb(rgbs)
+
+        if self._calibration_augmentation:
+            if episode[3]:
+                cameras = list(episode[3][0].keys())
+                aug_index = [
+                    i for i, c in enumerate(self._cameras)
+                    if c in self._calaug_cameras
+                ]
+            else:
+                aug_index = list(range(pcds.shape[1]))
+
+            pcds[:, aug_index] = calibration_augmentation(
+                pcds[:, aug_index], [-10 ,10], [-10, 10], [-10, 10], [-0.2, 0.2]
+            )
 
         # Get action tensors for respective frame ids
         action = torch.cat([torch.from_numpy(episode[2][i]) for i in frame_ids])

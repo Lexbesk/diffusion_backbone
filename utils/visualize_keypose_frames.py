@@ -262,7 +262,7 @@ def visualize_actions_and_point_clouds(visible_pcd, visible_rgb,
 
 
 def visualize_actions_and_point_clouds_video(visible_pcd, visible_rgb,
-                                             gt_pose, curr_pose,
+                                             gt_pose_l, gt_pose_r, curr_pose_l, curr_pose_r,
                                              save=True, rotation_param="quat_from_query"):
     """Visualize by plotting the point clouds and gripper pose as video.
 
@@ -284,9 +284,9 @@ def visualize_actions_and_point_clouds_video(visible_pcd, visible_rgb,
         #    and the later to the gt_action of the second scene
         image, rand_inds = visualize_actions_and_point_clouds(
             visible_pcd[i:], visible_rgb[i:],
-            [gt_pose[i:], curr_pose[i:]], 
-            ["gt", "curr"], # add legened label to the imagined gripper
-            ["d", "o"], # some dummy matplotlib marker
+            [gt_pose_l[i:], gt_pose_r[i:], curr_pose_l[i:], curr_pose_r[i:]], 
+            ["gt-l", "gt-r", "curr-l", "curr-r"], # add legened label to the imagined gripper
+            ["d", "d", "o", "o"], # some dummy matplotlib marker
             save=False,
             rotation_param=rotation_param,
             rand_inds=rand_inds,

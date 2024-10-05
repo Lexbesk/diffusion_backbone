@@ -2,6 +2,8 @@ main_dir=BiManualActor_13Peract2_100Demo_multitask
 
 dataset=/scratch/peract2/train
 valset=/scratch/peract2/test
+dataset=/projects/katefgroup/analogical_manipulation/rlbench/packaged/peract2/train
+valset=/projects/katefgroup/analogical_manipulation/rlbench/packaged/peract2/test
 
 lr=1e-4
 dense_interpolation=1
@@ -14,7 +16,8 @@ ngpus=8
 quaternion_format=wxyz
 bimanual=1
 gripper_loc_bounds_buffer=0.08
-run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps
+camera_calibration_aug=1
+run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-CA$camera_calibration_aug
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -31,6 +34,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --use_instruction 1 \
     --rotation_parametrization 6D \
     --diffusion_timesteps $diffusion_timesteps \
+    --camera_calibration_aug $camera_calibration_aug \
     --val_freq 4000 \
     --val_iters 8 \
     --dense_interpolation $dense_interpolation \
