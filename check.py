@@ -100,7 +100,7 @@ def main():
     # data_idxs = [1, 4, 31, 32, 33, 34, 35]
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
-    file_dir = "test41"
+    file_dir = "test42"
     length = 25
     for idx in range(length):
         print("idx: ", idx)

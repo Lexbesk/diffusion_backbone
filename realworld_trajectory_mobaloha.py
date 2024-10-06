@@ -154,7 +154,7 @@ class Tester(BaseTrainTester):
         )
         # print("action: ", action.shape)
         if(self.args.relative_action):
-            action = to_absolute_action(action, curr_gripper)
+            action = to_absolute_action( action.flatten(-2, -1).cpu(), curr_gripper.cpu().flatten(-2, -1)).unflatten(-1, (2, 8) )
 
         action_np = action.cpu().numpy()
         action_np = action_np.reshape(-1,2,8)

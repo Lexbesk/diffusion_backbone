@@ -1,7 +1,9 @@
 main_dir=BiManualActor_MobileAloha
 
-dataset=/home/tsungwek/data/mobile_aloha/train
-valset=/home/tsungwek/data/mobile_aloha/eval
+# dataset=/home/tsungwek/data/mobile_aloha/train
+# valset=/home/tsungwek/data/mobile_aloha/eval
+dataset=/ws/data/mobile_aloha
+valset=/ws/data/mobile_aloha_debug
 
 lr=1e-4
 wd=5e-3

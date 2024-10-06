@@ -71,7 +71,7 @@ class bi_3dda_node(Node):
         self.sample = np.load( self.file_dir, allow_pickle=True)
         self.sample = self.sample.item()
 
-        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep41.npy"
+        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep42.npy"
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()
 
@@ -121,81 +121,14 @@ class bi_3dda_node(Node):
         self.time_diff = 0.05
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        timer_period = 0.01 #100hz
-        self.timer = self.create_timer(timer_period, self.publish_tf)
+
         self.bimanual_ee_publisher = self.create_publisher(Float32MultiArray, "bimanual_ee_cmd", 1)
 
-        self.bgr_sub = Subscriber(self, Image, "/camera_1/left_image")
-        self.depth_sub = Subscriber(self, Image, "/camera_1/depth")
-        self.left_hand_sub = Subscriber(self, JointState, "/follower_left/joint_states")
-        self.right_hand_sub = Subscriber(self, JointState, "/follower_right/joint_states")
 
-        # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
-                                                    #  queue_size, max_delay)
-        self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
-                                                     queue_size, max_delay)
-        self.time_sync.registerCallback(self.SyncCallback)
+        timer_period = 2.0 #2.0 s /call
+        self.timer = self.create_timer(timer_period, self.SyncCallback)
         print("init finished !!!!!!!!!!!")
 
-    
-    def publish_tf(self):
-        left_t = TransformStamped()
-        right_t = TransformStamped()
-        master_cam_t = TransformStamped()
-        
-        # # Read message content and assign it to
-        # # corresponding tf variables
-        ros_time = self.get_clock().now()
-        left_t.header.stamp = ros_time.to_msg()
-        right_t.header.stamp = ros_time.to_msg()
-        master_cam_t.header.stamp = ros_time.to_msg()
-
-        left_t.header.frame_id = 'world'
-        left_t.child_frame_id = "follower_left/base_link"
-        left_t.transform.translation.x = 0.0
-        left_t.transform.translation.y = 0.315
-        left_t.transform.translation.z = 0.0
-        left_t.transform.rotation.x = 0.0
-        left_t.transform.rotation.y = 0.0
-        left_t.transform.rotation.z = 0.0
-        left_t.transform.rotation.w = 1.0
-
-        right_t.header.frame_id = 'world'
-        right_t.child_frame_id = "follower_right/base_link"
-        right_t.transform.translation.x = 0.0
-        right_t.transform.translation.y = -0.315
-        right_t.transform.translation.z = 0.0
-        right_t.transform.rotation.x = 0.0
-        right_t.transform.rotation.y = 0.0
-        right_t.transform.rotation.z = 0.0
-        right_t.transform.rotation.w = 1.0
-
-        master_cam_t.header.frame_id = 'world'
-        master_cam_t.child_frame_id = "master_camera"
-        master_cam_t.transform.translation.x = -0.1393031
-        master_cam_t.transform.translation.y = 0.0539
-        master_cam_t.transform.translation.z = 0.43911375
-
-        master_cam_t.transform.rotation.x = -0.61860094
-        master_cam_t.transform.rotation.y = 0.66385477
-        master_cam_t.transform.rotation.z = -0.31162288
-        master_cam_t.transform.rotation.w = 0.2819945
-
-        # cam_t.header.frame_id = 'master_camera'
-        # cam_t.child_frame_id = "zed_left_camera_frame"
-        # cam_t.transform.translation.x = 0.0
-        # cam_t.transform.translation.y = 0.0
-        # cam_t.transform.translation.z = 0.0
-        # cam_t.transform.rotation.x = -0.4996018
-        # cam_t.transform.rotation.y =  -0.4999998
-        # cam_t.transform.rotation.z = 0.4999998
-        # cam_t.transform.rotation.w = 0.5003982
-
-        # # Send the transformation
-        self.tf_broadcaster.sendTransform(left_t)
-        self.tf_broadcaster.sendTransform(right_t)
-        self.tf_broadcaster.sendTransform(master_cam_t)
-        # self.tf_broadcaster.sendTransform(cam_t)
     def get_transform(self, transf_7D):
         trans = transf_7D[0:3]
         quat = transf_7D[3:7]
@@ -302,7 +235,7 @@ class bi_3dda_node(Node):
 
 
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
-    def SyncCallback(self, bgr, depth):
+    def SyncCallback(self):
         self.frame_idx += 1
         length = self.sample["rgbs"].shape[0]
 
@@ -337,13 +270,13 @@ class bi_3dda_node(Node):
         curr_gripper = self.episode[4][ self.frame_idx ]
         curr_gripper = curr_gripper[None, None, :,:]
         action2 = self.network.run( rgbs, pcds, curr_gripper, instr)
-        print("diff", np.abs(action - action2))
+        # print("diff", np.abs(action - action2))
 
         current_data = {}
         current_data['rgb'] = rgbs
         current_data['xyz'] = pcds
         current_data['curr_gripper'] = curr_gripper
-        current_data['action'] = action
+        current_data['action'] = action2
         current_data['gt'] = self.episode[5][ self.frame_idx ].numpy()       
         np.save('step_{}'.format(self.frame_idx), current_data, allow_pickle = True)
         # self.step_idx += 1

@@ -86,14 +86,14 @@ def main():
     # print("rgb: ", rgb.shape)
     rgbs = rgbs.numpy()
     pcds = sample["pcds"].numpy()
-    actions = sample["action"].numpy()
+    # actions = sample["action"].numpy()
     abs_actions = sample["abs_action"].numpy()    
     curr_gripper = sample['curr_gripper'].numpy()
-    gts = sample["trajectory"].numpy()
+    gts = sample["abs_sample_trajectory"].numpy()
 
     length = rgbs.shape[0]
 
-    print("actions: ", actions.shape)
+    print("actions: ", abs_actions.shape)
     print("gts: ", gts.shape)
     for step_id in range(length):
         rgb = np.transpose(rgbs[step_id,0], (1, 2, 0) ).astype(float) # (0,1)
@@ -106,7 +106,7 @@ def main():
         pcd.colors = o3d.utility.Vector3dVector( pcd_rgb )
         pcd.points = o3d.utility.Vector3dVector( pcd_xyz )
         gt = gts[step_id]
-        action = actions[step_id]
+        # action = actions[step_id]
         abs_action = abs_actions[step_id]
         left = []
         right = []
@@ -119,10 +119,10 @@ def main():
             left.append( get_transform( abs_action[action_idx,0,0:7]))
             right.append( get_transform( abs_action[action_idx,1,0:7]))
 
-            diff = np.abs( action[action_idx,1,0:3] - gt[action_idx,1,0:3])
+            diff = np.abs( abs_action[action_idx,1,0:3] - gt[action_idx,1,0:3])
             if( np.max(diff) > 0.005 ):
                 print("step idx: ", action_idx)
-                print("gt: ", gt[action_idx,1,0:3], " action: ", action[action_idx,1,0:3])
+                print("gt: ", gt[action_idx,1,0:3], " action: ", abs_action[action_idx,1,0:3])
                 print("diff: ", diff)
         visualize_pcd(pcd, left, right, curr_pose)
 
