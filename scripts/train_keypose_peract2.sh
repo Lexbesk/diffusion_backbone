@@ -4,6 +4,8 @@ dataset=/scratch/peract2/train
 valset=/scratch/peract2/test
 dataset=/projects/katefgroup/analogical_manipulation/rlbench/packaged/peract2/train
 valset=/projects/katefgroup/analogical_manipulation/rlbench/packaged/peract2/test
+dataset=/lustre/fsw/portfolios/nvr/users/ngkanatsios/packaged/peract2/train
+valset=/lustre/fsw/portfolios/nvr/users/ngkanatsios/packaged/peract2/test
 
 lr=1e-4
 dense_interpolation=1
@@ -12,12 +14,12 @@ num_history=1
 diffusion_timesteps=100
 B=8
 C=120
-ngpus=8
+ngpus=6
 quaternion_format=wxyz
 bimanual=1
 gripper_loc_bounds_buffer=0.08
 camera_calibration_aug=1
-run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-CA$camera_calibration_aug
+run_log_dir=diffusion_multitask_new-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-CA$camera_calibration_aug
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -35,7 +37,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --rotation_parametrization 6D \
     --diffusion_timesteps $diffusion_timesteps \
     --camera_calibration_aug $camera_calibration_aug \
-    --val_freq 4000 \
+    --val_freq 1000 \
     --val_iters 8 \
     --dense_interpolation $dense_interpolation \
     --interpolation_length $interpolation_length \
@@ -52,6 +54,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --cameras over_shoulder_left over_shoulder_right wrist_left wrist_right front\
     --max_episodes_per_task -1 \
     --quaternion_format $quaternion_format \
-    --checkpoint train_logs/${main_dir}/${run_log_dir}/best.pth \
-    --run_log_dir ${run_log_dir}
+    --run_log_dir ${run_log_dir} \
+    --checkpoint /lustre/fsw/portfolios/nvr/users/ngkanatsios/analogical_manipulation/train_logs/BiManualActor_13Peract2_100Demo_multitask/diffusion_multitask_new-C120-B8-lr1e-4-DI1-2-H1-DT100-CA1/last.pth
 

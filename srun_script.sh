@@ -1,0 +1,20 @@
+#!/bin/bash
+#conda activate 3d_diffuser_actor
+while true
+do
+    echo
+    echo "#######################################################"
+    echo
+
+    srun -A nvr_srl_simpler \
+       -p polar,polar2,polar3,polar4,grizzly \
+       -N 1 \
+       --gpus 6 \
+       --cpus-per-task 32 \
+       --unbuffered \
+       -t 04:00:00 \
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/analogical_manipulation && bash scripts/train_keypose_peract2.sh"
+
+    sleep 1m
+
+done
