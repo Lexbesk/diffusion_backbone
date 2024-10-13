@@ -38,7 +38,7 @@ from geometry_msgs.msg import PoseStamped, PointStamped, TwistStamped, Quaternio
 
 from std_msgs.msg import String, Float32, Int8, UInt8, Bool, UInt32MultiArray, Int32, Header, Float32MultiArray, MultiArrayDimension
 
-
+from sklearn.neighbors import NearestNeighbors
 
 import numpy as np 
 import time
@@ -116,10 +116,12 @@ class bi_3dda_node(Node):
             [0., 0., 1.0]
         ])
 
+        self.bound_box = np.array( [ [0.05, 0.55], [ -0.5 , 0.5], [ -0.3 , 0.6] ] )
+        self.left_bias = self.get_transform( [ -0.11, 0.015, 0.010 ,0., 0., 0., 1.] )
+        self.right_bias = self.get_transform( [-0.06, 0.005, -0.005, 0., 0., 0., 1.] )
+        
         self.last_data_time = time.time()
 
-
-        queue_size = 1
         max_delay = 0.01 #10ms
         self.time_diff = 0.05
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -148,6 +150,7 @@ class bi_3dda_node(Node):
 
         # self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub, self.left_hand_sub, self.right_hand_sub],
                                                     #  queue_size, max_delay)
+        queue_size = 1
         self.time_sync = ApproximateTimeSynchronizer([self.bgr_sub, self.depth_sub],
                                                      queue_size, max_delay)
         self.time_sync.registerCallback(self.SyncCallback)
@@ -255,6 +258,42 @@ class bi_3dda_node(Node):
         xyz = xyz[:,:,0:3]
         return xyz
 
+    def denoise(self, rgb, xyz, debug = False):
+
+        start = time.time()
+        x = xyz[:,:,0]
+        z = xyz[:,:,2]
+        # print("minz: ", np.min(z))
+        valid_idx = np.where( (z > -0.08) & (x > 0.05))
+        # print("points: ", len( valid_idx[0]))
+        if(len( valid_idx[0]) < 10):
+            return rgb, xyz
+
+        test_xyz = xyz [ valid_idx ]
+        X = test_xyz.reshape(-1,3)
+
+        nbrs = NearestNeighbors(n_neighbors=3, algorithm='ball_tree').fit(X)
+        distances, indices = nbrs.kneighbors(X)
+        distances = distances[:,2]
+        invalid_idx = np.where(distances > 0.01)
+        
+        if( len(valid_idx[0]) < 10):
+            return rgb, xyz
+
+        xs = valid_idx[0]
+        ys = valid_idx[1]
+
+        xs = xs[invalid_idx]
+        ys = ys[invalid_idx]    
+        rgb[xs,ys] = np.array([0., 0., 0.])
+        xyz[xs,ys] = np.array([0., 0., 0.])
+        end = time.time()
+        if(debug):
+            print("time cost: ", end - start)
+        
+        return rgb, xyz
+
+
     def image_process(self, bgr, depth, intrinsic_np, original_img_size, resized_intrinsic_np, resized_img_size):
         
         cx = intrinsic_np[0,2]
@@ -282,6 +321,38 @@ class bi_3dda_node(Node):
         processed_depth = cv2.resize(cropped_depth, resized_img_size, interpolation =cv2.INTER_NEAREST)
 
         return processed_rgb, processed_depth
+
+    def cropping(self, rgb, xyz, bound_box, label = None, return_image = True):
+
+        x = xyz[:,:,0]
+        y = xyz[:,:,1]
+        z = xyz[:,:,2]
+
+        # print("bound_box: ", bound_box)
+        valid_idx = np.where( (x>=bound_box[0][0]) & (x <=bound_box[0][1]) & (y>=bound_box[1][0]) & (y<=bound_box[1][1]) & (z>=bound_box[2][0]) & (z<=bound_box[2][1]) )
+
+        if(return_image):
+
+            cropped_rgb = np.zeros(rgb.shape)
+            cropped_xyz = np.zeros(xyz.shape) 
+            cropped_rgb[valid_idx] = rgb[valid_idx]
+            cropped_xyz[valid_idx] = xyz[valid_idx]
+
+            return cropped_rgb, cropped_xyz
+
+        valid_xyz = xyz[valid_idx]
+        valid_rgb = rgb[valid_idx]
+        valid_label = None
+        if(label is not None):
+            valid_label = label[valid_idx]
+                
+        valid_pcd = o3d.geometry.PointCloud()
+        valid_pcd.points = o3d.utility.Vector3dVector( valid_xyz)
+        if(np.max(valid_rgb) > 1.0):
+            valid_pcd.colors = o3d.utility.Vector3dVector( valid_rgb/255.0 )
+        else:
+            valid_pcd.colors = o3d.utility.Vector3dVector( valid_rgb )
+        return valid_xyz, valid_rgb, valid_label, valid_pcd
 
     def xyz_rgb_validation(self, rgb, xyz):
         # verify xyz and depth value
@@ -337,6 +408,9 @@ class bi_3dda_node(Node):
         # visualize_pcd(all_valid_resized_pcd)
         xyz = self.xyz_from_depth(depth, self.resized_intrinsic_o3d.intrinsic_matrix, self.cam_extrinsic )
 
+        cropped_rgb, cropped_xyz = self.cropping( rgb, xyz, self.bound_box)
+        filtered_rgb, filtered_xyz = self.denoise(cropped_rgb, cropped_xyz, debug= True)
+
         if( len( np.where( np.isnan(xyz))[0] ) > 0 ):
             print(np.where( np.isnan(xyz)))
             print(" x y z has invalid point !!!!!")
@@ -344,9 +418,9 @@ class bi_3dda_node(Node):
             print(" x y z has invalid point !!!!!")
             raise
 
-        resized_img_data = np.transpose(rgb, (2, 0, 1) ).astype(float)
+        resized_img_data = np.transpose(filtered_rgb, (2, 0, 1) ).astype(float)
         resized_img_data = (resized_img_data / 255.0 ).astype(float)
-        resized_xyz = np.transpose(xyz, (2, 0, 1) ).astype(float)
+        resized_xyz = np.transpose(filtered_xyz, (2, 0, 1) ).astype(float)
         # print("resized_xyz: ", resized_xyz.shape)
         n_cam = 1
         obs = np.zeros( (1, n_cam, 2, 3, 256, 256) ).astype(float)
@@ -357,9 +431,9 @@ class bi_3dda_node(Node):
         left_pos = np.array(self.left_hand_joints.position) 
         right_pos = np.array(self.right_hand_joints.position) 
 
-        left_hand_transform_7D = self.get_7D_transform( FwdKin(left_pos[0:6]) )
+        left_hand_transform_7D = self.get_7D_transform( FwdKin(left_pos[0:6]) @ self.left_bias )
         left_hand_transform_7D[1] += 0.315
-        right_hand_transform_7D = self.get_7D_transform( FwdKin(right_pos[0:6]) )
+        right_hand_transform_7D = self.get_7D_transform( FwdKin(right_pos[0:6]) @ self.right_bias )
         right_hand_transform_7D[1] -= 0.315
 
         # trans = FwdKin(left_pos[0:6])
@@ -392,12 +466,14 @@ class bi_3dda_node(Node):
         print("3dda took: ", end - start)
         # print("action: ", action.shape)
         # print("action: ", action[0:5, :,:])
+        action[:,0,1] -= 0.02
+        action[:,1,1] += 0.02
         self.print_action(action)
 
         current_data = {}
-        current_data['rgb'] = rgb
-        current_data['xyz'] = xyz
-        current_data['curr_gripper'] = curr_gripper_np
+        current_data['rgb'] = rgbs
+        current_data['xyz'] = pcds
+        current_data['curr_gripper'] = curr_gripper
         current_data['left_joints'] = left_pos
         current_data['right_joints'] = right_pos
         current_data['action'] = action

@@ -71,7 +71,7 @@ class bi_3dda_node(Node):
         self.sample = np.load( self.file_dir, allow_pickle=True)
         self.sample = self.sample.item()
 
-        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep42.npy"
+        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()
 
