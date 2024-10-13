@@ -23,15 +23,15 @@ from datasets.dataset_mobaloha import MobileAlohaDataset
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("front", )
     image_size: str = "256,256"
-    dataset: List[Path] = "/home/tsungwek/data/mobile_aloha"
+    dataset: List[Path] = "/home/tsungwek/data/mobile_aloha/train"
     max_episodes_per_task: int = -1
     cache_size: int = 0
     out_file: str = "location_bounds.json"
     return_trajectory: int = 1
-    relative_action: int = 0
+    relative_action: int = 1
 
     tasks: Tuple[str, ...] = (
-        "20240827_plate",
+        "20241006_plate_keypose",
     )
     variations: Tuple[int, ...] = range(0, 1)
     mode: str = "aggregate"  # channelwise, aggregate
@@ -83,6 +83,15 @@ if __name__ == "__main__":
             #     ep['trajectory'][k, :, 0],
             #     ep['trajectory'][k, :, 1]
             # )
+            # visualize_actions_and_point_clouds_video(
+            #    ep['pcds'].float(),
+            #    ep['rgbs'].float(),
+            #    ep['curr_gripper'][:, 0].float(),
+            #    ep['curr_gripper'][:, 1].float(),
+            #    ep['action'][:, 0].float(),
+            #    ep['action'][:, 1].float(),
+            # )
+            # import ipdb; ipddb.set_trace()
             bounds[task].append(ep["trajectory"][..., :3].reshape([-1, 3]))
 
     bounds = {

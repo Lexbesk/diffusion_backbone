@@ -248,22 +248,22 @@ class TrainTester(BaseTrainTester):
                 curr_gripper.to(device),
                 run_inference=True
             )
-            #import ipdb; ipdb.set_trace()
-            #from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
-            #from utils.utils_with_mobaloha import to_absolute_action
-            #k = 0
-            #abs_sample_trajectory = to_absolute_action(
-            #    sample['trajectory'][k].flatten(-2, -1), sample["curr_gripper"][[k]].flatten(-2, -1)).unflatten(-1, (2, 8))
-            #abs_action = to_absolute_action(
-            #    action[k].flatten(-2, -1).cpu(), sample["curr_gripper"][[k]].flatten(-2, -1)).unflatten(-1, (2, 8))
-            #visualize_actions_and_point_clouds_video(
-            #    sample['pcds'][[k]].expand(25, -1, -1, -1,  -1),
-            #    sample['rgbs'][[k]].expand(25, -1, -1, -1, -1),
-            #    abs_sample_trajectory[:, 0],
-            #    abs_sample_trajectory[:, 1],
-            #    abs_action[:, 0],
-            #    abs_action[:, 1],
-            #)
+            from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
+            from utils.utils_with_mobaloha import to_absolute_action
+            k = 0
+            abs_sample_trajectory = to_absolute_action(
+               sample['trajectory'][:, 0].flatten(-2, -1), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
+            abs_action = to_absolute_action(
+               action[:, 0].flatten(-2, -1).cpu(), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
+            visualize_actions_and_point_clouds_video(
+               sample['pcds'],
+               sample['rgbs'],
+               abs_sample_trajectory[:, 0],
+               abs_sample_trajectory[:, 1],
+               abs_action[:, 0],
+               abs_action[:, 1],
+            )
+            import ipdb; ipdb.set_trace()
             losses, losses_B = criterion.compute_metrics(
                 action,
                 sample["trajectory"].to(device),
