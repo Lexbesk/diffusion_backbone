@@ -22,7 +22,7 @@ run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpola
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     mobaloha_playback.py \
-    --tasks 20240827_plate \
+    --tasks 20241006_plate_keypose \
     --dataset $dataset \
     --valset $valset \
     --gripper_loc_bounds tasks/mobaloha_tasks_rel_keypose_location_bounds.json \
@@ -54,6 +54,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
     --eval_only 1 \
+    --keypose_only $keypose_only \
     --checkpoint train_logs/$main_dir/$run_log_dir/last.pth \
     --run_log_dir ${run_log_dir}
 

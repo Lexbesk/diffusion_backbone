@@ -152,7 +152,11 @@ class Tester(BaseTrainTester):
             curr_gripper = curr_gripper,
             run_inference=True
         )
-        # print("action: ", action.shape)
+
+        print("action: ", action.shape)
+        if(self.args.keypose_only):
+            action = action[0:1,0:1,:,:]
+
         if(self.args.relative_action):
             action = to_absolute_action( action.flatten(-2, -1).cpu(), curr_gripper.cpu().flatten(-2, -1)).unflatten(-1, (2, 8) )
 

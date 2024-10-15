@@ -16,7 +16,8 @@ quaternion_format=xyzw
 bimanual=1
 relative_action=1
 gripper_loc_bounds_buffer=0.08
-run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix-cleanbg
+keypose_only=1
+run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix-cleanbg-KP$keypose_only
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -24,7 +25,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --tasks 20240827_plate \
     --dataset $dataset \
     --valset $valset \
-    --eval_only 1 \
     --gripper_loc_bounds tasks/mobaloha_tasks_rel_location_bounds.json \
     --gripper_loc_bounds_buffer $gripper_loc_bounds_buffer \
     --num_workers 4 \
@@ -50,8 +50,11 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --num_history $num_history \
     --cameras front\
     --max_episodes_per_task -1 \
+    --max_episode_length 20 \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
+    --eval_only 1 \
+    --keypose_only $keypose_only \
     --checkpoint train_logs/$main_dir/$run_log_dir/last.pth \
     --run_log_dir ${run_log_dir}
 
