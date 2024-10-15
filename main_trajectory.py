@@ -22,6 +22,7 @@ from utils.common_utils import (
     load_instructions, count_parameters, get_gripper_loc_bounds
 )
 
+from utils.utils_with_mobaloha import to_absolute_action
 
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("wrist", "left_shoulder", "right_shoulder")
@@ -248,22 +249,22 @@ class TrainTester(BaseTrainTester):
                 curr_gripper.to(device),
                 run_inference=True
             )
-            from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
-            from utils.utils_with_mobaloha import to_absolute_action
-            k = 0
-            abs_sample_trajectory = to_absolute_action(
-               sample['trajectory'][:, 0].flatten(-2, -1), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
-            abs_action = to_absolute_action(
-               action[:, 0].flatten(-2, -1).cpu(), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
-            visualize_actions_and_point_clouds_video(
-               sample['pcds'],
-               sample['rgbs'],
-               abs_sample_trajectory[:, 0],
-               abs_sample_trajectory[:, 1],
-               abs_action[:, 0],
-               abs_action[:, 1],
-            )
-            import ipdb; ipdb.set_trace()
+
+            # from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
+            # from utils.utils_with_mobaloha import to_absolute_action
+            # k = 0
+            # abs_sample_trajectory = to_absolute_action(
+            #    sample['trajectory'][:, 0].flatten(-2, -1), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
+            # abs_action = to_absolute_action(
+            #    action[:, 0].flatten(-2, -1).cpu(), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
+            # visualize_actions_and_point_clouds_video(
+            #    sample['pcds'],
+            #    sample['rgbs'],
+            #    abs_sample_trajectory[:, 0],
+            #    abs_sample_trajectory[:, 1],
+            #    abs_action[:, 0],
+            #    abs_action[:, 1],
+            # )
             losses, losses_B = criterion.compute_metrics(
                 action,
                 sample["trajectory"].to(device),
