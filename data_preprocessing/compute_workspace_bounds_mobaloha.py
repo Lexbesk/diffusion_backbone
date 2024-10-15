@@ -23,7 +23,7 @@ from datasets.dataset_mobaloha import MobileAlohaDataset
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("front", )
     image_size: str = "256,256"
-    dataset: List[Path] = "/home/tsungwek/data/mobile_aloha/train"
+    dataset: List[Path] = "./data/processed_bimanual/train"
     max_episodes_per_task: int = -1
     cache_size: int = 0
     out_file: str = "location_bounds.json"
@@ -31,7 +31,11 @@ class Arguments(tap.Tap):
     relative_action: int = 1
 
     tasks: Tuple[str, ...] = (
-        "20241006_plate_keypose",
+        "close_pen",
+        "pick_up_plate",
+        "pouring_into_bowl",
+        "put_block_into_bowl",
+        "stack_block",
     )
     variations: Tuple[int, ...] = range(0, 1)
     mode: str = "aggregate"  # channelwise, aggregate

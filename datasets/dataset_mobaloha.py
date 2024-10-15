@@ -10,6 +10,51 @@ from .dataset_engine import RLBenchDataset
 class MobileAlohaDataset(RLBenchDataset):
     """Dataset class for Mobile Aloha."""
 
+    def __init__(
+        self,
+        # required
+        root,
+        instructions=None,
+        # dataset specification
+        taskvar=[('close_door', 0)],
+        max_episode_length=5,
+        cache_size=0,
+        max_episodes_per_task=100,
+        num_iters=None,
+        cameras=("wrist", "left_shoulder", "right_shoulder"),
+        # for augmentations
+        training=True,
+        image_rescale=(1.0, 1.0),
+        # for trajectories
+        return_low_lvl_trajectory=False,
+        dense_interpolation=False,
+        interpolation_length=100,
+        relative_action=False,
+        bimanual=False,
+        calibration_augmentation=True,
+        calaug_cameras=("wrist_left", "wrist_right"),
+    ):
+        super().__init__(
+            root=root,
+            instructions=None,
+            taskvar=taskvar,
+            max_episode_length=max_episode_length,
+            cache_size=cache_size,
+            max_episodes_per_task=max_episodes_per_task,
+            num_iters=num_iters,
+            cameras=cameras,
+            training=training,
+            image_rescale=image_rescale,
+            return_low_lvl_trajectory=return_low_lvl_trajectory,
+            dense_interpolation=dense_interpolation,
+            interpolation_length=interpolation_length,
+            relative_action=relative_action,
+            bimanual=bimanual,
+            calibration_augmentation=calibration_augmentation,
+            calaug_cameras=calaug_cameras
+        )
+        self._instructions = instructions
+
     def __getitem__(self, episode_id):
         """
         the episode item: [
@@ -68,8 +113,15 @@ class MobileAlohaDataset(RLBenchDataset):
 
         # Sample one instruction feature
         if self._instructions:
-            instr = random.choice(self._instructions[task][variation])
-            instr = instr[None].repeat(len(rgbs), 1, 1)
+            instr_ind = {
+                "close_pen": 0,
+                "pick_up_plate": 1,
+                "pouring_into_bowl": 2,
+                "put_block_into_bowl": 3,
+                "stack_block": 4
+            }
+            instr = self._instructions[instr_ind[task]]
+            instr = instr.repeat(len(rgbs), 1, 1)
         else:
             instr = torch.zeros((rgbs.shape[0], 53, 512))
 

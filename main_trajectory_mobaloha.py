@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import random
 from typing import Optional
+import pickle
 
 import numpy as np
 import torch
@@ -12,7 +13,7 @@ from datasets.dataset_mobaloha import MobileAlohaDataset
 from diffuser_actor.trajectory_optimization.bimanual_diffuser_actor_mobaloha import BiManualDiffuserActor
 
 from utils.common_utils import (
-    load_instructions, count_parameters, get_gripper_loc_bounds
+    count_parameters, get_gripper_loc_bounds
 )
 from main_trajectory import Arguments as BaseArguments
 from main_trajectory import TrainTester as BaseTrainTester
@@ -23,6 +24,13 @@ class Arguments(BaseArguments):
     instructions: Optional[Path] = None
 
 
+def load_instructions(instructions):
+    instructions = pickle.load(
+        open(instructions, "rb")
+    )['embeddings']
+    return instructions
+
+
 class TrainTester(BaseTrainTester):
     """Train/test a trajectory optimization algorithm."""
 
@@ -31,21 +39,12 @@ class TrainTester(BaseTrainTester):
         # Load instruction, based on which we load tasks/variations
         instruction = load_instructions(
             self.args.instructions,
-            tasks=self.args.tasks,
-            variations=self.args.variations
         )
-        if instruction is None:
-            taskvar = [
-                (task, var)
-                for task in self.args.tasks
-                for var in self.args.variations
-            ]
-        else:
-            taskvar = [
-                (task, var)
-                for task, var_instr in instruction.items()
-                for var in var_instr.keys()
-            ]
+        taskvar = [
+            (task, var)
+            for task in self.args.tasks
+            for var in self.args.variations
+        ]
 
         # Initialize datasets with arguments
         train_dataset = MobileAlohaDataset(
