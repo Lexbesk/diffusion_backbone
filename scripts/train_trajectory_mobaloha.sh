@@ -13,7 +13,7 @@ num_history=1
 diffusion_timesteps=50
 B=8
 C=120
-ngpus=1
+ngpus=2
 quaternion_format=xyzw
 bimanual=1
 relative_action=1
@@ -57,4 +57,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
     --eval_only 0 \
+    --checkpoint train_logs/$main_dir/$run_log_dir/last.pth \
     --run_log_dir ${run_log_dir}
+
