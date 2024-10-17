@@ -117,9 +117,15 @@ class bi_3dda_node(Node):
         ])
 
         self.bound_box = np.array( [ [0.05, 0.55], [ -0.5 , 0.5], [ -0.3 , 0.6] ] )
-        self.left_bias = self.get_transform( [ -0.11, 0.015, 0.010 ,0., 0., 0., 1.] )
-        self.right_bias = self.get_transform( [-0.06, 0.005, -0.005, 0., 0., 0., 1.] )
+        # self.left_bias = self.get_transform( [ -0.11, 0.015, 0.010 ,0., 0., 0., 1.] )
+        # self.right_bias = self.get_transform( [-0.06, 0.005, -0.005, 0., 0., 0., 1.] )
         
+        self.left_bias = self.get_transform(   [ -0.01, 0.365, -0.0 ,0., 0.,0.02617695, 0.99965732] )
+        self.left_tip_bias = self.get_transform( [-0.028, 0.01, 0.01,      0., 0., 0., 1.] ) @ self.get_transform([0.087, 0, 0., 0., 0., 0., 1.] )
+
+        self.right_bias = self.get_transform(   [ 0.01, -0.315, 0.00, 0., 0., 0., 1.0] )
+        self.right_tip_bias = self.get_transform( [-0.035, 0.01, -0.008,      0., 0., 0., 1.] ) @ self.get_transform([0.087, 0, 0., 0., 0., 0., 1.] )
+
         self.last_data_time = time.time()
 
         max_delay = 0.01 #10ms
@@ -431,21 +437,22 @@ class bi_3dda_node(Node):
         left_pos = np.array(self.left_hand_joints.position) 
         right_pos = np.array(self.right_hand_joints.position) 
 
-        left_hand_transform_7D = self.get_7D_transform( FwdKin(left_pos[0:6]) @ self.left_bias )
-        left_hand_transform_7D[1] += 0.315
-        right_hand_transform_7D = self.get_7D_transform( FwdKin(right_pos[0:6]) @ self.right_bias )
-        right_hand_transform_7D[1] -= 0.315
+        left_transform = left_bias @ FwdKin(left_pos[0:6])  @ left_tip_bias
+        left_hand_transform_7D = self.get_7D_transform( left_transform )
+
+        right_transform = right_bias @ FwdKin(right_pos[0:6]) @ right_tip_bias
+        right_hand_transform_7D = self.get_7D_transform( right_transform )
 
         # trans = FwdKin(left_pos[0:6])
         # trans[1,3] += 0.315
         # left_fk = self.get_7D_transform( trans)
         # print("left_fk: ", left_fk)
         # print("diff: ", left_fk - self.left_hand_transform_7D)
-        left_min_joint = 0.638
-        left_max_joint = 1.626
+        left_min_joint = 0.62
+        left_max_joint = 1.62
 
-        right_min_joint = 0.625
-        right_max_joint = 1.610
+        right_min_joint = 0.62
+        right_max_joint = 1.62
 
         curr_gripper_np = np.zeros( (1,1,2,8)).astype(float)
         curr_gripper_np[0,0,0,0:7] = left_hand_transform_7D
@@ -456,18 +463,19 @@ class bi_3dda_node(Node):
 
         start = time.time()
  
-        instr = torch.zeros((1, 53, 512))
+        # instr = torch.zeros((1, 53, 512))
+        task = self.args.current_task
         rgbs = torch.from_numpy(obs[0:,0:,0])
         pcds = torch.from_numpy(obs[0:,0:,1])
         curr_gripper = torch.from_numpy(curr_gripper_np)
 
-        action = self.network.run( rgbs, pcds, curr_gripper, instr)
+        action = self.network.run( rgbs, pcds, curr_gripper, task)
         end = time.time()
         print("3dda took: ", end - start)
         # print("action: ", action.shape)
         # print("action: ", action[0:5, :,:])
-        action[:,0,1] -= 0.02
-        action[:,1,1] += 0.02
+        # action[:,0,1] -= 0.02
+        # action[:,1,1] += 0.02
         self.print_action(action)
 
         current_data = {}
@@ -507,7 +515,7 @@ class bi_3dda_node(Node):
         # self.right_hand_transform_7D
 
 class Arguments(BaseArguments):
-    instructions: Optional[Path] = None
+    instructions: Optional[str] = None
        
 
 def main(main_args):

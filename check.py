@@ -100,7 +100,7 @@ def main():
     # data_idxs = [1, 4, 31, 32, 33, 34, 35]
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
-    file_dir = "test4"
+    file_dir = "test39"
     length = 25
     for idx in range(length):
         print("idx: ", idx)
@@ -153,11 +153,11 @@ def main():
         for action_idx in range(trajectory.shape[0]):
             # right.append( get_transform2( gt[action_idx,1,0:7]))
             right.append( get_transform2( action[action_idx,1,0:7]))
-            diff = np.abs( action[action_idx,1,0:3] - gt[action_idx,1,0:3])
-            if(np.max(diff) > 0.005):
-                print("step idx: ", action_idx)
-                print("gt: ", gt[action_idx,1,0:3], " action: ", action[action_idx,1,0:3])
-                print("diff: ", diff)
+            #diff = np.abs( action[action_idx,1,0:3] - gt[action_idx,1,0:3])
+            #if(np.max(diff) > 0.005):
+            #    print("step idx: ", action_idx)
+            #    print("gt: ", gt[action_idx,1,0:3], " action: ", action[action_idx,1,0:3])
+            #    print("diff: ", diff)
             
 
         # for action_idx in range(trajectory.shape[0]):

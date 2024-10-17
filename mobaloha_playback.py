@@ -67,12 +67,13 @@ class bi_3dda_node(Node):
         self.network = Tester(args)
         ##########################################################
         # self.file_dir = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep4.npy"
-        self.file_dir = "./trained_model.npy"
-        self.sample = np.load( self.file_dir, allow_pickle=True)
-        self.sample = self.sample.item()
+        # self.file_dir = "./trained_model.npy"
+        # self.sample = np.load( self.file_dir, allow_pickle=True)
+        # self.sample = self.sample.item()
 
         # self.file_dir2 = "/ws/data/mobile_aloha_debug/20241006_plate_keypose+0/ep41.npy"
-        self.file_dir2 = "/ws/data/mobile_aloha_debug/20240827_plate+0/ep41.npy"
+        self.file_dir2 = "/ws/analogical_manipulation/data/processed_bimanual_keypose/eval/stack_block+0/ep39.npy"
+
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()
 
@@ -238,7 +239,8 @@ class bi_3dda_node(Node):
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
     def SyncCallback(self):
         self.frame_idx += 1
-        length = self.sample["rgbs"].shape[0]
+        # length = self.sample["rgbs"].shape[0]
+        length = len(self.episode[0])
 
         print("in callback")
         if(self.frame_idx >= length):
@@ -248,20 +250,21 @@ class bi_3dda_node(Node):
         
         start = time.time()
  
-        instr = torch.zeros((1, 53, 512))
-        rgbs = self.sample["rgbs"][self.frame_idx]
-        pcds = self.sample["pcds"][self.frame_idx]
+        # instr = torch.zeros((1, 53, 512))
+        task = self.args.current_task
 
-        rgbs = rgbs[None, :,:,:,:]
-        pcds = pcds[None, :,:,:,:]
+        # rgbs = self.sample["rgbs"][self.frame_idx]
+        # pcds = self.sample["pcds"][self.frame_idx]
+        # rgbs = rgbs[None, :,:,:,:]
+        # pcds = pcds[None, :,:,:,:]
 
-        curr_gripper = self.sample['curr_gripper'][self.frame_idx]
-        curr_gripper = curr_gripper[None, None, :,:]
-        print("rgbs: ",rgbs.shape)
-        print("curr_gripper: ", curr_gripper.shape)
-        action = self.network.run( rgbs, pcds, curr_gripper, instr)
-        checked_action = self.sample["abs_action"][self.frame_idx].numpy()
-        # print("diff", np.abs(checked_action - action[1:]))
+        # curr_gripper = self.sample['curr_gripper'][self.frame_idx]
+        # curr_gripper = curr_gripper[None, None, :,:]
+        # print("rgbs: ",rgbs.shape)
+        # print("curr_gripper: ", curr_gripper.shape)
+        # action = self.network.run( rgbs, pcds, curr_gripper, instr)
+        # checked_action = self.sample["abs_action"][self.frame_idx].numpy()
+        # # print("diff", np.abs(checked_action - action[1:]))
 
         obs = self.episode[1][ self.frame_idx ].numpy()
         rgbs = torch.from_numpy(obs[0:,0])
@@ -270,7 +273,8 @@ class bi_3dda_node(Node):
         pcds = pcds[None, :,:,:,:]
         curr_gripper = self.episode[4][ self.frame_idx ]
         curr_gripper = curr_gripper[None, None, :,:]
-        action2 = self.network.run( rgbs, pcds, curr_gripper, instr)
+        action2 = self.network.run( rgbs, pcds, curr_gripper, task)
+        print("action2: ", action2.shape)
         # print("diff", np.abs(action - action2))
 
         current_data = {}
@@ -278,6 +282,7 @@ class bi_3dda_node(Node):
         current_data['xyz'] = pcds
         current_data['curr_gripper'] = curr_gripper
         current_data['action'] = action2
+
         current_data['gt'] = self.episode[5][ self.frame_idx ].numpy()       
         np.save('step_{}'.format(self.frame_idx), current_data, allow_pickle = True)
         # self.step_idx += 1
@@ -287,7 +292,7 @@ class bi_3dda_node(Node):
 
 
 class Arguments(BaseArguments):
-    instructions: Optional[Path] = None
+    instructions: Optional[str] = None
        
 
 def main(main_args):

@@ -26,17 +26,45 @@ from torch.nn.parallel import DistributedDataParallel
 
 from scipy.spatial.transform import Rotation
 from utils.utils_with_mobaloha import to_absolute_action
+import pickle
 
 class Arguments(BaseArguments):
     instructions: Optional[Path] = None
 
+def load_instructions(instructions):
+    instructions = pickle.load(
+        open(instructions, "rb")
+    )['embeddings']
+    return instructions
 
 class Tester(BaseTrainTester):
     """Train/test a trajectory optimization algorithm."""
     def __init__(self, args):
         super().__init__(args)
         self.args = args
+        
+        # print("self.args.instructions: ", self.args.instructions )
+        # print("self.args.tasks: ", self.args.tasks)
+        # print("self.args.variations: ", self.args.variations)
 
+        # Todo, make instruction a task indexed dictionary
+        self.instructions = load_instructions(
+            self.args.instructions,
+        )
+        # print("instructions: ", self.instructions)
+
+        self.instr_ind = {
+                "close_pen": 0,
+                "pick_up_plate": 1,
+                "pouring_into_bowl": 2,
+                "put_block_into_bowl": 3,
+                "stack_block": 4
+            }
+        # self.taskvar = [
+        #     (task, var)
+        #     for task in self.args.tasks
+        #     for var in self.args.variations
+        # ]
         # Get model
         self.model = self.get_model()
         self.model.eval()
@@ -120,7 +148,7 @@ class Tester(BaseTrainTester):
         return trans_7D
 
     @torch.no_grad()
-    def run(self, rgb_obs, pcd_obs, curr_gripper, instruction):
+    def run(self, rgb_obs, pcd_obs, curr_gripper, task = "None", variation = 0):
         '''
         output is (N,2,8)
         '''
@@ -135,8 +163,17 @@ class Tester(BaseTrainTester):
         curr_gripper = curr_gripper.to(torch.float32)
         curr_gripper = curr_gripper.to(device)
 
-        instruction = instruction.to(torch.float32)
-        instruction = instruction.to(device)
+        instr = torch.zeros((1, 53, 512))
+        # print("self.instructions: ", len(self.instructions))
+        # Sample one instruction feature
+        if task != "None":
+            instr = self.instructions[self.instr_ind[task]]
+            instr = instr[None,:]
+        # print("instr: ", instr.shape)
+
+
+        instr = instr.to(torch.float32)
+        instr = instr.to(device)
 
         traj_mask = torch.zeros( (1, self.args.interpolation_length - 1) ).to(torch.float32)
         traj_mask = traj_mask.to(device)      
@@ -148,12 +185,12 @@ class Tester(BaseTrainTester):
             trajectory_mask = traj_mask,
             rgb_obs = rgb_obs,
             pcd_obs = pcd_obs,
-            instruction = instruction,
+            instruction = instr,
             curr_gripper = curr_gripper,
             run_inference=True
         )
 
-        print("action: ", action.shape)
+        # print("action: ", action.shape)
         if(self.args.keypose_only):
             action = action[0:1,0:1,:,:]
 

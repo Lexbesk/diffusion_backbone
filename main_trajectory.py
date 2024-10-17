@@ -31,6 +31,7 @@ class Arguments(tap.Tap):
     instructions: Optional[Path] = "instructions.pkl"
     seed: int = 0
     tasks: Tuple[str, ...]
+    current_task: str = "None"
     variations: Tuple[int, ...] = (0,)
     checkpoint: Optional[Path] = None
     accumulate_grad_batches: int = 1
