@@ -100,7 +100,7 @@ def main():
     # data_idxs = [1, 4, 31, 32, 33, 34, 35]
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
-    file_dir = "test39"
+    file_dir = "keypose_stack_block_fail1"
     length = 25
     for idx in range(length):
         print("idx: ", idx)
@@ -117,7 +117,7 @@ def main():
         xyz = sample["xyz"][0][0].numpy()
         xyz = np.transpose(xyz, (1, 2, 0) ).astype(float) # (0,1)
         action = sample['action']
-        gt = sample['gt']
+        # gt = sample['gt']
 
         # print("action: ", action.shape)
         curr_gripper = sample['curr_gripper'][0,0]

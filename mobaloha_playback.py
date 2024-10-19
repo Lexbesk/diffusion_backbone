@@ -72,7 +72,7 @@ class bi_3dda_node(Node):
         # self.sample = self.sample.item()
 
         # self.file_dir2 = "/ws/data/mobile_aloha_debug/20241006_plate_keypose+0/ep41.npy"
-        self.file_dir2 = "/ws/analogical_manipulation/data/processed_bimanual_keypose/eval/stack_block+0/ep39.npy"
+        self.file_dir2 = "/ws/analogical_manipulation/data/processed_bimanual_keypose/pick_up_plate+0/ep1.npy"
 
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()

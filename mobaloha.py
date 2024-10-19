@@ -437,10 +437,10 @@ class bi_3dda_node(Node):
         left_pos = np.array(self.left_hand_joints.position) 
         right_pos = np.array(self.right_hand_joints.position) 
 
-        left_transform = left_bias @ FwdKin(left_pos[0:6])  @ left_tip_bias
+        left_transform = self.left_bias @ FwdKin(left_pos[0:6])  @ self.left_tip_bias
         left_hand_transform_7D = self.get_7D_transform( left_transform )
 
-        right_transform = right_bias @ FwdKin(right_pos[0:6]) @ right_tip_bias
+        right_transform = self.right_bias @ FwdKin(right_pos[0:6]) @ self.right_tip_bias
         right_hand_transform_7D = self.get_7D_transform( right_transform )
 
         # trans = FwdKin(left_pos[0:6])

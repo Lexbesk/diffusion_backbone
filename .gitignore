@@ -4,6 +4,7 @@ output/
 output*
 *.jpg
 .cache*
+*.npy
 .mypy_cache
 *.sif
 *.pyc
