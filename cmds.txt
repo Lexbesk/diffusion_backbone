@@ -1,1 +1,1 @@
-python3 compute_workspace_bounds_mobaloha.py --dataset ./data/processed_bimanual_keypose --out_file tasks/mobaloha_rel_keypose_debug_location_bounds.json
+python3 compute_workspace_bounds_mobaloha.py --dataset ./data/processed_bimanual_keypose --bimanual 0 --out_file tasks/mobaloha_multitasks_rel_keypose_location_bounds_singlearm.json

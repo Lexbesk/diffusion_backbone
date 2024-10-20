@@ -39,9 +39,11 @@ class TrainTester(BaseTrainTester):
     def get_datasets(self):
         """Initialize datasets."""
         # Load instruction, based on which we load tasks/variations
-        instruction = load_instructions(
-            self.args.instructions,
-        )
+        instruction = None
+        if(self.args.use_instruction):
+            instruction = load_instructions(
+                self.args.instructions,
+            )
         taskvar = [
             (task, var)
             for task in self.args.tasks

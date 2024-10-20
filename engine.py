@@ -180,6 +180,23 @@ class BaseTrainTester:
                     )
                 model.train()
 
+            if (step_id + 1) % self.args.save_freq == 0:
+                print("Test evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, test_loader, step_id,
+                    val_iters=max(
+                        5,
+                        int(4 * len(self.args.tasks)/self.args.batch_size_val)
+                    )
+                )
+                if dist.get_rank() == 0:  # save model
+                    best_loss = self.save_checkpoint(
+                        model, optimizer, step_id,
+                        new_loss, best_loss
+                    )
+
+
         return model
 
     def train_one_step(self, model, criterion, optimizer, step_id, sample):
@@ -227,8 +244,10 @@ class BaseTrainTester:
             "optimizer": optimizer.state_dict(),
             "iter": step_id + 1,
             "best_loss": best_loss
-        }, self.args.log_dir / "last.pth")
+        }, self.args.log_dir / "{}steps.pth".format( str(step_id + 1)) )
         return best_loss
+
+
 
     def synchronize_between_processes(self, a_dict):
         all_dicts = all_gather(a_dict)
