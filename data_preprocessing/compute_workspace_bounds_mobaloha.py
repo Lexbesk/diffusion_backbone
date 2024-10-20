@@ -17,7 +17,7 @@ import numpy as np
 from tqdm import tqdm
 import blosc
 
-from datasets.dataset_mobaloha import MobileAlohaDataset
+from datasets.dataset_mobaloha import MobileAlohaDataset, SingleArmMobileAlohaDataset
 
 
 class Arguments(tap.Tap):
@@ -40,6 +40,7 @@ class Arguments(tap.Tap):
     variations: Tuple[int, ...] = range(0, 1)
     mode: str = "aggregate"  # channelwise, aggregate
     horizon: int = 26
+    bimanual: int = 1
 
 
 if __name__ == "__main__":
@@ -55,7 +56,8 @@ if __name__ == "__main__":
         ]
         max_episode_length = 200
 
-        dataset = MobileAlohaDataset(
+        dataset_class = MobileAlohaDataset if args.bimanual else SingleArmMobileAlohaDataset
+        dataset = dataset_class(
             root=args.dataset,
             instructions=None,
             taskvar=taskvar,

@@ -211,3 +211,28 @@ class MobileAlohaDataset(RLBenchDataset):
             ret_dict['trajectory'] = ret_dict['trajectory'].unflatten(-1, (2, -1))
 
         return ret_dict
+
+
+class SingleArmMobileAlohaDataset(MobileAlohaDataset):
+
+    def __getitem__(self, episode_id):
+        """
+        the episode item: [
+            [frame_ids],  # we use chunk and max_episode_length to index it
+            [obs_tensors],  # wrt frame_ids, (n_cam, 2, 3, 256, 256)
+                obs_tensors[i][:, 0] is RGB, obs_tensors[i][:, 1] is XYZ
+            [action_tensors],  # wrt frame_ids, (1, 8)
+            [camera_dicts],
+            [gripper_tensors],  # wrt frame_ids, (1, 8)
+            [trajectories]  # wrt frame_ids, (N_i, 8)
+        ]
+        """
+        ret_dict = super().__getitem__(episode_id)
+
+        if self._bimanual:
+            ret_dict['action'] = ret_dict['action'][..., [0], :]
+            ret_dict['curr_gripper'] = ret_dict['curr_gripper'][..., [0], :]
+            ret_dict['curr_gripper_history'] = ret_dict['curr_gripper_history'][..., [0], :]
+            ret_dict['trajectory'] = ret_dict['trajectory'][..., [0], :]
+
+        return ret_dict

@@ -11,6 +11,8 @@ import torch
 
 from datasets.dataset_mobaloha import MobileAlohaDataset
 from diffuser_actor.trajectory_optimization.bimanual_diffuser_actor_mobaloha import BiManualDiffuserActor
+from datasets.dataset_mobaloha import SingleArmMobileAlohaDataset
+from diffuser_actor.trajectory_optimization.singlearm_diffuser_actor_mobaloha import SingleArmDiffuserActor
 
 from utils.common_utils import (
     count_parameters, get_gripper_loc_bounds
@@ -47,7 +49,8 @@ class TrainTester(BaseTrainTester):
         ]
 
         # Initialize datasets with arguments
-        train_dataset = MobileAlohaDataset(
+        dataset_class = MobileAlohaDataset if self.args.bimanual else SingleArmMobileAlohaDataset
+        train_dataset = dataset_class(
             root=self.args.dataset,
             instructions=instruction,
             taskvar=taskvar,
@@ -64,9 +67,10 @@ class TrainTester(BaseTrainTester):
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
             relative_action=bool(self.args.relative_action),
-            bimanual=bool(self.args.bimanual)
+            # bimanual=bool(self.args.bimanual)
+            bimanual=True
         )
-        test_dataset = MobileAlohaDataset(
+        test_dataset = dataset_class(
             root=self.args.valset,
             instructions=instruction,
             taskvar=taskvar,
@@ -82,14 +86,16 @@ class TrainTester(BaseTrainTester):
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
             relative_action=bool(self.args.relative_action),
-            bimanual=bool(self.args.bimanual)
+            # bimanual=bool(self.args.bimanual)
+            bimanual=True
         )
         return train_dataset, test_dataset
 
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        _model = BiManualDiffuserActor(
+        model_class = BiManualDiffuserActor if self.args.bimanual else SingleArmDiffuserActor
+        _model = model_class(
             backbone=self.args.backbone,
             image_size=tuple(int(x) for x in self.args.image_size.split(",")),
             embedding_dim=self.args.embedding_dim,
