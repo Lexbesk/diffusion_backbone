@@ -13,7 +13,7 @@ num_history=1
 diffusion_timesteps=50
 B=8
 C=120
-ngpus=2
+ngpus=1
 quaternion_format=xyzw
 bimanual=0
 relative_action=1
@@ -23,8 +23,8 @@ run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolat
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_trajectory_mobaloha_single_arm.py \
-    --tasks close_pen pick_up_plate pouring_into_bowl put_block_into_bowl stack_block \
+    main_trajectory_mobaloha.py \
+    --tasks stack_bowl_single_arm \
     --dataset $dataset \
     --valset $valset \
     --gripper_loc_bounds tasks/mobaloha_multitasks_rel_keypose_location_bounds_singlearm.json \
