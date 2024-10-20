@@ -230,9 +230,9 @@ class SingleArmMobileAlohaDataset(MobileAlohaDataset):
         ret_dict = super().__getitem__(episode_id)
 
         if self._bimanual:
-            ret_dict['action'] = ret_dict['action'][..., [0], :]
-            ret_dict['curr_gripper'] = ret_dict['curr_gripper'][..., [0], :]
-            ret_dict['curr_gripper_history'] = ret_dict['curr_gripper_history'][..., [0], :]
-            ret_dict['trajectory'] = ret_dict['trajectory'][..., [0], :]
+            ret_dict['action'] = ret_dict['action'][..., [1], :]
+            ret_dict['curr_gripper'] = ret_dict['curr_gripper'][..., [1], :]
+            ret_dict['curr_gripper_history'] = ret_dict['curr_gripper_history'][..., [1], :]
+            ret_dict['trajectory'] = ret_dict['trajectory'][..., [1], :]
 
         return ret_dict
