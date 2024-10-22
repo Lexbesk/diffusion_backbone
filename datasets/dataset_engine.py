@@ -240,14 +240,19 @@ class RLBenchDataset(Dataset):
         if self._return_low_lvl_trajectory:
             if len(episode) > 5:
                 traj_items = [
-                    self._interpolate_traj(torch.from_numpy(episode[5][i]))
+                    self._interpolate_traj(
+                        episode[5][i] if isinstance(episode[5][i], torch.Tensor)
+                        else torch.from_numpy(episode[5][i])
+                    )
                     for i in frame_ids
                 ]
             else:
                 traj_items = [
                     self._interpolate_traj(
-                        torch.cat([torch.from_numpy(episode[4][i]),
-                                   torch.from_numpy(episode[2][i])], dim=0)
+                        torch.cat([
+                            torch.from_numpy(episode[4][i]),
+                            torch.from_numpy(episode[2][i])
+                        ], dim=0)
                     ) for i in frame_ids
                 ]
             max_l = max(len(item) for item in traj_items)
