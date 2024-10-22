@@ -2,6 +2,8 @@ main_dir=Actor_18Peract_20Demo_10GNFactortask
 
 dataset=data/peract/Peract_packaged/train
 valset=data/peract/Peract_packaged/val
+dataset=/home/jeszhang/data/Peract_packaged/train
+valset=/home/jeszhang/data/Peract_packaged/val
 
 lr=1e-4
 dense_interpolation=1
@@ -16,6 +18,7 @@ quaternion_format=xyzw
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_trajectory.py \
+    --use_rf 1 \
     --tasks close_jar open_drawer sweep_to_dustpan_of_size meat_off_grill turn_tap slide_block_to_color_target put_item_in_drawer reach_and_drag push_buttons stack_blocks \
     --dataset $dataset \
     --valset $valset \
@@ -28,7 +31,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --use_instruction 1 \
     --rotation_parametrization 6D \
     --diffusion_timesteps $diffusion_timesteps \
-    --val_freq 4000 \
+    --val_freq 2000 \
     --dense_interpolation $dense_interpolation \
     --interpolation_length $interpolation_length \
     --exp_log_dir $main_dir \

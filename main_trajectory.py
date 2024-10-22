@@ -24,6 +24,7 @@ from utils.common_utils import (
 
 from utils.utils_with_mobaloha import to_absolute_action
 
+
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("wrist", "left_shoulder", "right_shoulder")
     image_size: str = "256,256"
@@ -41,6 +42,7 @@ class Arguments(tap.Tap):
     gripper_loc_bounds_buffer: float = 0.04
     eval_only: int = 0
     bimanual: int = 0
+    use_rf: int = 0
 
     # Training and validation datasets
     dataset: Path
@@ -151,6 +153,10 @@ class TrainTester(BaseTrainTester):
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
+        if bool(self.args.use_rf):
+            assert not bool(self.args.bimanual)
+            from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor as DiffuserActor
+            print('Using RF class')
         if bool(self.args.bimanual):
             model_class = BiManualDiffuserActor
         else:
