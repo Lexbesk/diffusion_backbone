@@ -434,18 +434,20 @@ def generate_visualizations(pred, gt, mask, box_size=0.3):
             pred[~mask][:, 0, 0], pred[~mask][:, 0, 1], pred[~mask][:, 0, 2],
             color='red', label='pred-left'
         )
-        ax.scatter3D(
-            pred[~mask][:, 1, 0], pred[~mask][:, 1, 1], pred[~mask][:, 1, 2],
-            color='magenta', label='pred-right'
-        )
+        if(pred[~mask].shape[1]>1):
+            ax.scatter3D(
+                pred[~mask][:, 1, 0], pred[~mask][:, 1, 1], pred[~mask][:, 1, 2],
+                color='magenta', label='pred-right'
+            )
         ax.scatter3D(
             gt[~mask][:, 0, 0], gt[~mask][:, 0, 1], gt[~mask][:, 0, 2],
             color='blue', label='gt-left'
         )
-        ax.scatter3D(
-            gt[~mask][:, 1, 0], gt[~mask][:, 1, 1], gt[~mask][:, 1, 2],
-            color='cyan', label='gt-right'
-        )
+        if(pred[~mask].shape[1]>1):
+            ax.scatter3D(
+                gt[~mask][:, 1, 0], gt[~mask][:, 1, 1], gt[~mask][:, 1, 2],
+                color='cyan', label='gt-right'
+            )
         center = np.reshape(gt[~mask], (-1, gt.shape[-1])).mean(0)
     else:
         raise ValueError("Invalid dimensions")
