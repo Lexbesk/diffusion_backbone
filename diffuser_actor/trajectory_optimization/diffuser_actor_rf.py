@@ -39,9 +39,15 @@ class RFDiffuserActor(DiffuserActor):
 
         self.position_noise_scheduler = RFScheduler(
             num_train_timesteps=diffusion_timesteps,
+            timestep_spacing="linspace",
+            noise_sampler="logit_normal",
+            noise_sampler_config={'mean': 0, 'std': 1},
         )
         self.rotation_noise_scheduler = RFScheduler(
             num_train_timesteps=diffusion_timesteps,
+            timestep_spacing="linspace",
+            noise_sampler="logit_normal",
+            noise_sampler_config={'mean': 0, 'std': 1},
         )
 
     def forward(
@@ -56,13 +62,13 @@ class RFDiffuserActor(DiffuserActor):
     ):
         """
         Arguments:
-            gt_trajectory: (B, trajectory_length, 2, 3+4+X)
+            gt_trajectory: (B, trajectory_length, 3+4+X)
             trajectory_mask: (B, trajectory_length)
             timestep: (B, 1)
             rgb_obs: (B, num_cameras, 3, H, W) in [0, 1]
             pcd_obs: (B, num_cameras, 3, H, W) in world coordinates
             instruction: (B, max_instruction_length, 512)
-            curr_gripper: (B, nhist, 2, 3+4+X)
+            curr_gripper: (B, nhist, 3+4+X)
 
         Note:
             Regardless of rotation parametrization, the input rotation
@@ -113,11 +119,9 @@ class RFDiffuserActor(DiffuserActor):
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
         # Sample a random timestep
-        timesteps = torch.randint(
-            0,
-            self.position_noise_scheduler.config.num_train_timesteps,
-            (len(noise),), device=noise.device
-        ).long()
+        timesteps = self.position_noise_scheduler.sample_noise_step(
+            num_noise=len(noise), device=noise.device
+        )
 
         # Add noise to the clean trajectories
         pos = self.position_noise_scheduler.add_noise(

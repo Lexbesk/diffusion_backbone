@@ -1,4 +1,5 @@
-from typing import Tuple, Union, Optional
+import math
+from typing import Tuple, Union, Optional, Dict, Any
 from dataclasses import dataclass
 
 import torch
@@ -37,8 +38,9 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
     def __init__(
         self,
         num_train_timesteps: int = 1000,
-        timestep_spacing: str = "leading",
-        steps_offset: int = 0,
+        timestep_spacing: str = "linspace",
+        noise_sampler: str = "log_normal",
+        noise_sampler_config: Dict[str, Any] = {},
     ):
         """
         Args:
@@ -47,14 +49,12 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
             timestep_spacing (`str`, defaults to `"leading"`):
                 The way the timesteps should be scaled. Refer to Table 2 of the [Common Diffusion Noise Schedules and
                 Sample Steps are Flawed](https://huggingface.co/papers/2305.08891) for more information.
-            steps_offset (`int`, defaults to 0):
-                An offset added to the inference steps, as required by some model families
         """
         # setable values
         self.num_inference_steps = None
         self.timesteps = torch.from_numpy(
-            np.arange(0, num_train_timesteps)[::-1].copy()
-        )
+            np.linspace(0, 1, num_train_timesteps)[::-1].copy()
+        )[:-1].float()
 
     def set_timesteps(
         self,
@@ -82,29 +82,39 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
 
         # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://arxiv.org/abs/2305.08891
         if self.config.timestep_spacing == "linspace":
-            timesteps = (
-                np.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps)
-                .round()[::-1]
-                .copy()
-                .astype(np.int64)
-            )
-        elif self.config.timestep_spacing == "leading":
-            step_ratio = self.config.num_train_timesteps // self.num_inference_steps
-            # creates integer timesteps by multiplying by ratio
-            # casting to int to avoid issues when num_inference_step is power of 3
-            timesteps = (np.arange(0, num_inference_steps) * step_ratio).round()[::-1].copy().astype(np.int64)
-            timesteps += self.config.steps_offset
-        elif self.config.timestep_spacing == "trailing":
-            step_ratio = self.config.num_train_timesteps / self.num_inference_steps
-            # creates integer timesteps by multiplying by ratio
-            # casting to int to avoid issues when num_inference_step is power of 3
-            timesteps = np.round(np.arange(self.config.num_train_timesteps, 0, -step_ratio)).astype(np.int64)
-            timesteps -= 1
+            timesteps = np.linspace(0, 1, num_inference_steps,
+                                    dtype=np.float32)[::-1][:-1].copy()
         else:
             raise ValueError(
                 f"{self.config.timestep_spacing} is not supported. Please make sure to choose one of 'linspace', 'leading' or 'trailing'."
             )
         self.timesteps = torch.from_numpy(timesteps).to(device)
+
+    def sample_noise_step(self, num_noise, device):
+        if self.config.noise_sampler == "uniform":
+            # Might be buggy, do we need to consider 1?
+            samples = torch.full((num_noise,), 0, dtype=torch.float,
+                                 device=device)
+            timesteps = samples.uniform_()
+        elif self.config.noise_sampler == "logit_normal":
+            samples = torch.full((num_noise,), 0, dtype=torch.float,
+                                 device=device)
+            samples = samples.normal_(
+                mean=self.config.noise_sampler_config['mean'],
+                std=self.config.noise_sampler_config['std']
+            )
+            timesteps = torch.sigmoid(samples)
+        elif self.config.noise_sampler == "stratified":
+            # Stratified sampling
+            b = num_noise
+            quantiles = torch.linspace(0, 1, b + 1).to(device)
+            z = quantiles[:-1] + torch.rand((b,)).to(device) / b
+            z = torch.erfinv(2 * z - 1) * math.sqrt(2)
+            timesteps = torch.sigmoid(z)  # Stratified sigmoid
+        else:
+            raise NotImplementedError(f"sampler: {self.noise_sampler} not implemented")
+
+        return timesteps
 
     def add_noise(
         self,
@@ -115,12 +125,7 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
 
         x = original_samples
         z1 = noise
-        # DDPM uses timesteps from the range of 0, ..., T - 1
-        # RectifiedFlow seems to uses timesteps from the range of
-        # 0, 1/ΔT, 2/ΔT, ..., 1, where `0` denotes clean sample and `1` denotes
-        # pure noise
-        t = (1 + timesteps).to(x.device).float() / self.config.num_train_timesteps
-        assert ((t >= 0) & (t <= 1)).all()
+        t = timesteps
         b = x.size(0)
         
         # Interpolate between Z0 and Z1 (Eqn 1 in the paper)
@@ -135,27 +140,23 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
     def step(
         self,
         model_output: torch.Tensor,
-        timestep: int,
+        timestep: float,
         sample: torch.Tensor,
         generator=None,
         return_dict: bool = True,
     ) -> Union[RFSchedulerOutput, Tuple]:
         zt = sample
         vc = model_output
-
-        # DDPM uses timesteps from the range of 0, ..., T - 1
-        # RectifiedFlow seems to uses timesteps from the range of
-        # 0, 1/ΔT, 2/ΔT, ..., 1, where `0` denotes clean sample and `1` denotes
-        # pure noise
-        dt_to_0 = float(timestep + 1) / self.config.num_train_timesteps
+        dt_to_0 = timestep.to(vc.device)
         pred_original_sample = zt - dt_to_0 * vc # z_0
 
-        prev_t = self.previous_timestep(timestep)
-        if prev_t < 0:
+        curr_ind = (self.timesteps == timestep).flatten().nonzero()[0]
+        if curr_ind == self.timesteps.shape[0] - 1:
             # timestep seems to be the last step
             pred_prev_sample = pred_original_sample
         else:
-            dt = float(timestep - prev_t) / self.config.num_train_timesteps
+            prev_t = self.timesteps[curr_ind + 1].to(vc.device)
+            dt = timestep - prev_t
             pred_prev_sample = zt - dt * vc # z_t'
 
         if not return_dict:
@@ -165,11 +166,3 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
             )
         return RFSchedulerOutput(prev_sample=pred_prev_sample,
                                  pred_original_sample=pred_original_sample)
-
-    def previous_timestep(self, timestep):
-        num_inference_steps = (
-            self.num_inference_steps if self.num_inference_steps else self.config.num_train_timesteps
-        )
-        prev_t = timestep - self.config.num_train_timesteps // num_inference_steps
-
-        return prev_t
