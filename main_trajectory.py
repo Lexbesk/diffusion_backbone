@@ -84,6 +84,7 @@ class Arguments(tap.Tap):
     relative_action: int = 0
     lang_enhanced: int = 0
     fps_subsampling_factor: int = 5
+    point_sampling: str = 'fps'
 
 
 class TrainTester(BaseTrainTester):
@@ -155,9 +156,10 @@ class TrainTester(BaseTrainTester):
         # Initialize model with arguments
         if bool(self.args.use_rf):
             assert not bool(self.args.bimanual)
-            from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor as DiffuserActor
+            from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
             print('Using RF class')
-        if bool(self.args.bimanual):
+            model_class = RFDiffuserActor
+        elif bool(self.args.bimanual):
             model_class = BiManualDiffuserActor
         else:
             model_class = DiffuserActor
@@ -168,6 +170,7 @@ class TrainTester(BaseTrainTester):
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
             use_instruction=bool(self.args.use_instruction),
             fps_subsampling_factor=self.args.fps_subsampling_factor,
+            point_sampling=self.args.point_sampling,
             gripper_loc_bounds=self.args.gripper_loc_bounds,
             rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,

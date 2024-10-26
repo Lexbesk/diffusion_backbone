@@ -33,6 +33,7 @@ class DiffuserActor(nn.Module):
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
                  fps_subsampling_factor=5,
+                 point_sampling='fps',
                  gripper_loc_bounds=None,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
@@ -44,6 +45,7 @@ class DiffuserActor(nn.Module):
         self._rotation_parametrization = rotation_parametrization
         self._quaternion_format = quaternion_format
         self._relative = relative
+        self._point_sampling = point_sampling
         self.use_instruction = use_instruction
         self.encoder = Encoder(
             backbone=backbone,
@@ -105,10 +107,19 @@ class DiffuserActor(nn.Module):
         )
 
         # FPS on visual features (N, B, F) and (B, N, F, 2)
-        fps_feats, fps_pos = self.encoder.run_fps(
-            context_feats.transpose(0, 1),
-            self.encoder.relative_pe_layer(context)
-        )
+        if self._point_sampling == 'fps':
+            fps_feats, fps_pos = self.encoder.run_fps(
+                context_feats.transpose(0, 1),
+                self.encoder.relative_pe_layer(context)
+            )
+        else:
+            fps_feats = context_feats.transpose(0, 1)
+            fps_pos = self.encoder.relative_pe_layer(context).transpose(0, 1)
+            _inds = torch.randperm(
+                len(fps_pos)
+            )[:len(fps_pos) // self.encoder.fps_subsampling_factor]
+            fps_feats = fps_feats[:_inds]
+            fps_pos = fps_pos[:_inds].transpose(0, 1)
         return (
             context_feats, context,  # contextualized visual features
             instr_feats,  # language features

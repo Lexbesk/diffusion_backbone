@@ -18,7 +18,7 @@ quaternion_format=xyzw
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_trajectory.py \
-    --use_rf 1 \
+    --use_rf 0 \
     --tasks close_jar open_drawer sweep_to_dustpan_of_size meat_off_grill turn_tap slide_block_to_color_target put_item_in_drawer reach_and_drag push_buttons stack_blocks \
     --dataset $dataset \
     --valset $valset \
@@ -30,6 +30,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --embedding_dim $C \
     --use_instruction 1 \
     --rotation_parametrization 6D \
+    --point_sampling uniform \
     --diffusion_timesteps $diffusion_timesteps \
     --val_freq 2000 \
     --dense_interpolation $dense_interpolation \
