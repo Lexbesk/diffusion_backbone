@@ -33,28 +33,28 @@ class DiffuserActor(nn.Module):
                  nhist=3,
                  relative=False,
                  lang_enhanced=False,
-                 num_sampling_level=2,
+                 sampling_levels=[0, 0],
                  cropped_num_scene_tokens=[-1, 256]):
         super().__init__()
         self._rotation_parametrization = rotation_parametrization
         self._quaternion_format = quaternion_format
         self._relative = relative
         self._point_sampling = point_sampling
-        self._num_sampling_level = num_sampling_level
+        self._sampling_levels = sampling_levels
         self._cropped_num_scene_tokens = cropped_num_scene_tokens
         self.use_instruction = use_instruction
         self.encoder = Encoder(
             backbone=backbone,
             image_size=image_size,
             embedding_dim=embedding_dim,
-            num_sampling_level=1,
+            num_sampling_level=max(sampling_levels) + 1,
             nhist=nhist,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor
         )
         self.prediction_heads = nn.ModuleList()
         self.noise_schedulers = nn.ModuleList()
-        for _ in range(num_sampling_level):
+        for _ in range(len(sampling_levels)):
             self.prediction_heads.append(
                 DiffusionHead(
                     embedding_dim=embedding_dim,
@@ -100,7 +100,7 @@ class DiffuserActor(nn.Module):
         context_feats_pyramid = []
         context_pcds_pyramid = []
         adaln_gripper_feats_pyramid = []
-        for level in range(self.num_sampling_level):
+        for level in self._sampling_levels:
             _, ncam, _, h, w = rgb_feats_pyramid[level].shape
             context_feats = einops.rearrange(
                 rgb_feats_pyramid[level],
@@ -135,7 +135,7 @@ class DiffuserActor(nn.Module):
             instr_feats,  # language features
             adaln_gripper_feats_pyramid,  # gripper history features
         )
-    
+
     def _prepare_fixed_inputs(self, fixed_inputs, anchor, sampling_level):
         """Select the fixed inputs for the current sampling level.
         Also, crop the scene tokens based on the input trajectory position.
@@ -179,7 +179,7 @@ class DiffuserActor(nn.Module):
         )
 
         return processed_fixed_inputs
-    
+
     def _crop_scene(self, context_feats, context, anchor, sampling_level):
         """Select the fixed inputs for the current sampling level.
         Also, crop the scene tokens based on the input trajectory position.
@@ -215,7 +215,8 @@ class DiffuserActor(nn.Module):
         
         return context_feats, context
 
-    def _policy_forward_pass(self, trajectory, timestep, fixed_inputs):
+    def _policy_forward_pass(self, trajectory, timestep, fixed_inputs,
+                             sampling_level):
         # Parse inputs
         (
             context_feats,
@@ -229,7 +230,7 @@ class DiffuserActor(nn.Module):
         fps_feats = context_feats.transpose(0, 1)
         fps_pos = self.encoder.relative_pe_layer(context)
 
-        return self.prediction_head(
+        return self.prediction_heads[sampling_level](
             trajectory,
             timestep,
             context_feats=context_feats,
@@ -257,7 +258,8 @@ class DiffuserActor(nn.Module):
             out = self._policy_forward_pass(
                 trajectory,
                 t * torch.ones(len(trajectory)).to(trajectory.device).long(),
-                fixed_inputs
+                fixed_inputs,
+                sampling_level
             )
             out = out[-1]  # keep only last layer's output
             trajectory = noise_scheduler.step(
@@ -299,7 +301,7 @@ class DiffuserActor(nn.Module):
             dtype=torch.float,
             device=rgb_obs.device
         )
-        for level in range(self._num_sampling_level):
+        for level in range(len(self._sampling_levels)):
             selected_fixed_inputs = self._prepare_fixed_inputs(
                 fixed_inputs, trajectory, level
             )
@@ -449,7 +451,7 @@ class DiffuserActor(nn.Module):
         init_trajectory = torch.randn(
             gt_trajectory.shape, device=gt_trajectory.device
         )
-        for level in range(self._num_sampling_level):
+        for level in range(len(self._sampling_levels)):
             # Select fixed inputs for the current level
             selected_fixed_inputs = self._prepare_fixed_inputs(
                 fixed_inputs, gt_trajectory, level
@@ -462,7 +464,7 @@ class DiffuserActor(nn.Module):
             )
 
             # Add noise to the clean trajectories
-            noisy_trajectory = self.position_noise_scheduler.add_noise(
+            noisy_trajectory = noise_scheduler.add_noise(
                 gt_trajectory[..., :9], init_trajectory[..., :9],
                 timesteps
             )
