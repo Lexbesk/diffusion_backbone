@@ -50,8 +50,8 @@ class Encoder(nn.Module):
             # at 1/4 resolution (32x32)
             # Fine RGB features are the 1st layer of the feature pyramid
             # at 1/2 resolution (64x64)
-            self.coarse_feature_map = ['res2', 'res1', 'res1', 'res1']
-            self.downscaling_factor_pyramid = [4, 2, 2, 2]
+            self.coarse_feature_map = ['res4', 'res3', 'res2', 'res1']
+            self.downscaling_factor_pyramid = [16, 8, 4, 2]
         elif self.image_size == (256, 256):
             # Coarse RGB features are the 3rd layer of the feature pyramid
             # at 1/8 resolution (32x32)
