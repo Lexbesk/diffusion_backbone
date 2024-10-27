@@ -118,8 +118,8 @@ class DiffuserActor(nn.Module):
             _inds = torch.randperm(
                 len(fps_pos)
             )[:len(fps_pos) // self.encoder.fps_subsampling_factor]
-            fps_feats = fps_feats[:_inds]
-            fps_pos = fps_pos[:_inds].transpose(0, 1)
+            fps_feats = fps_feats[_inds]
+            fps_pos = fps_pos[_inds].transpose(0, 1)
         return (
             context_feats, context,  # contextualized visual features
             instr_feats,  # language features
