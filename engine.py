@@ -244,7 +244,7 @@ class BaseTrainTester:
             "optimizer": optimizer.state_dict(),
             "iter": step_id + 1,
             "best_loss": best_loss
-        }, self.args.log_dir / "{}steps.pth".format( str(step_id + 1)) )
+        }, self.args.log_dir / "last.pth")
         return best_loss
 
 

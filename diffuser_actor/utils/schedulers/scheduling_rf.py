@@ -39,7 +39,7 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
         self,
         num_train_timesteps: int = 1000,
         timestep_spacing: str = "linspace",
-        noise_sampler: str = "log_normal",
+        noise_sampler: str = "logit_normal",
         noise_sampler_config: Dict[str, Any] = {},
     ):
         """
@@ -166,3 +166,27 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
             )
         return RFSchedulerOutput(prev_sample=pred_prev_sample,
                                  pred_original_sample=pred_original_sample)
+
+    def batch_original_step(
+        self,
+        model_output: torch.Tensor,
+        timestep: torch.Tensor,
+        sample: torch.Tensor
+    ) -> torch.Tensor:
+        """This function always returns the predicted original sample,
+        since during training, the RF noise scheduler samples dense
+        continuous diffusion timesteps.
+
+        Args:
+            model_output: A tensor of shape [batch_size, ...]
+            timestep: An integer tensor of shape [batch_size]
+            sample: A tensor of shape [batch_size, ...]
+        """
+        bs = timestep.shape[0]
+        zt = sample
+        vc = model_output
+        dt_to_0 = timestep.to(vc.device)
+        dt_to_0 = dt_to_0.reshape([bs] + [1] * (sample.ndim - 1))
+        pred_original_sample = zt - dt_to_0 * vc # z_0
+
+        return pred_original_sample

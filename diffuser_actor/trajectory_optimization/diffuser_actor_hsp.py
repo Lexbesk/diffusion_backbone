@@ -53,8 +53,8 @@ class DiffuserActor(nn.Module):
             fps_subsampling_factor=fps_subsampling_factor
         )
         self.prediction_heads = nn.ModuleList()
-        self.noise_schedulers = nn.ModuleList()
-        for _ in range(len(sampling_levels)):
+        self.noise_schedulers = []
+        for level in range(len(sampling_levels)):
             self.prediction_heads.append(
                 DiffusionHead(
                     embedding_dim=embedding_dim,
@@ -66,7 +66,7 @@ class DiffuserActor(nn.Module):
             )
             self.noise_schedulers.append(
                 RFScheduler(
-                    num_train_timesteps=diffusion_timesteps,
+                    num_train_timesteps=diffusion_timesteps[level],
                     timestep_spacing="linspace",
                     noise_sampler="logit_normal",
                     noise_sampler_config={'mean': 0, 'std': 1},
@@ -122,7 +122,11 @@ class DiffuserActor(nn.Module):
             )
             
             context_feats = einops.rearrange(
-                context_feats, "b (ncam h w ) c -> b ncam h w c",
+                context_feats, "b (ncam h w) c -> b ncam h w c",
+                ncam=ncam, h=h, w=w
+            )
+            context_pcds = einops.rearrange(
+                context_pcds, "b (ncam h w) c -> b ncam h w c",
                 ncam=ncam, h=h, w=w
             )
 
@@ -215,15 +219,14 @@ class DiffuserActor(nn.Module):
         
         return context_feats, context
 
-    def _policy_forward_pass(self, trajectory, timestep, fixed_inputs,
-                             sampling_level):
+    def _policy_forward_pass(self, trajectory, timestep, fixed_inputs):
         # Parse inputs
         (
             context_feats,
             context,
             instr_feats,
             adaln_gripper_feats,
-            _
+            sampling_level
         ) = fixed_inputs
 
         # Legacy operation, needs to remove
@@ -247,7 +250,7 @@ class DiffuserActor(nn.Module):
         # Setting the inference steps for the noise scehduler
         noise_scheduler = self.noise_schedulers[sampling_level]
         n_steps = self.n_steps[sampling_level]
-        noise_scheduler[sampling_level].set_timesteps(n_steps)
+        noise_scheduler.set_timesteps(n_steps)
 
         # Noisy condition data
         trajectory = init_trajectory
@@ -259,7 +262,6 @@ class DiffuserActor(nn.Module):
                 trajectory,
                 t * torch.ones(len(trajectory)).to(trajectory.device).long(),
                 fixed_inputs,
-                sampling_level
             )
             out = out[-1]  # keep only last layer's output
             trajectory = noise_scheduler.step(
@@ -308,7 +310,7 @@ class DiffuserActor(nn.Module):
 
             # Sample
             trajectory = self._conditional_sample(
-                trajectory, selected_fixed_inputs
+                trajectory[..., :9], selected_fixed_inputs
             )
 
         # Normalize quaternion
@@ -487,8 +489,8 @@ class DiffuserActor(nn.Module):
 
             # Set the second distribution of the next sampling level to the
             # predicted original sample
-            init_trajectory = noise_scheduler.batch_step(
-                pred[-1][..., :9], timesteps, init_trajectory[..., :9]
-            ).pred_original_sample.detach()
+            init_trajectory = noise_scheduler.batch_original_step(
+                pred[-1][..., :9], timesteps, noisy_trajectory[..., :9]
+            ).detach()
 
         return total_loss
