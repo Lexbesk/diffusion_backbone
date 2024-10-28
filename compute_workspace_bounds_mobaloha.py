@@ -1,4 +1,4 @@
-++"""
+"""
 This script computes the minimum and maximum gripper locations for
 each task in the training set.
 """
@@ -36,8 +36,8 @@ class Arguments(tap.Tap):
         # "pouring_into_bowl",
         # "put_block_into_bowl",
         # "stack_block",
-        "stack_bowl_single_arm",
-        "stack_bowl_dual_arm"        
+        "stack_bowl",
+        # "stack_bowl_dual_arm"        
     )
     variations: Tuple[int, ...] = range(0, 1)
     mode: str = "aggregate"  # channelwise, aggregate

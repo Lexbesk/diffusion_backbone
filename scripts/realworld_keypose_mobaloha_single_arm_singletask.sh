@@ -1,10 +1,7 @@
 main_dir=BiManualActor_MobileAloha
 
-# dataset=/home/tsungwek/data/mobile_aloha/train
-# valset=/home/tsungwek/data/mobile_aloha/eval
-dataset=./data/processed_bimanual_keypose/train
-valset=./data/processed_bimanual_keypose/eval
-# valset=./data/processed_bimanual_keypose/debug
+dataset=/home/tsungwek/data/mobile_aloha
+valset=/home/tsungwek/data/mobile_aloha
 
 lr=1e-4
 wd=5e-3
@@ -20,16 +17,16 @@ bimanual=1
 relative_action=1
 gripper_loc_bounds_buffer=0.08
 keypose_only=1
-
-run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix-cleanbg-KP$keypose_only-1028
+run_log_dir=diffusion_singletask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-R$relative_action-rgbfix-cleanbg-KP$keypose_only-1018
 
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_trajectory_mobaloha.py \
+    mobaloha.py \
     --tasks stack_bowl \
+    --current_task stack_bowl \
     --dataset $dataset \
     --valset $valset \
-    --gripper_loc_bounds tasks/mobaloha_stack_bowl_rel_keypose_location_bounds.json \
+    --gripper_loc_bounds tasks/mobaloha_single_tasks_rel_keypose_location_bounds_singlearm.json \
     --gripper_loc_bounds_buffer $gripper_loc_bounds_buffer \
     --num_workers 4 \
     --train_iters 200000 \
@@ -39,16 +36,15 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --rotation_parametrization 6D \
     --diffusion_timesteps $diffusion_timesteps \
     --val_freq 4000 \
-    --save_freq 10000 \
     --val_iters 8 \
     --dense_interpolation $dense_interpolation \
     --interpolation_length $interpolation_length \
     --exp_log_dir $main_dir \
     --batch_size $B \
-    --batch_size_val 2 \
+    --batch_size_val 14 \
     --cache_size 0 \
     --cache_size_val 0 \
-    --keypose_only $keypose_only \
+    --keypose_only 0 \
     --variations {0..0} \
     --lr $lr\
     --wd $wd \
@@ -56,9 +52,11 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --num_history $num_history \
     --cameras front\
     --max_episodes_per_task -1 \
-    --max_episode_length 100 \
+    --max_episode_length 20 \
     --relative_action $relative_action \
     --quaternion_format $quaternion_format \
+    --eval_only 1 \
+    --keypose_only $keypose_only \
+    --checkpoint train_logs/$main_dir/$run_log_dir/200000steps.pth \
     --run_log_dir ${run_log_dir}
-    # --eval_only 1 \
-    # --checkpoint train_logs/$main_dir/$run_log_dir/200000steps.pth \
+

@@ -10,6 +10,8 @@ import torch
 
 from datasets.dataset_mobaloha import MobileAlohaDataset
 from diffuser_actor.trajectory_optimization.bimanual_diffuser_actor_mobaloha import BiManualDiffuserActor
+from datasets.dataset_mobaloha import SingleArmMobileAlohaDataset
+from diffuser_actor.trajectory_optimization.singlearm_diffuser_actor_mobaloha import SingleArmDiffuserActor
 
 from utils.common_utils import (
     load_instructions, count_parameters, get_gripper_loc_bounds
@@ -46,11 +48,12 @@ class Tester(BaseTrainTester):
         # print("self.args.instructions: ", self.args.instructions )
         # print("self.args.tasks: ", self.args.tasks)
         # print("self.args.variations: ", self.args.variations)
-
+        self.instructions = None
         # Todo, make instruction a task indexed dictionary
-        self.instructions = load_instructions(
-            self.args.instructions,
-        )
+        if(self.args.use_instruction):
+            self.instruction = load_instructions(
+                self.args.instructions,
+            )
         # print("instructions: ", self.instructions)
 
         self.instr_ind = {
@@ -92,12 +95,16 @@ class Tester(BaseTrainTester):
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        _model = BiManualDiffuserActor(
+        print("self.args.bimanual: ", self.args.bimanual )
+        print("self.args.use_instruction: ", self.args.use_instruction)
+        model_class = BiManualDiffuserActor if self.args.bimanual else SingleArmDiffuserActor
+        _model = model_class(
             backbone=self.args.backbone,
             image_size=tuple(int(x) for x in self.args.image_size.split(",")),
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
             use_instruction=bool(self.args.use_instruction),
+
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             gripper_loc_bounds=self.args.gripper_loc_bounds,
             rotation_parametrization=self.args.rotation_parametrization,
@@ -107,6 +114,7 @@ class Tester(BaseTrainTester):
             relative=bool(self.args.relative_action),
             lang_enhanced=bool(self.args.lang_enhanced)
         )
+
         print("Model parameters:", count_parameters(_model))
         return _model
 
@@ -166,7 +174,7 @@ class Tester(BaseTrainTester):
         instr = torch.zeros((1, 53, 512))
         # print("self.instructions: ", len(self.instructions))
         # Sample one instruction feature
-        if task != "None":
+        if task != "None" and self.instructions:
             instr = self.instructions[self.instr_ind[task]]
             instr = instr[None,:]
         # print("instr: ", instr.shape)
@@ -175,7 +183,10 @@ class Tester(BaseTrainTester):
         instr = instr.to(torch.float32)
         instr = instr.to(device)
 
-        traj_mask = torch.zeros( (1, self.args.interpolation_length - 1) ).to(torch.float32)
+        if self.args.keypose_only:
+            traj_mask = torch.zeros((1, 1)).to(torch.float32)
+        else:
+            traj_mask = torch.zeros( (1, self.args.interpolation_length - 1) ).to(torch.float32)
         traj_mask = traj_mask.to(device)      
 
         # gt_trajectory = torch.zeros( (1, self.args.interpolation_length) )

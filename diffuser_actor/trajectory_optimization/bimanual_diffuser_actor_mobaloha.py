@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -130,6 +131,9 @@ class BiManualDiffuserActor(DiffuserActor):
         cond_mask = cond_mask.bool()
 
         # Sample
+        # <need to remove>
+        torch.manual_seed(0)
+        np.random.seed(0)
         trajectory = self.conditional_sample(
             cond_data,
             cond_mask,
