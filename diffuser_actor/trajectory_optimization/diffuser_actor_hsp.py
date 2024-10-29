@@ -493,4 +493,12 @@ class DiffuserActor(nn.Module):
                 pred[-1][..., :9], timesteps, noisy_trajectory[..., :9]
             ).detach()
 
+            # mix with the ground-truth
+            mix_ratio = 0.6 * timesteps.float()
+            init_trajectory = (
+                gt_trajectory * mix_ratio.view(-1, 1, 1)
+                + init_trajectory * (1 - mix_ratio).view(-1, 1, 1)
+            )
+            init_trajectory = init_trajectory + torch.randn_like(init_trajectory).mul_(0.05)
+
         return total_loss

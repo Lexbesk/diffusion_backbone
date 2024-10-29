@@ -57,8 +57,8 @@ class Encoder(nn.Module):
             # at 1/8 resolution (32x32)
             # Fine RGB features are the 1st layer of the feature pyramid
             # at 1/2 resolution (128x128)
-            self.feature_map_pyramid = ['res3', 'res1', 'res1', 'res1']
-            self.downscaling_factor_pyramid = [8, 2, 2, 2]
+            self.feature_map_pyramid = ['res3', 'res2', 'res1', 'res1']
+            self.downscaling_factor_pyramid = [8, 4, 2, 2]
 
         # 3D relative positional embeddings
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)

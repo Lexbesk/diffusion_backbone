@@ -4,7 +4,7 @@ import io
 import os
 from pathlib import Path
 import random
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union, List
 
 import cv2
 from matplotlib import pyplot as plt
@@ -24,6 +24,13 @@ from utils.common_utils import (
 
 from utils.utils_with_mobaloha import to_absolute_action
 
+
+def to_number_or_list(string: str) -> Union[int, List[int]]:
+    return (int(string) if ',' not in string
+            else [int(s) for s in string.split(',')])
+
+def to_list(string: str) -> List[int]:
+    return [int(s) for s in string.split(',')]
 
 class Arguments(tap.Tap):
     cameras: Tuple[str, ...] = ("wrist", "left_shoulder", "right_shoulder")
@@ -78,13 +85,22 @@ class Arguments(tap.Tap):
     use_instruction: int = 0
     rotation_parametrization: str = 'quat'
     quaternion_format: str = 'wxyz'
-    diffusion_timesteps: int = 100
+    diffusion_timesteps: Union[int, List[int]] = 100
     keypose_only: int = 0
     num_history: int = 0
     relative_action: int = 0
     lang_enhanced: int = 0
     fps_subsampling_factor: int = 5
     point_sampling: str = 'fps'
+
+    # Parameters for HSP
+    sampling_levels: List[int] = [0, 1]
+    cropped_num_scene_tokens: List[int] = [-1, 256]
+
+    def configure(self):
+        self.add_argument('--diffusion_timesteps', type=to_number_or_list)
+        self.add_argument('--sampling_levels', type=to_list)
+        self.add_argument('--cropped_num_scene_tokens', type=to_list)
 
 
 class TrainTester(BaseTrainTester):
@@ -156,9 +172,12 @@ class TrainTester(BaseTrainTester):
         # Initialize model with arguments
         if bool(self.args.use_rf):
             assert not bool(self.args.bimanual)
-            from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
-            print('Using RF class')
+            #from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
+            #print('Using RF class')
+            #model_class = RFDiffuserActor
+            from diffuser_actor.trajectory_optimization.diffuser_actor_hsp import DiffuserActor
             model_class = RFDiffuserActor
+            print('Using HSP class')
         elif bool(self.args.bimanual):
             model_class = BiManualDiffuserActor
         else:
@@ -177,7 +196,9 @@ class TrainTester(BaseTrainTester):
             diffusion_timesteps=self.args.diffusion_timesteps,
             nhist=self.args.num_history,
             relative=bool(self.args.relative_action),
-            lang_enhanced=bool(self.args.lang_enhanced)
+            lang_enhanced=bool(self.args.lang_enhanced),
+            sampling_levels=self.args.sampling_levels,
+            cropped_num_scene_tokens=self.args.cropped_num_scene_tokens
         )
         print("Model parameters:", count_parameters(_model))
 
