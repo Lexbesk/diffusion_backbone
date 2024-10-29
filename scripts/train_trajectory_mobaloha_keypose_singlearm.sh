@@ -27,7 +27,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --tasks stack_bowl_single_arm \
     --dataset $dataset \
     --valset $valset \
-    --gripper_loc_bounds tasks/mobaloha_multitasks_rel_keypose_location_bounds_singlearm.json \
+    --gripper_loc_bounds tasks/mobaloha_single_tasks_rel_keypose_location_bounds_singlearm.json \
     --gripper_loc_bounds_buffer $gripper_loc_bounds_buffer \
     --num_workers 4 \
     --train_iters 200000 \

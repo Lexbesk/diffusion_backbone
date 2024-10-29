@@ -29,6 +29,7 @@ from numpy.linalg import inv
 # from lib_cloud_conversion_between_Open3D_and_ROS import convertCloudFromRosToOpen3d
 from scipy.spatial.transform import Rotation
 import torch
+from numpy import linalg as LA
 np.set_printoptions(suppress=True,precision=4)
 
 def get_transform2( trans_7D):
@@ -101,12 +102,23 @@ def main():
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
     # file_dir = "test39"
-    file_dir = "test"
+    data_idx = 39
+    file_dir = "{}/{}_real_obj".format(data_idx, data_idx)
     # file_dir = "39_rh_fixed/1"
-    length = 40
+    length = 8
+    left_diff = []
+    right_diff = []
+    right = []
+    left = []
+
+    gt_file_dir = "{}/{}_vanila".format(data_idx, data_idx)
+
+    # debug_steps = 10
     for idx in range(length):
         print("idx: ", idx)
         sample = np.load("./{}/step_{}.npy".format(file_dir, idx) , allow_pickle = True)
+        gt_sample = np.load("./{}/step_{}.npy".format(gt_file_dir, idx) , allow_pickle = True)
+        gt_sample = gt_sample.item()
         # print("sample: ", sample)
         # print(sample.item())
         sample = sample.item()
@@ -119,7 +131,8 @@ def main():
         xyz = sample["xyz"][0][0].numpy()
         xyz = np.transpose(xyz, (1, 2, 0) ).astype(float) # (0,1)
         action = sample['action']
-        # gt = sample['gt']
+        gt = gt_sample['gt']
+        print("gt: ", gt.shape)
 
         # print("action: ", action.shape)
         curr_gripper = sample['curr_gripper'][0,0]
@@ -132,11 +145,12 @@ def main():
         pcd.points = o3d.utility.Vector3dVector( pcd_xyz )
         # visualize_pcd(pcd)
 
-        right = []
-        left = []
+
         
         curr_pose = []
-        # print("curr_gripper: ", get_transform2(curr_gripper[0,0:7]))
+        print("curr_left_gripper: ", get_transform2(curr_gripper[0,0:7]))
+        print("curr_right_gripper: ", get_transform2(curr_gripper[1,0:7]))
+
         curr_pose.append( get_transform2(curr_gripper[0,0:7]) )
         curr_pose.append( get_transform2(curr_gripper[1,0:7]) )
 
@@ -148,35 +162,37 @@ def main():
 
         # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
         # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
+        right = []
+        left = []
 
         for action_idx in range(trajectory.shape[0]):
-            # left.append( get_transform2( gt[action_idx,0,0:7]))
+            left.append( get_transform2( gt[-1,0,0:7]))
             left.append( get_transform2( action[action_idx,0,0:7]))
-            # print("left gripper: ", int( action[action_idx,0,7] > 0.1) )
-            # diff = np.abs( action[action_idx,0,0:3] - gt[action_idx,0,0:3])
-            # # if(np.max(diff) > 0.005):
-            # print("left step idx: ", action_idx)
-            # print("gt: ", gt[action_idx,0,0:3], " action: ", action[action_idx,0,0:3])
-            # print("diff: ", diff)
-        for action_idx in range(trajectory.shape[0]):
-            # right.append( get_transform2( gt[action_idx,1,0:7]))
-            right.append( get_transform2( action[action_idx,1,0:7]))
-            # print("right gripper: ", int( action[action_idx,1,7] > 0.1 ) )
-            # diff = np.abs( action[action_idx,1,0:3] - gt[action_idx,1,0:3])
-            # # if(np.max(diff) > 0.005)
-            # print("right step idx: ", action_idx)
-            # print("gt: ", gt[action_idx,1,0:3], " action: ", action[action_idx,1,0:3])
-            # print("diff: ", diff)
-            
+            print("left gripper: ", int( action[action_idx,0,7] > 0.1) )
+            diff = np.abs( action[action_idx,0,0:3] - gt[-1,0,0:3])
+            # if(np.max(diff) > 0.005):
+            print("left step idx: ", action_idx)
+            print("gt: ", gt[-1,0,0:3], " action: ", action[action_idx,0,0:3])
+            print("diff: ", LA.norm(diff) )
+            left_diff.append( round( LA.norm(diff), 4) )
 
-        # for action_idx in range(trajectory.shape[0]):
-        #     left.append( get_transform2( trajectory[action_idx,0,0:7]))
-        # for action_idx in range(trajectory.shape[0]):
-        #     right.append( get_transform2( trajectory[action_idx,1,0:7]))
-        #     print("right ", action_idx, " ", trajectory[action_idx,1,0:3])
-        #     print("gt ", action_idx, " ", gt[action_idx,1,0:3])
-        #     print("diff: ", np.abs( trajectory[action_idx,1,0:3] - gt[action_idx,1,0:3]))
-        visualize_pcd(pcd, left, right, curr_pose)
+        for action_idx in range(trajectory.shape[0]):
+            right.append( get_transform2( gt[-1,1,0:7]))
+            right.append( get_transform2( action[action_idx,1,0:7]))
+            print("right gripper: ", int( action[action_idx,1,7] > 0.1 ) )
+            diff = np.abs( action[action_idx,1,0:3] - gt[-1,1,0:3])
+            # if(np.max(diff) > 0.005)
+            print("right step idx: ", action_idx)
+            print("gt: ", gt[-1,1,0:3], " action: ", action[action_idx,1,0:3])
+            print("diff: ", LA.norm(diff) )
+            right_diff.append( round( LA.norm(diff), 4)  )
+
+        visualize_pcd(pcd, left, right)
+    print("diff:")
+    for idx in range(length):
+        print( round( left_diff[idx]*100,2) , "/", round( right_diff[idx]*100,2) )
+    # print("right_diff: ", right_diff)
+    
 
 
 if __name__ == "__main__":

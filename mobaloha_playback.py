@@ -72,7 +72,9 @@ class bi_3dda_node(Node):
         # self.sample = self.sample.item()
 
         # self.file_dir2 = "/ws/data/mobile_aloha_debug/20241006_plate_keypose+0/ep41.npy"
-        self.file_dir2 = "/ws/analogical_manipulation/data/processed_bimanual_keypose/pick_up_plate+0/ep1.npy"
+        # self.file_dir2 = "/ws/bimanual/data/processed_singlearm_keypose/eval/stack_bowl_single_arm+0/ep41.npy"
+        # self.file_dir2 = "/ws/bimanual/data/processed_bimanual_keypose/debug/stack_bowl+0/ep39.npy"
+        self.file_dir2 = "/ws/bimanual/39/ep39_realworld.npy"
 
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()
@@ -242,12 +244,12 @@ class bi_3dda_node(Node):
         # length = self.sample["rgbs"].shape[0]
         length = len(self.episode[0])
 
-        print("in callback")
-        if(self.frame_idx >= length):
+        
+        if(self.frame_idx >= 1):
             # self.episode.append(self.inference_action)
             np.save('debug_result', self.inference_action)
             return
-        
+        print("in callback")
         start = time.time()
  
         # instr = torch.zeros((1, 53, 512))
@@ -275,7 +277,7 @@ class bi_3dda_node(Node):
         curr_gripper = curr_gripper[None, None, :,:]
         action2 = self.network.run( rgbs, pcds, curr_gripper, task)
         print("action2: ", action2.shape)
-        # print("diff", np.abs(action - action2))
+
 
         current_data = {}
         current_data['rgb'] = rgbs
@@ -283,7 +285,11 @@ class bi_3dda_node(Node):
         current_data['curr_gripper'] = curr_gripper
         current_data['action'] = action2
 
-        current_data['gt'] = self.episode[5][ self.frame_idx ].numpy()       
+        current_data['gt'] = self.episode[5][ self.frame_idx ].numpy()
+        print("current_data['gt']: ", current_data['gt'].shape )
+        # print("action val: ", action2)
+        print("diff", np.abs(current_data['gt'][-1] - action2))
+        # print("-------------")
         np.save('step_{}'.format(self.frame_idx), current_data, allow_pickle = True)
         # self.step_idx += 1
 

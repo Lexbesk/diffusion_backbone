@@ -29,6 +29,7 @@ from numpy.linalg import inv
 # from lib_cloud_conversion_between_Open3D_and_ROS import convertCloudFromRosToOpen3d
 from scipy.spatial.transform import Rotation
 import torch
+from numpy import linalg as LA
 np.set_printoptions(suppress=True,precision=4)
 
 def get_transform2( trans_7D):
@@ -101,82 +102,37 @@ def main():
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
     # file_dir = "test39"
-    file_dir = "test"
+    data_idx = 39
+    task_list = [ "bound", "plane", "realworld", "env_rgb_01", "env_rgb_02", "env_rgb_03", "obj_rgb_01", "obj_rgb_02", "obj_rgb_03", "real_obj", "real_env"]
+    # task_list = [ "bound"]
+    # task_str = "obj_rgb_01"
+    
     # file_dir = "39_rh_fixed/1"
-    length = 40
-    for idx in range(length):
-        print("idx: ", idx)
-        sample = np.load("./{}/step_{}.npy".format(file_dir, idx) , allow_pickle = True)
-        # print("sample: ", sample)
-        # print(sample.item())
-        sample = sample.item()
-        rgb = sample["rgb"]
-        # print("rgb: ", rgb.shape)
-        rgb = rgb[0,0].numpy()
-        rgb = np.transpose(rgb, (1, 2, 0) ).astype(float) # (0,1)
-            
-        
-        xyz = sample["xyz"][0][0].numpy()
-        xyz = np.transpose(xyz, (1, 2, 0) ).astype(float) # (0,1)
-        action = sample['action']
-        # gt = sample['gt']
+    # length = 8
+    left_diff = []
+    right_diff = []
+    right = []
+    left = []
 
-        # print("action: ", action.shape)
-        curr_gripper = sample['curr_gripper'][0,0]
+    # sample = sample.item()
+    gt_file_dir = "{}/{}_vanila_rgb_embedding".format(data_idx, data_idx)
+    gt_emb = np.load("./{}.npy".format(gt_file_dir) , allow_pickle = True)[0].reshape(-1,)
 
-        pcd_rgb = rgb.reshape(-1, 3)
-        pcd_xyz = xyz.reshape(-1, 3)
+    for task_str in task_list:
+        file_dir = "{}/{}_{}_rgb_embedding".format(data_idx, data_idx, task_str)
+        emb = np.load("./{}.npy".format(file_dir) , allow_pickle = True)[0].reshape(-1,)
+        print("task_str: ", task_str)
 
-        pcd = o3d.geometry.PointCloud()
-        pcd.colors = o3d.utility.Vector3dVector( pcd_rgb )
-        pcd.points = o3d.utility.Vector3dVector( pcd_xyz )
-        # visualize_pcd(pcd)
-
-        right = []
-        left = []
-        
-        curr_pose = []
-        # print("curr_gripper: ", get_transform2(curr_gripper[0,0:7]))
-        curr_pose.append( get_transform2(curr_gripper[0,0:7]) )
-        curr_pose.append( get_transform2(curr_gripper[1,0:7]) )
-
-        print("action: ", action.shape)
-        trajectory = action
-        print("trajectory: ", trajectory.shape)
-        # left.append( get_transform2( trajectory[-1,0,0:7]))
-        # right.append( get_transform2( trajectory[-1,1,0:7]))
-
-        # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
-        # print("last goal: ", get_transform2( trajectory[-1,0,0:7]))
-
-        for action_idx in range(trajectory.shape[0]):
-            # left.append( get_transform2( gt[action_idx,0,0:7]))
-            left.append( get_transform2( action[action_idx,0,0:7]))
-            # print("left gripper: ", int( action[action_idx,0,7] > 0.1) )
-            # diff = np.abs( action[action_idx,0,0:3] - gt[action_idx,0,0:3])
-            # # if(np.max(diff) > 0.005):
-            # print("left step idx: ", action_idx)
-            # print("gt: ", gt[action_idx,0,0:3], " action: ", action[action_idx,0,0:3])
-            # print("diff: ", diff)
-        for action_idx in range(trajectory.shape[0]):
-            # right.append( get_transform2( gt[action_idx,1,0:7]))
-            right.append( get_transform2( action[action_idx,1,0:7]))
-            # print("right gripper: ", int( action[action_idx,1,7] > 0.1 ) )
-            # diff = np.abs( action[action_idx,1,0:3] - gt[action_idx,1,0:3])
-            # # if(np.max(diff) > 0.005)
-            # print("right step idx: ", action_idx)
-            # print("gt: ", gt[action_idx,1,0:3], " action: ", action[action_idx,1,0:3])
-            # print("diff: ", diff)
-            
-
-        # for action_idx in range(trajectory.shape[0]):
-        #     left.append( get_transform2( trajectory[action_idx,0,0:7]))
-        # for action_idx in range(trajectory.shape[0]):
-        #     right.append( get_transform2( trajectory[action_idx,1,0:7]))
-        #     print("right ", action_idx, " ", trajectory[action_idx,1,0:3])
-        #     print("gt ", action_idx, " ", gt[action_idx,1,0:3])
-        #     print("diff: ", np.abs( trajectory[action_idx,1,0:3] - gt[action_idx,1,0:3]))
-        visualize_pcd(pcd, left, right, curr_pose)
+        diff = np.abs( gt_emb - emb )
+        print("whole L2: ", LA.norm( diff, 2) )
+        sort_diff =  -np.sort( -diff )
+        # print("whole L2: ", LA.norm( sort_diff, 2) )
+        # print("sort_diff: ", sort_diff)
+        for percent in [1, 2, 4, 8, 16, 32, 64]:
+            top_elelments = sort_diff.shape[0] // 100 * percent
+            print("{}% L2: ".format(percent), LA.norm( sort_diff[:top_elelments], 2) )
+        print()
+    
 
 
 if __name__ == "__main__":

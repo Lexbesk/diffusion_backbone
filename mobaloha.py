@@ -116,7 +116,7 @@ class bi_3dda_node(Node):
             [0., 0., 1.0]
         ])
 
-        self.bound_box = np.array( [ [0.05, 0.55], [ -0.5 , 0.5], [ -0.3 , 0.6] ] )
+        self.bound_box = np.array( [ [0.05, 0.65], [ -0.5 , 0.5], [ -0.1 , 0.6] ] )
         # self.left_bias = self.get_transform( [ -0.11, 0.015, 0.010 ,0., 0., 0., 1.] )
         # self.right_bias = self.get_transform( [-0.06, 0.005, -0.005, 0., 0., 0., 1.] )
         
@@ -393,6 +393,7 @@ class bi_3dda_node(Node):
                                         self.resized_intrinsic_o3d.intrinsic_matrix,
                                         self.resized_image_size 
                                         )
+        print("rgb: ", rgb.shape)
         # print("rgb: ", type(rgb))
    
         # print("image_time: ", bgr.header.stamp)
@@ -414,6 +415,22 @@ class bi_3dda_node(Node):
         # visualize_pcd(all_valid_resized_pcd)
         xyz = self.xyz_from_depth(depth, self.resized_intrinsic_o3d.intrinsic_matrix, self.cam_extrinsic )
 
+        # sample = np.load("/ws/bimanual/39/39_bound/step_0.npy", allow_pickle=True)
+        # sample = sample.item()
+
+        # sample_rgb  = sample["rgb"]
+        # sample_rgb = sample_rgb[0,0].numpy()*255
+        # sample_rgb = np.transpose(sample_rgb, (1, 2, 0) ).astype(float) # (0,1)
+
+        # rgb[105:150, 70:130] = sample_rgb[105:150, 70:130]
+
+        # sample_xyz  = sample["xyz"]
+        # sample_xyz = sample_xyz[0,0].numpy()
+        # sample_xyz = np.transpose(sample_xyz, (1, 2, 0) ).astype(float) # (0,1)
+
+        # xyz[105:150, 70:130] = sample_xyz[105:150, 70:130]
+        # # xyz[105:150, 70:130, 2] = -0.05
+        
         cropped_rgb, cropped_xyz = self.cropping( rgb, xyz, self.bound_box)
         filtered_rgb, filtered_xyz = self.denoise(cropped_rgb, cropped_xyz, debug= True)
 
@@ -457,9 +474,11 @@ class bi_3dda_node(Node):
         curr_gripper_np = np.zeros( (1,1,2,8)).astype(float)
         curr_gripper_np[0,0,0,0:7] = left_hand_transform_7D
         curr_gripper_np[0,0,0,7] = (left_pos[6] - left_min_joint ) / (left_max_joint -  left_min_joint)
+        curr_gripper_np[0,0,0,7] = 0 if curr_gripper_np[0,0,0,7] < 0.1 else 1
 
         curr_gripper_np[0,0,1,0:7] = right_hand_transform_7D
         curr_gripper_np[0,0,1,7] = (right_pos[6] - right_min_joint ) / (right_max_joint -  right_min_joint)
+        curr_gripper_np[0,0,1,7] = 0 if curr_gripper_np[0,0,1,7] < 0.1 else 1
 
         start = time.time()
  
