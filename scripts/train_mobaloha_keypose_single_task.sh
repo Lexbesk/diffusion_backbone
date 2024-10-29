@@ -39,7 +39,7 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --rotation_parametrization 6D \
     --diffusion_timesteps $diffusion_timesteps \
     --val_freq 4000 \
-    --save_freq 10000 \
+    --save_freq 20000 \
     --val_iters 8 \
     --dense_interpolation $dense_interpolation \
     --interpolation_length $interpolation_length \

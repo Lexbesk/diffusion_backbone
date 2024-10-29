@@ -239,12 +239,13 @@ class BaseTrainTester:
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / "best.pth")
-        torch.save({
-            "weight": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "iter": step_id + 1,
-            "best_loss": best_loss
-        }, self.args.log_dir / "last.pth")
+        if( (step_id +1) % self.args.save_freq ==0 ):
+            torch.save({
+                "weight": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "iter": step_id + 1,
+                "best_loss": best_loss
+            }, self.args.log_dir / "{}_steps.pth".format( str(step_id + 1)) )
         return best_loss
 
 
