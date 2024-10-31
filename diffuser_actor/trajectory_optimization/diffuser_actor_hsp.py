@@ -16,7 +16,7 @@ from diffuser_actor.utils.schedulers.scheduling_rf import RFScheduler
 from .diffuser_actor import DiffusionHead
 
 
-class DiffuserActor(nn.Module):
+class HSPDiffuserActor(nn.Module):
 
     def __init__(self,
                  backbone="clip",
@@ -74,6 +74,20 @@ class DiffuserActor(nn.Module):
             )
         self.n_steps = diffusion_timesteps
         self.gripper_loc_bounds = torch.tensor(gripper_loc_bounds)
+        model_dict = torch.load(
+            '/ws/dev_bimanual_3dda/train_logs/Actor_18Peract_20Demo_5GNFactortask_RF_v3_logitnorm/diffusion_multitask-C120-B24-lr1e-4-DI1-2-H1-DT10/last.pth',
+            map_location="cpu"
+        )
+        self.encoder.load_state_dict({
+            '.'.join(key.split('.')[2:]): val for key, val in model_dict['weight'].items()
+            if key.split('.')[1] == 'encoder'
+        })
+        self.prediction_heads[0].load_state_dict({
+            '.'.join(key.split('.')[2:]): val for key, val in model_dict['weight'].items()
+            if key.split('.')[1] == 'prediction_head'
+        })
+        # for p in self.prediction_heads[0].parameters():
+        #     p.requires_grad = False
 
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,
                       curr_gripper):
@@ -229,9 +243,16 @@ class DiffuserActor(nn.Module):
             sampling_level
         ) = fixed_inputs
 
-        # Legacy operation, needs to remove
-        fps_feats = context_feats.transpose(0, 1)
-        fps_pos = self.encoder.relative_pe_layer(context)
+        # <HACK> NEED TO REMOVE.  OLD MODEL USE FPS
+        if sampling_level == 0:
+            fps_feats, fps_pos = self.encoder.run_fps(
+                context_feats.transpose(0, 1),
+                self.encoder.relative_pe_layer(context)
+            )
+        else:
+            # Legacy operation, needs to remove
+            fps_feats = context_feats.transpose(0, 1)
+            fps_pos = self.encoder.relative_pe_layer(context)
 
         return self.prediction_heads[sampling_level](
             trajectory,

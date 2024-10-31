@@ -175,8 +175,8 @@ class TrainTester(BaseTrainTester):
             #from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
             #print('Using RF class')
             #model_class = RFDiffuserActor
-            from diffuser_actor.trajectory_optimization.diffuser_actor_hsp import DiffuserActor
-            model_class = RFDiffuserActor
+            from diffuser_actor.trajectory_optimization.diffuser_actor_hsp import HSPDiffuserActor
+            model_class = HSPDiffuserActor
             print('Using HSP class')
         elif bool(self.args.bimanual):
             model_class = BiManualDiffuserActor

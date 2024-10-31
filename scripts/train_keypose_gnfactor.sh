@@ -1,5 +1,5 @@
 main_dir=Actor_18Peract_20Demo_10GNFactortask
-main_dir=Actor_18Peract_20Demo_5GNFactortask_RF_hspmix_aug
+main_dir=Actor_18Peract_20Demo_5GNFactortask_RF_hspmix_aug_cascade
 
 dataset=/home/jeszhang/data/Peract_packaged/train
 valset=/home/jeszhang/data/Peract_packaged/val
