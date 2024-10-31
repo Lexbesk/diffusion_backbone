@@ -101,7 +101,7 @@ def main():
     # data_idxs =  [1, 4, 31, 32, 33, 34, 35]
     # idx =  2
     # file_dir = "test39"
-    file_dir = "test"
+    file_dir = "42"
     # file_dir = "39_rh_fixed/1"
     length = 40
     for idx in range(length):

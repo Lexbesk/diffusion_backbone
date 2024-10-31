@@ -74,7 +74,9 @@ class bi_3dda_node(Node):
         # self.file_dir2 = "/ws/data/mobile_aloha_debug/20241006_plate_keypose+0/ep41.npy"
         # self.file_dir2 = "/ws/bimanual/data/processed_singlearm_keypose/eval/stack_bowl_single_arm+0/ep41.npy"
         # self.file_dir2 = "/ws/bimanual/data/processed_bimanual_keypose/debug/stack_bowl+0/ep39.npy"
-        self.file_dir2 = "/ws/bimanual/39/ep39_realworld.npy"
+        # self.file_dir2 = "/ws/bimanual/39/ep39_realworld.npy"
+
+        self.file_dir2 = "/ws/bimanual/data/processed_bimanual_keypose/eval/stack_bowl+0/ep42.npy"
 
         self.episode = np.load( self.file_dir2, allow_pickle=True)
         # self.episode = self.episode.item()
@@ -240,16 +242,18 @@ class bi_3dda_node(Node):
 
     # def SyncCallback(self, bgr, depth, left_hand_joints, right_hand_joints):
     def SyncCallback(self):
+        print("in callback")
         self.frame_idx += 1
         # length = self.sample["rgbs"].shape[0]
         length = len(self.episode[0])
 
         
-        if(self.frame_idx >= 1):
+        # if(self.frame_idx >= 1):
+        if(self.frame_idx >= length ):
             # self.episode.append(self.inference_action)
             np.save('debug_result', self.inference_action)
             return
-        print("in callback")
+        
         start = time.time()
  
         # instr = torch.zeros((1, 53, 512))
