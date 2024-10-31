@@ -31,8 +31,7 @@ class MobileAlohaDataset(RLBenchDataset):
         interpolation_length=100,
         relative_action=False,
         bimanual=False,
-        calibration_augmentation=True,
-        calaug_cameras=("wrist_left", "wrist_right"),
+        color_aug=False,
     ):
         super().__init__(
             root=root,
@@ -50,8 +49,7 @@ class MobileAlohaDataset(RLBenchDataset):
             interpolation_length=interpolation_length,
             relative_action=relative_action,
             bimanual=bimanual,
-            calibration_augmentation=calibration_augmentation,
-            calaug_cameras=calaug_cameras
+            color_aug=color_aug
         )
         self._instructions = instructions
 
@@ -106,6 +104,11 @@ class MobileAlohaDataset(RLBenchDataset):
         rgbs = states[:, :, 0]
         pcds = states[:, :, 1]
         # rgbs = self._unnormalize_rgb(rgbs)
+
+        if self._color_aug is not None:
+            rgbs = rgbs.mul(255).byte()
+            rgbs = self._color_aug(rgbs)
+            rgbs = rgbs.float().div(255)
 
         # Get action tensors for respective frame ids
         # action = torch.cat([torch.from_numpy(episode[2][i]) for i in frame_ids])

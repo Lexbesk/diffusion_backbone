@@ -7,6 +7,7 @@ import numpy as np
 from scipy.interpolate import CubicSpline, interp1d
 import torch
 import torchvision.transforms as transforms
+from torchvision.transforms import v2 as tfv2
 import torchvision.transforms.functional as transforms_f
 
 from diffuser_actor.utils.utils import normalise_quat
@@ -35,6 +36,28 @@ def loader(file):
         except UnpicklingError as e:
             print(f"Can't load {file}: {e}")
     return None
+
+
+class ColorAugmentation:
+    """Color-wise augmentation"""
+    def __init__(self):
+        self.transforms = tfv2.Compose([
+            tfv2.RandomChoice([
+                tfv2.GaussianBlur(9),
+                tfv2.RandomAdjustSharpness(sharpness_factor=4)
+            ]),
+            tfv2.RandomAutocontrast(),
+            tfv2.RandomEqualize(),
+            tfv2.RandomPosterize(2)
+        ])
+
+    def __call__(self, image, **kwargs):
+        image = self.transforms(image)
+        brightness = np.random.uniform(0.5, 1.5)
+        image = tfv2.functional.adjust_brightness(
+            image, brightness
+        )
+        return image
 
 
 class Resize:

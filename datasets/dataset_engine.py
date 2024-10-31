@@ -4,11 +4,12 @@ import math
 import random
 from pathlib import Path
 from time import time
+import PIL.Image as Image
 
 import torch
 from torch.utils.data import Dataset
 
-from .utils import loader, Resize, TrajectoryInterpolator, calibration_augmentation
+from .utils import loader, Resize, TrajectoryInterpolator, ColorAugmentation
 
 
 class RLBenchDataset(Dataset):
@@ -35,8 +36,7 @@ class RLBenchDataset(Dataset):
         interpolation_length=100,
         relative_action=False,
         bimanual=False,
-        calibration_augmentation=True,
-        calaug_cameras=("wrist_left", "wrist_right"),
+        color_aug=False,
     ):
         self._cache = {}
         self._cache_size = cache_size
@@ -51,8 +51,6 @@ class RLBenchDataset(Dataset):
         self._root = [Path(r).expanduser() for r in root]
         self._relative_action = relative_action
         self._bimanual = bimanual
-        self._calibration_augmentation = calibration_augmentation
-        self._calaug_cameras = calaug_cameras
 
         # For trajectory optimization, initialize interpolation tools
         if return_low_lvl_trajectory:
@@ -110,6 +108,11 @@ class RLBenchDataset(Dataset):
             self._num_episodes += len(eps)
         print(f"Created dataset from {root} with {self._num_episodes}")
         self._episodes_by_task = episodes_by_task
+
+        if color_aug:
+            self._color_aug = ColorAugmentation()
+        else:
+            self._color_aug = None
 
     def read_from_cache(self, args):
         if self._cache_size == 0:
@@ -185,19 +188,10 @@ class RLBenchDataset(Dataset):
         pcds = states[:, :, 1]
         rgbs = self._unnormalize_rgb(rgbs)
 
-        if self._calibration_augmentation:
-            if episode[3]:
-                cameras = list(episode[3][0].keys())
-                aug_index = [
-                    i for i, c in enumerate(self._cameras)
-                    if c in self._calaug_cameras
-                ]
-            else:
-                aug_index = list(range(pcds.shape[1]))
-
-            pcds[:, aug_index] = calibration_augmentation(
-                pcds[:, aug_index], [-10 ,10], [-10, 10], [-10, 10], [-0.2, 0.2]
-            )
+        if self._color_aug is not None:
+            rgbs = rgbs.mul(255).byte()
+            rgbs = self._color_aug(rgbs)
+            rgbs = rgbs.float().div(255)
 
         # Get action tensors for respective frame ids
         action = torch.cat([
