@@ -225,6 +225,11 @@ class TrainTester(BaseTrainTester):
             sample["curr_gripper"] if self.args.num_history < 1
             else sample["curr_gripper_history"][:, -self.args.num_history:]
         )
+        # #
+        # import pdb
+        # pdb.set_trace()
+        # print("sample[trajectory]: ", sample["trajectory"].shape)
+
         out = model(
             sample["trajectory"],
             sample["trajectory_mask"],

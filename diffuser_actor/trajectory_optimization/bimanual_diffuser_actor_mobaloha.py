@@ -86,7 +86,9 @@ class BiManualDiffuserActor(DiffuserActor):
         trajectory = trajectory.clone()
         trajectory[..., :3] = self.unnormalize_pos(trajectory[..., :3])
         if self._relative:
-            trajectory[..., :3] = trajectory[..., :3] + query_trajectory[..., :3]
+            # print("trajectory: ", trajectory[... , :3].shape)
+            # trajectory[..., :3] = trajectory[..., :3] + query_trajectory[..., :3]
+            trajectory[..., :3] = trajectory[..., :3] + query_trajectory[:, [-1], :, :3]
 
         return self.prediction_head(
             trajectory_feats,
