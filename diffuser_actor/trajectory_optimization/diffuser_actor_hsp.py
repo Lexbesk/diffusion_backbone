@@ -33,7 +33,7 @@ class HSPDiffuserActor(nn.Module):
                  nhist=3,
                  relative=False,
                  lang_enhanced=False,
-                 sampling_levels=[0, 0],
+                 sampling_levels=[0, 1],
                  cropped_num_scene_tokens=[-1, 256]):
         super().__init__()
         self._rotation_parametrization = rotation_parametrization
@@ -49,6 +49,7 @@ class HSPDiffuserActor(nn.Module):
             embedding_dim=embedding_dim,
             num_sampling_level=max(sampling_levels) + 1,
             nhist=nhist,
+            num_attn_heads=9,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor
         )
@@ -61,6 +62,7 @@ class HSPDiffuserActor(nn.Module):
                     use_instruction=use_instruction,
                     rotation_parametrization=rotation_parametrization,
                     nhist=nhist,
+                    num_attn_heads=9,
                     lang_enhanced=lang_enhanced
                 )
             )
@@ -75,7 +77,7 @@ class HSPDiffuserActor(nn.Module):
         self.n_steps = diffusion_timesteps
         self.gripper_loc_bounds = torch.tensor(gripper_loc_bounds)
         model_dict = torch.load(
-            '/ws/dev_bimanual_3dda/train_logs/Actor_18Peract_20Demo_5GNFactortask_RF_v3_logitnorm/diffusion_multitask-C120-B24-lr1e-4-DI1-2-H1-DT10/last.pth',
+            '/home/ngkanats/repos/dev_bimanual_3dda/train_logs/Actor_18Peract_20Demo_10GNFactortask_RF/diffusion_multitask-C144-B24-lr1e-4-DI1-2-H1-DT10-fps-xformer/last.pth',
             map_location="cpu"
         )
         self.encoder.load_state_dict({
@@ -515,11 +517,12 @@ class HSPDiffuserActor(nn.Module):
             ).detach()
 
             # mix with the ground-truth
-            mix_ratio = 0.6 * timesteps.float()
+            mix_ratio = 0.6 * timesteps
             init_trajectory = (
                 gt_trajectory * mix_ratio.view(-1, 1, 1)
                 + init_trajectory * (1 - mix_ratio).view(-1, 1, 1)
             )
-            init_trajectory = init_trajectory + torch.randn_like(init_trajectory).mul_(0.05)
+            #init_trajectory = init_trajectory + torch.randn_like(init_trajectory).mul_(0.05)
+            init_trajectory = init_trajectory + torch.randn_like(init_trajectory).mul_(0.2)
 
         return total_loss

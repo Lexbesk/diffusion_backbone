@@ -53,6 +53,7 @@ class DiffuserActor(nn.Module):
             embedding_dim=embedding_dim,
             num_sampling_level=1,
             nhist=nhist,
+            num_attn_heads=9,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor
         )
@@ -61,6 +62,7 @@ class DiffuserActor(nn.Module):
             use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist,
+            num_attn_heads=9,
             lang_enhanced=lang_enhanced
         )
         self.position_noise_scheduler = DDPMScheduler(

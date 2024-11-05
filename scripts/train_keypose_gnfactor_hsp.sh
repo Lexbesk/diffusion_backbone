@@ -1,4 +1,4 @@
-main_dir=Actor_18Peract_20Demo_10GNFactortask_RF
+main_dir=Actor_18Peract_20Demo_10GNFactortask_RF_hspmix_aug_cascade
 
 dataset=data/peract/Peract_packaged/train
 valset=data/peract/Peract_packaged/val
@@ -7,7 +7,7 @@ lr=1e-4
 dense_interpolation=1
 interpolation_length=2
 num_history=1
-diffusion_timesteps=10
+diffusion_timesteps=10,5
 B=24
 C=144
 ngpus=2
@@ -17,9 +17,8 @@ quaternion_format=wxyz
 image_size=256,256
 point_sampling=fps
 use_rf=1
-use_hsp=0
-run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer
-# run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer-regtoken
+use_hsp=1
+run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-xformer-noise0.2
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_trajectory.py \

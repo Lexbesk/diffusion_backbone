@@ -1,9 +1,10 @@
-import dgl.geometry as dgl_geo
+#import dgl.geometry as dgl_geo
 import einops
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision.ops import FeaturePyramidNetwork
+from torch_cluster import fps
 
 from .position_encodings import RotaryPositionEncoding3D
 from .layers import FFWRelativeCrossAttentionModule, ParallelAttention
@@ -242,13 +243,26 @@ class Encoder(nn.Module):
         npts, bs, ch = context_features.shape
 
         # Sample points with FPS
-        sampled_inds = dgl_geo.farthest_point_sampler(
+        #sampled_inds = dgl_geo.farthest_point_sampler(
+        #    einops.rearrange(
+        #        context_features,
+        #        "npts b c -> b npts c"
+        #    ).to(torch.float64),
+        #    max(npts // self.fps_subsampling_factor, 1), 0
+        #).long()
+        batch_indices = torch.arange(
+            bs, device=context_features.device).long()
+        batch_indices = batch_indices[:, None].repeat(1, npts)
+        batch_indices = batch_indices.flatten(0, 1)
+        sampled_inds = fps(
             einops.rearrange(
-                context_features,
-                "npts b c -> b npts c"
-            ).to(torch.float64),
-            max(npts // self.fps_subsampling_factor, 1), 0
-        ).long()
+                context_features, "npts b c -> (b npts) c").half(),
+            batch_indices,
+            1. / self.fps_subsampling_factor,
+            random_start=True
+        )
+        sampled_inds = sampled_inds.reshape(bs, -1)
+        sampled_inds = sampled_inds % npts
 
         # Sample features
         expanded_sampled_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, ch)
