@@ -9,4 +9,4 @@ docker run \
     --shm-size 16G \
     -v /dev/shm:/dev/shm \
     -v $DATA_PATH:/ws \
-    --name 3dda2204 -it 3dda2204:latest
+    --name 3dda2204 -it 3dda2004:latest

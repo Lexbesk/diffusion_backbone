@@ -31,7 +31,7 @@ class MobileAlohaDataset(RLBenchDataset):
         interpolation_length=100,
         relative_action=False,
         bimanual=False,
-        color_aug=False,
+        color_aug=True,
     ):
         super().__init__(
             root=root,
@@ -106,6 +106,8 @@ class MobileAlohaDataset(RLBenchDataset):
         # rgbs = self._unnormalize_rgb(rgbs)
 
         if self._color_aug is not None:
+
+            # print("in brightness aug!!!!!!!!!!!!!!!!!")
             rgbs = rgbs.mul(255).byte()
             rgbs = self._color_aug(rgbs)
             rgbs = rgbs.float().div(255)

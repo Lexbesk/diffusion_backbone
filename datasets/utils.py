@@ -40,7 +40,7 @@ def loader(file):
 
 class ColorAugmentation:
     """Color-wise augmentation"""
-    def __init__(self):
+    def __init__(self, ratio = 0.5 ):
         self.transforms = tfv2.Compose([
             tfv2.RandomChoice([
                 tfv2.GaussianBlur(9),
@@ -50,13 +50,16 @@ class ColorAugmentation:
             tfv2.RandomEqualize(),
             tfv2.RandomPosterize(2)
         ])
+        self.ration = ratio
 
     def __call__(self, image, **kwargs):
         image = self.transforms(image)
-        brightness = np.random.uniform(0.5, 1.5)
-        image = tfv2.functional.adjust_brightness(
-            image, brightness
-        )
+        random_value = np.random.uniform()
+        if(random_value > self.ration):
+            brightness = np.random.uniform(0.5, 1.5)
+            image = tfv2.functional.adjust_brightness(
+                image, brightness
+            )
         return image
 
 
