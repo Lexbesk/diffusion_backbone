@@ -114,6 +114,7 @@ class BaseTrainTester:
 
         # Get optimizer
         optimizer = self.get_optimizer(model)
+        scaler = torch.GradScaler()
 
         # Move model to devices
         if torch.cuda.is_available():
@@ -152,7 +153,7 @@ class BaseTrainTester:
                 iter_loader = iter(train_loader)
                 sample = next(iter_loader)
 
-            self.train_one_step(model, criterion, optimizer, step_id, sample)
+            self.train_one_step(model, criterion, optimizer, scaler, step_id, sample)
             if (step_id + 1) % self.args.val_freq == 0:
                 print("Train evaluation.......")
                 model.eval()
@@ -239,13 +240,12 @@ class BaseTrainTester:
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / "best.pth")
-        if( (step_id +1) % self.args.save_freq ==0 ):
-            torch.save({
-                "weight": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "iter": step_id + 1,
-                "best_loss": best_loss
-            }, self.args.log_dir / "{}_steps.pth".format( str(step_id + 1)) )
+        torch.save({
+            "weight": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "iter": step_id + 1,
+            "best_loss": best_loss
+        }, self.args.log_dir / "last.pth")
         return best_loss
 
 

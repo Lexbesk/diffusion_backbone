@@ -47,6 +47,18 @@ Create a conda environment with the following command:
 > pip install flash-attn==2.5.9.post1 --no-build-isolation
 ```
 
+
+```
+> conda create --name 3dda-pt24 python=3.10
+> conda install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
+> pip install  dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
+> pip install numpy pillow einops typed-argument-parser tqdm transformers absl-py matplotlib scipy tensorboard opencv-python open3d trimesh wandb;
+> pip install --upgrade pydantic>=2.0
+> pip install git+https://github.com/openai/CLIP.git;
+> pip install diffusers blosc moviepy ipdb einops
+> pip install --upgrade https://download.pytorch.org/whl/cu124/xformers-0.0.28.post1-cp310-cp310-manylinux_2_28_x86_64.whl#sha256=cf3f05bb71be32c96c587975798abd2e0886e921bd268f5ecb653ceef402ace3
+```
+
 ### Install CALVIN locally
 
 Remember to use the latest `calvin_env` module, which fixes bugs of `turn_off_led`.  See this [post](https://github.com/mees/calvin/issues/32#issuecomment-1363352121) for detail.

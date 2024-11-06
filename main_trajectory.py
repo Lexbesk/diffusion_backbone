@@ -17,12 +17,12 @@ from torch.nn import functional as F
 from datasets.dataset_engine import RLBenchDataset
 from engine import BaseTrainTester
 from diffuser_actor import DiffuserActor, BiManualDiffuserActor
+from diffuser_actor.trajectory_optimization.diffuser_actor_hsp import HSPDiffuserActor
+from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
 
 from utils.common_utils import (
     load_instructions, count_parameters, get_gripper_loc_bounds
 )
-
-from utils.utils_with_mobaloha import to_absolute_action
 
 
 def to_number_or_list(string: str) -> Union[int, List[int]]:
@@ -39,17 +39,16 @@ class Arguments(tap.Tap):
     instructions: Optional[Path] = "instructions.pkl"
     seed: int = 0
     tasks: Tuple[str, ...]
-    current_task: str = "None"
     variations: Tuple[int, ...] = (0,)
     checkpoint: Optional[Path] = None
     accumulate_grad_batches: int = 1
     val_freq: int = 500
-    save_freq: int = 10000
     gripper_loc_bounds: Optional[str] = None
     gripper_loc_bounds_buffer: float = 0.04
     eval_only: int = 0
     bimanual: int = 0
     use_rf: int = 0
+    use_hsp: int = 0
 
     # Training and validation datasets
     dataset: Path
@@ -73,10 +72,13 @@ class Arguments(tap.Tap):
     train_iters: int = 200_000
     val_iters: int = -1  # -1 means heuristically-defined
     max_episode_length: int = 5  # -1 for no limit
-    camera_calibration_aug: int = 1
 
     # Data augmentations
     image_rescale: str = "0.75,1.25"  # (min, max), "1.0,1.0" for no rescaling
+
+    # Parameters modified by Jiahe
+    current_task: str = "None"
+    save_freq: int = 10000
 
     # Model
     backbone: str = "clip"  # one of "resnet", "clip"
@@ -145,7 +147,6 @@ class TrainTester(BaseTrainTester):
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
             bimanual=bool(self.args.bimanual),
-            calibration_augmentation=bool(self.args.camera_calibration_aug)
         )
         test_dataset = RLBenchDataset(
             root=self.args.valset,
@@ -163,25 +164,24 @@ class TrainTester(BaseTrainTester):
             dense_interpolation=bool(self.args.dense_interpolation),
             interpolation_length=self.args.interpolation_length,
             bimanual=bool(self.args.bimanual),
-            calibration_augmentation=bool(self.args.camera_calibration_aug)
         )
         return train_dataset, test_dataset
 
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        if bool(self.args.use_rf):
-            assert not bool(self.args.bimanual)
-            #from diffuser_actor.trajectory_optimization.diffuser_actor_rf import RFDiffuserActor
-            #print('Using RF class')
-            #model_class = RFDiffuserActor
-            from diffuser_actor.trajectory_optimization.diffuser_actor_hsp import HSPDiffuserActor
-            model_class = HSPDiffuserActor
-            print('Using HSP class')
-        elif bool(self.args.bimanual):
+        if bool(self.args.bimanual):
             model_class = BiManualDiffuserActor
         else:
-            model_class = DiffuserActor
+            if bool(self.args.use_rf):
+                if bool(self.args.use_hsp):
+                    model_class = HSPDiffuserActor
+                    print('Using HSP class')
+                else:
+                    model_class = RFDiffuserActor
+                    print('Using RF class')
+            else:
+                model_class = DiffuserActor
         _model = model_class(
             backbone=self.args.backbone,
             image_size=tuple(int(x) for x in self.args.image_size.split(",")),
@@ -197,8 +197,6 @@ class TrainTester(BaseTrainTester):
             nhist=self.args.num_history,
             relative=bool(self.args.relative_action),
             lang_enhanced=bool(self.args.lang_enhanced),
-            sampling_levels=self.args.sampling_levels,
-            cropped_num_scene_tokens=self.args.cropped_num_scene_tokens
         )
         print("Model parameters:", count_parameters(_model))
 
@@ -208,7 +206,7 @@ class TrainTester(BaseTrainTester):
     def get_criterion():
         return TrajectoryCriterion()
 
-    def train_one_step(self, model, criterion, optimizer, step_id, sample):
+    def train_one_step(self, model, criterion, optimizer, scaler, step_id, sample):
         """Run a single training step."""
         if step_id % self.args.accumulate_grad_batches == 0:
             optimizer.zero_grad()
@@ -225,27 +223,26 @@ class TrainTester(BaseTrainTester):
             sample["curr_gripper"] if self.args.num_history < 1
             else sample["curr_gripper_history"][:, -self.args.num_history:]
         )
-        # #
-        # import pdb
-        # pdb.set_trace()
-        # print("sample[trajectory]: ", sample["trajectory"].shape)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out = model(
+                sample["trajectory"],
+                sample["trajectory_mask"],
+                sample["rgbs"],
+                sample["pcds"],
+                sample["instr"],
+                curr_gripper
+            )
 
-        out = model(
-            sample["trajectory"],
-            sample["trajectory_mask"],
-            sample["rgbs"],
-            sample["pcds"],
-            sample["instr"],
-            curr_gripper
-        )
-
-        # Backward pass
-        loss = criterion.compute_loss(out)
-        loss.backward()
+            # Backward pass
+            loss = criterion.compute_loss(out)
+        #loss.backward()
+        scaler.scale(loss).backward()
 
         # Update
         if step_id % self.args.accumulate_grad_batches == self.args.accumulate_grad_batches - 1:
-            optimizer.step()
+            #optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
         # Log
         if dist.get_rank() == 0 and (step_id + 1) % self.args.val_freq == 0:
@@ -277,36 +274,22 @@ class TrainTester(BaseTrainTester):
                 sample["curr_gripper"] if self.args.num_history < 1
                 else sample["curr_gripper_history"][:, -self.args.num_history:]
             )
-            action = model(
-                sample["trajectory"].to(device),
-                sample["trajectory_mask"].to(device),
-                sample["rgbs"].to(device),
-                sample["pcds"].to(device),
-                sample["instr"].to(device),
-                curr_gripper.to(device),
-                run_inference=True
-            )
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                action = model(
+                    sample["trajectory"].to(device),
+                    sample["trajectory_mask"].to(device),
+                    sample["rgbs"].to(device),
+                    sample["pcds"].to(device),
+                    sample["instr"].to(device),
+                    curr_gripper.to(device),
+                    run_inference=True
+                )
 
-            # from utils.visualize_keypose_frames import visualize_actions_and_point_clouds_video 
-            # from utils.utils_with_mobaloha import to_absolute_action
-            # k = 0
-            # abs_sample_trajectory = to_absolute_action(
-            #    sample['trajectory'][:, 0].flatten(-2, -1), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
-            # abs_action = to_absolute_action(
-            #    action[:, 0].flatten(-2, -1).cpu(), sample["curr_gripper"].flatten(-2, -1)).unflatten(-1, (2, 8))
-            # visualize_actions_and_point_clouds_video(
-            #    sample['pcds'],
-            #    sample['rgbs'],
-            #    abs_sample_trajectory[:, 0],
-            #    abs_sample_trajectory[:, 1],
-            #    abs_action[:, 0],
-            #    abs_action[:, 1],
-            # )
-            losses, losses_B = criterion.compute_metrics(
-                action,
-                sample["trajectory"].to(device),
-                sample["trajectory_mask"].to(device)
-            )
+                losses, losses_B = criterion.compute_metrics(
+                    action,
+                    sample["trajectory"].to(device),
+                    sample["trajectory_mask"].to(device)
+                )
 
             # Gather global statistics
             for n, l in losses.items():
