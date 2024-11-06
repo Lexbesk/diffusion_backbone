@@ -7,10 +7,10 @@ channels:
 dependencies:
   - python=3.8
   - pip
-  - pytorch=1.13.1
-  - torchvision=0.14.1
-  - torchaudio=0.13.1
-  - pytorch-cuda=11.6
+  - pytorch=2.0.0
+  - torchvision=0.15.1
+  - torchaudio=2.0.1
+  - pytorch-cuda=11.8
   - pip:
     - git+https://github.com/openai/CLIP.git
     - numpy==1.23.5
