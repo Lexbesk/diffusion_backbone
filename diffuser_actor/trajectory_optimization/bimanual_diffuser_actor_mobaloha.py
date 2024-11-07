@@ -46,6 +46,7 @@ class BiManualDiffuserActor(DiffuserActor):
             use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist * 2,
+            num_attn_heads=9,
             lang_enhanced=lang_enhanced
         )
 
