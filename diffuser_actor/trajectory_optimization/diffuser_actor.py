@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+import numpy as np
 
 from diffuser_actor.utils.layers import (
     FFWRelativeSelfAttentionModule,
@@ -78,6 +79,8 @@ class DiffuserActor(nn.Module):
         self.n_steps = diffusion_timesteps
         self.gripper_loc_bounds = torch.tensor(gripper_loc_bounds)
 
+        self._mae = True
+
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,
                       curr_gripper):
         # Compute visual features/positional embeddings at different scales
@@ -90,6 +93,25 @@ class DiffuserActor(nn.Module):
             "b ncam c h w -> b (ncam h w) c"
         )
         context = pcd_pyramid[0]
+
+        if self._mae and self.training:
+            # drop_ratio = np.random.uniform(0.3, 0.6)
+            drop_ratio = np.random.uniform(0.2, 0.4)
+            keep_num = int(context_feats.shape[1] * (1 - drop_ratio))
+            device = context_feats.device
+            keep_inds = [
+                torch.randperm(context_feats.shape[1], device=device)[:keep_num]
+                for _ in range(context_feats.shape[0])
+            ]
+            keep_inds = torch.stack(keep_inds, dim=0)
+            context_feats = torch.gather(
+                context_feats, 1,
+                keep_inds.unsqueeze(-1).repeat(1, 1, context_feats.shape[-1])
+            )
+            context = torch.gather(
+                context, 1,
+                keep_inds.unsqueeze(-1).repeat(1, 1, context.shape[-1])
+            )
 
         # Encode instruction (B, 53, F)
         instr_feats = None
