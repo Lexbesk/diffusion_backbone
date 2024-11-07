@@ -64,9 +64,9 @@ if __name__ == "__main__":
     instructions_string = [
         "close the pen.",
         "pick up the plate.",
-        "pouring the object into the bowl.",
-        "put the block into bowl.",
-        "stack the blocks."
+        "hand over the block.",
+        "put block into bowl.",
+        "stack bowls."
     ]
 
     tokenizer = load_tokenizer(args.encoder)
