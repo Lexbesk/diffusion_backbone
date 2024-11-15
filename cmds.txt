@@ -1,1 +1,0 @@
-python3 compute_workspace_bounds_mobaloha.py --dataset ./data/processed_bimanual_keypose --bimanual 1 --out_file tasks/mobaloha_stack_bowl_rel_keypose_location_bounds.json
