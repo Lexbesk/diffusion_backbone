@@ -2,6 +2,7 @@ main_dir=Actor_18Peract_20Demo_10GNFactortask_RF
 
 dataset=data/peract/Peract_packaged/train
 valset=data/peract/Peract_packaged/val
+valset=data/peract/Peract_packaged/debug
 
 lr=1e-4
 dense_interpolation=1
@@ -11,6 +12,7 @@ diffusion_timesteps=10
 B=24
 C=144
 ngpus=2
+ngpus=1
 max_episodes_per_task=20
 quaternion_format=xyzw
 quaternion_format=wxyz
@@ -18,8 +20,7 @@ image_size=256,256
 point_sampling=fps
 use_rf=1
 use_hsp=0
-run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer
-# run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer-regtoken
+run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer-maeres3
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_trajectory.py \
@@ -55,4 +56,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --max_episodes_per_task $max_episodes_per_task \
     --max_episode_length 100 \
     --quaternion_format $quaternion_format \
+    --checkpoint train_logs/${main_dir}/${run_log_dir}/last.pth \
+    --eval_only 1 \
     --run_log_dir ${run_log_dir}

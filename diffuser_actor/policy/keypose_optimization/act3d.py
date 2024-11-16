@@ -13,8 +13,8 @@ from diffuser_actor.utils.utils import (
     sample_ghost_points_uniform_sphere,
     compute_rotation_matrix_from_ortho6d
 )
-from diffuser_actor.utils.resnet import load_resnet50
-from diffuser_actor.utils.clip import load_clip
+from diffuser_actor.encoder.vision.resnet import load_resnet50
+from diffuser_actor.encoder.vision.clip import load_clip
 
 
 class Act3D(nn.Module):

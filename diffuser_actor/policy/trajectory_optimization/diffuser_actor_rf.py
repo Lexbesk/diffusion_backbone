@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from diffuser_actor.utils.schedulers.scheduling_rf import RFScheduler
+from diffuser_actor.noise_scheduler.rectified_flow import RFScheduler
 from .diffuser_actor import DiffuserActor
 
 
@@ -10,34 +10,28 @@ class RFDiffuserActor(DiffuserActor):
 
     def __init__(self,
                  backbone="clip",
-                 image_size=(256, 256),
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
                  fps_subsampling_factor=5,
-                 point_sampling='fps',
                  gripper_loc_bounds=None,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
                  diffusion_timesteps=100,
                  nhist=3,
-                 relative=False,
-                 lang_enhanced=False):
+                 relative=False):
         super().__init__(
             backbone=backbone,
-            image_size=image_size,
             embedding_dim=embedding_dim,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             use_instruction=use_instruction,
             fps_subsampling_factor=fps_subsampling_factor,
-            point_sampling=point_sampling,
             gripper_loc_bounds=gripper_loc_bounds,
             rotation_parametrization=rotation_parametrization,
             quaternion_format=quaternion_format,
             diffusion_timesteps=diffusion_timesteps,
             nhist=nhist,
             relative=relative,
-            lang_enhanced=lang_enhanced
         )
 
         self.position_noise_scheduler = RFScheduler(
@@ -52,7 +46,6 @@ class RFDiffuserActor(DiffuserActor):
             noise_sampler="logit_normal",
             noise_sampler_config={'mean': 0, 'std': 1},
         )
-        self._drop_view = True
 
     def forward(
         self,
@@ -95,21 +88,6 @@ class RFDiffuserActor(DiffuserActor):
                 instruction,
                 curr_gripper
             )
-
-        if self._drop_view and self.training:
-            drop_ratio = np.random.uniform(0.1, 0.5)
-            keep_num = int(rgb_obs.shape[1] * (1 - drop_ratio))
-            keep_inds = [
-                torch.randperm(rgb_obs.shape[1], device=rgb_obs.device)[:keep_num]
-                for _ in range(rgb_obs.shape[0])
-            ]
-            keep_inds = torch.stack(keep_inds, dim=0)
-            keep_inds = (
-                keep_inds.view(keep_inds.shape[0], keep_inds.shape[1], 1, 1, 1)
-                         .repeat(1, 1, rgb_obs.shape[2], rgb_obs.shape[3], rgb_obs.shape[4])
-            )
-            rgb_obs = torch.gather(rgb_obs, 1, keep_inds)
-            pcd_obs = torch.gather(pcd_obs, 1, keep_inds)
 
         # Normalize all pos
         gt_trajectory = gt_trajectory.clone()

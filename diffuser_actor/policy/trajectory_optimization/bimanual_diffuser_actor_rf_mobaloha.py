@@ -1,7 +1,8 @@
 import torch
+import torch.nn.functional as F
 
-from diffuser_actor.utils.schedulers.scheduling_rf import RFScheduler
-from .bimanual_diffuser_actor import BiManualDiffuserActor
+from diffuser_actor.noise_scheduler.rectified_flow import RFScheduler
+from .bimanual_diffuser_actor_mobaloha import BiManualDiffuserActor
 
 
 class RFBiManualDiffuserActor(BiManualDiffuserActor):
@@ -38,9 +39,15 @@ class RFBiManualDiffuserActor(BiManualDiffuserActor):
 
         self.position_noise_scheduler = RFScheduler(
             num_train_timesteps=diffusion_timesteps,
+            timestep_spacing="linspace",
+            noise_sampler="logit_normal",
+            noise_sampler_config={'mean': 0, 'std': 1},
         )
         self.rotation_noise_scheduler = RFScheduler(
             num_train_timesteps=diffusion_timesteps,
+            timestep_spacing="linspace",
+            noise_sampler="logit_normal",
+            noise_sampler_config={'mean': 0, 'std': 1},
         )
 
     def forward(
@@ -68,8 +75,6 @@ class RFBiManualDiffuserActor(BiManualDiffuserActor):
             is ALWAYS expressed as a quaternion form.
             The model converts it to 6D internally if needed.
         """
-        if self._relative:
-            pcd_obs, curr_gripper = self.convert2rel(pcd_obs, curr_gripper)
         if gt_trajectory is not None:
             gt_openess = gt_trajectory[..., 7:]
             gt_trajectory = gt_trajectory[..., :7]
@@ -91,10 +96,6 @@ class RFBiManualDiffuserActor(BiManualDiffuserActor):
         pcd_obs = pcd_obs.clone()
         curr_gripper = curr_gripper.clone()
         gt_trajectory[..., :3] = self.normalize_pos(gt_trajectory[..., :3])
-        pcd_obs = torch.permute(self.normalize_pos(
-            torch.permute(pcd_obs, [0, 1, 3, 4, 2])
-        ), [0, 1, 4, 2, 3])
-        curr_gripper[..., :3] = self.normalize_pos(curr_gripper[..., :3])
 
         # Convert rotation parametrization
         gt_trajectory = self.convert_rot(
@@ -118,11 +119,9 @@ class RFBiManualDiffuserActor(BiManualDiffuserActor):
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
         # Sample a random timestep
-        timesteps = torch.randint(
-            0,
-            self.position_noise_scheduler.config.num_train_timesteps,
-            (len(noise),), device=noise.device
-        ).long()
+        timesteps = self.position_noise_scheduler.sample_noise_step(
+            num_noise=len(noise), device=noise.device
+        )
 
         # Add noise to the clean trajectories
         pos = self.position_noise_scheduler.add_noise(

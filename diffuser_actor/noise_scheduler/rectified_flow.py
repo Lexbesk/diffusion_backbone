@@ -190,3 +190,6 @@ class RFScheduler(SchedulerMixin, ConfigMixin):
         pred_original_sample = zt - dt_to_0 * vc # z_0
 
         return pred_original_sample
+
+    def prepare_target(self, noise, gt):
+        return noise - gt

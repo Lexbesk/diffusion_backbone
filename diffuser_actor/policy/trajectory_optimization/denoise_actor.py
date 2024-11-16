@@ -2,15 +2,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import einops
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 import numpy as np
 
 from diffuser_actor.utils.layers import (
     FFWRelativeSelfAttentionModule,
     FFWRelativeCrossAttentionModule,
-    FFWRelativeSelfCrossAttentionModule
 )
-from diffuser_actor.utils.encoder import Encoder
+from diffuser_actor.noise_scheduler.rectified_flow import RFScheduler
+from diffuser_actor.noise_scheduler.ddpm import DDPMScheduler
+from diffuser_actor.encoder.encoder import Encoder
 from diffuser_actor.utils.layers import ParallelAttention
 from diffuser_actor.utils.position_encodings import (
     RotaryPositionEncoding3D,
@@ -25,32 +25,28 @@ from diffuser_actor.utils.utils import (
 )
 
 
-class DiffuserActor(nn.Module):
+class DenoiseActor(nn.Module):
 
     def __init__(self,
                  backbone="clip",
-                 image_size=(256, 256),
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
                  fps_subsampling_factor=5,
-                 point_sampling='fps',
-                 gripper_loc_bounds=None,
+                 workspace_normalizer=None,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
-                 diffusion_timesteps=100,
+                 denoise_timesteps=100,
+                 denoise_model="ddpm",
                  nhist=3,
-                 relative=False,
-                 lang_enhanced=False):
+                 relative=False):
         super().__init__()
         self._rotation_parametrization = rotation_parametrization
         self._quaternion_format = quaternion_format
         self._relative = relative
-        self._point_sampling = point_sampling
         self.use_instruction = use_instruction
         self.encoder = Encoder(
             backbone=backbone,
-            image_size=image_size,
             embedding_dim=embedding_dim,
             num_sampling_level=1,
             nhist=nhist,
@@ -58,26 +54,41 @@ class DiffuserActor(nn.Module):
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor
         )
-        self.prediction_head = DiffusionHead(
+        self.prediction_head = TransformerHead(
             embedding_dim=embedding_dim,
             use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist,
             num_attn_heads=9,
-            lang_enhanced=lang_enhanced
         )
-        self.position_noise_scheduler = DDPMScheduler(
-            num_train_timesteps=diffusion_timesteps,
-            beta_schedule="scaled_linear",
-            prediction_type="epsilon"
-        )
-        self.rotation_noise_scheduler = DDPMScheduler(
-            num_train_timesteps=diffusion_timesteps,
-            beta_schedule="squaredcos_cap_v2",
-            prediction_type="epsilon"
-        )
-        self.n_steps = diffusion_timesteps
-        self.gripper_loc_bounds = torch.tensor(gripper_loc_bounds)
+        if denoise_model == "ddpm":
+            self.position_noise_scheduler = DDPMScheduler(
+                num_train_timesteps=denoise_timesteps,
+                beta_schedule="scaled_linear",
+                prediction_type="epsilon"
+            )
+            self.rotation_noise_scheduler = DDPMScheduler(
+                num_train_timesteps=denoise_timesteps,
+                beta_schedule="squaredcos_cap_v2",
+                prediction_type="epsilon"
+            )
+        elif denoise_model == "rectified_flow":
+            self.position_noise_scheduler = RFScheduler(
+                num_train_timesteps=denoise_timesteps,
+                timestep_spacing="linspace",
+                noise_sampler="logit_normal",
+                noise_sampler_config={'mean': 0, 'std': 1},
+            )
+            self.rotation_noise_scheduler = RFScheduler(
+                num_train_timesteps=denoise_timesteps,
+                timestep_spacing="linspace",
+                noise_sampler="logit_normal",
+                noise_sampler_config={'mean': 0, 'std': 1},
+            )
+        else:
+            raise ValueError(f"Unknown denoise model: {denoise_model}")
+        self.n_steps = denoise_timesteps
+        self.workspace_normalizer = workspace_normalizer
 
         self._mae = True
 
@@ -131,19 +142,10 @@ class DiffuserActor(nn.Module):
         )
 
         # FPS on visual features (N, B, F) and (B, N, F, 2)
-        if self._point_sampling == 'fps':
-            fps_feats, fps_pos = self.encoder.run_fps(
-                context_feats.transpose(0, 1),
-                self.encoder.relative_pe_layer(context)
-            )
-        else:
-            fps_feats = context_feats.transpose(0, 1)
-            fps_pos = self.encoder.relative_pe_layer(context).transpose(0, 1)
-            _inds = torch.randperm(
-                len(fps_pos)
-            )[:len(fps_pos) // self.encoder.fps_subsampling_factor]
-            fps_feats = fps_feats[_inds]
-            fps_pos = fps_pos[_inds].transpose(0, 1)
+        fps_feats, fps_pos = self.encoder.run_fps(
+            context_feats.transpose(0, 1),
+            self.encoder.relative_pe_layer(context)
+        )
         return (
             context_feats, context,  # contextualized visual features
             instr_feats,  # language features
@@ -271,13 +273,13 @@ class DiffuserActor(nn.Module):
         return trajectory
 
     def normalize_pos(self, pos):
-        pos_min = self.gripper_loc_bounds[0].float().to(pos.device)
-        pos_max = self.gripper_loc_bounds[1].float().to(pos.device)
+        pos_min = self.workspace_normalizer[0].float().to(pos.device)
+        pos_max = self.workspace_normalizer[1].float().to(pos.device)
         return (pos - pos_min) / (pos_max - pos_min) * 2.0 - 1.0
 
     def unnormalize_pos(self, pos):
-        pos_min = self.gripper_loc_bounds[0].float().to(pos.device)
-        pos_max = self.gripper_loc_bounds[1].float().to(pos.device)
+        pos_min = self.workspace_normalizer[0].float().to(pos.device)
+        pos_max = self.workspace_normalizer[1].float().to(pos.device)
         return (pos + 1.0) / 2.0 * (pos_max - pos_min) + pos_min
 
     def convert_rot(self, signal):
@@ -371,6 +373,7 @@ class DiffuserActor(nn.Module):
                 instruction,
                 curr_gripper
             )
+
         # Normalize all pos
         gt_trajectory = gt_trajectory.clone()
         pcd_obs = pcd_obs.clone()
@@ -399,11 +402,9 @@ class DiffuserActor(nn.Module):
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
         # Sample a random timestep
-        timesteps = torch.randint(
-            0,
-            self.position_noise_scheduler.config.num_train_timesteps,
-            (len(noise),), device=noise.device
-        ).long()
+        timesteps = self.position_noise_scheduler.sample_noise_step(
+            num_noise=len(noise), device=noise.device
+        )
 
         # Add noise to the clean trajectories
         pos = self.position_noise_scheduler.add_noise(
@@ -428,9 +429,12 @@ class DiffuserActor(nn.Module):
         for layer_pred in pred:
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
+            denoise_target = self.position_noise_scheduler.prepare_target(
+                noise, gt_trajectory
+            )
             loss = (
-                30 * F.l1_loss(trans, noise[..., :3], reduction='mean')
-                + 10 * F.l1_loss(rot, noise[..., 3:9], reduction='mean')
+                30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')
+                + 10 * F.l1_loss(rot, denoise_target[..., 3:9], reduction='mean')
             )
             if torch.numel(gt_openess) > 0:
                 openess = layer_pred[..., 9:]
@@ -439,18 +443,16 @@ class DiffuserActor(nn.Module):
         return total_loss
 
 
-class DiffusionHead(nn.Module):
+class TransformerHead(nn.Module):
 
     def __init__(self,
                  embedding_dim=60,
                  num_attn_heads=8,
                  use_instruction=False,
                  rotation_parametrization='quat',
-                 nhist=3,
-                 lang_enhanced=False):
+                 nhist=3):
         super().__init__()
         self.use_instruction = use_instruction
-        self.lang_enhanced = lang_enhanced
         if '6D' in rotation_parametrization:
             rotation_dim = 6  # continuous 6D
         else:
@@ -489,29 +491,16 @@ class DiffusionHead(nn.Module):
         )
 
         # Shared attention layers
-        if not self.lang_enhanced:
-            self.self_attn = FFWRelativeSelfAttentionModule(
-                embedding_dim, num_attn_heads, num_layers=4, use_adaln=True
-            )
-        else:  # interleave cross-attention to language
-            self.self_attn = FFWRelativeSelfCrossAttentionModule(
-                embedding_dim, num_attn_heads,
-                num_self_attn_layers=4,
-                num_cross_attn_layers=3,
-                use_adaln=True
-            )
+        self.self_attn = FFWRelativeSelfAttentionModule(
+            embedding_dim, num_attn_heads, num_layers=4, use_adaln=True
+        )
 
         # Specific (non-shared) Output layers:
         # 1. Rotation
         self.rotation_proj = nn.Linear(embedding_dim, embedding_dim)
-        if not self.lang_enhanced:
-            self.rotation_self_attn = FFWRelativeSelfAttentionModule(
-                embedding_dim, num_attn_heads, 2, use_adaln=True
-            )
-        else:  # interleave cross-attention to language
-            self.rotation_self_attn = FFWRelativeSelfCrossAttentionModule(
-                embedding_dim, num_attn_heads, 2, 1, use_adaln=True
-            )
+        self.rotation_self_attn = FFWRelativeSelfAttentionModule(
+            embedding_dim, num_attn_heads, 2, use_adaln=True
+        )
         self.rotation_predictor = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
@@ -520,14 +509,9 @@ class DiffusionHead(nn.Module):
 
         # 2. Position
         self.position_proj = nn.Linear(embedding_dim, embedding_dim)
-        if not self.lang_enhanced:
-            self.position_self_attn = FFWRelativeSelfAttentionModule(
-                embedding_dim, num_attn_heads, 2, use_adaln=True
-            )
-        else:  # interleave cross-attention to language
-            self.position_self_attn = FFWRelativeSelfCrossAttentionModule(
-                embedding_dim, num_attn_heads, 2, 1, use_adaln=True
-            )
+        self.position_self_attn = FFWRelativeSelfAttentionModule(
+            embedding_dim, num_attn_heads, 2, use_adaln=True
+        )
         self.position_predictor = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
@@ -600,13 +584,13 @@ class DiffusionHead(nn.Module):
             gripper_features: A tensor of shape (N, B, F)
             context_pcd: A tensor of shape (B, N, 3)
             context_features: A tensor of shape (N, B, F)
-            timesteps: A tensor of shape (B,) indicating the diffusion step
+            timesteps: A tensor of shape (B,) indicating the denoise step
             curr_gripper_features: A tensor of shape (M, B, F)
             sampled_context_features: A tensor of shape (K, B, F)
             sampled_rel_context_pos: A tensor of shape (B, K, F, 2)
             instr_feats: (B, max_instruction_length, F)
         """
-        # Diffusion timestep
+        # Denoise timestep
         time_embs = self.encode_denoising_timestep(
             timesteps, curr_gripper_features
         )

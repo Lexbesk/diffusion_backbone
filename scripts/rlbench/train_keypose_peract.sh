@@ -11,13 +11,14 @@ diffusion_timesteps=10
 B=12
 C=144
 ngpus=4
+ngpus=1
 quaternion_format=xyzw
 quaternion_format=wxyz
 image_size=256,256
 point_sampling=fps
 use_rf=1
 use_hsp=0
-run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer-maeres3-viewdrop40
+run_log_dir=diffusion_multitask-C$C-B$B-lr$lr-DI$dense_interpolation-$interpolation_length-H$num_history-DT$diffusion_timesteps-$point_sampling-xformer-maeres3
 
 CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_trajectory.py \
@@ -52,4 +53,6 @@ CUDA_LAUNCH_BLOCKING=1 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --max_episodes_per_task -1 \
     --max_episode_length 100 \
     --quaternion_format $quaternion_format \
+    --checkpoint train_logs/${main_dir}/${run_log_dir}/last.pth \
+    --eval_only 1 \
     --run_log_dir ${run_log_dir}

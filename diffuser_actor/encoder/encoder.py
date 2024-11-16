@@ -3,32 +3,29 @@ import einops
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torchvision.ops import FeaturePyramidNetwork
 from torch_cluster import fps
 
-from .position_encodings import RotaryPositionEncoding3D
-from .layers import FFWRelativeCrossAttentionModule, ParallelAttention
-from .resnet import load_resnet50, load_resnet18
-from .clip import load_clip
+from ..utils.position_encodings import RotaryPositionEncoding3D
+from ..utils.layers import FFWRelativeCrossAttentionModule, ParallelAttention
+from .vision.resnet import load_resnet50, load_resnet18
+from .vision.clip import load_clip
+from .vision.fpn import EfficientFeaturePyramidNetwork
 
 
 class Encoder(nn.Module):
 
     def __init__(self,
                  backbone="clip",
-                 image_size=(256, 256),
                  embedding_dim=60,
-                 num_sampling_level=3,
-                 nhist=3,
-                 num_attn_heads=8,
+                 num_sampling_level=1,
+                 nhist=1,
+                 num_attn_heads=9,
                  num_vis_ins_attn_layers=2,
                  fps_subsampling_factor=5):
         super().__init__()
         assert backbone in ["resnet50", "resnet18", "clip"]
-        assert image_size in [(128, 128), (256, 256)]
         assert num_sampling_level in [1, 2, 3, 4]
 
-        self.image_size = image_size
         self.num_sampling_level = num_sampling_level
         self.fps_subsampling_factor = fps_subsampling_factor
 
@@ -42,24 +39,19 @@ class Encoder(nn.Module):
         for p in self.backbone.parameters():
             p.requires_grad = False
 
+        # Coarse RGB features are the 3rd layer of the feature pyramid
+        # at 1/8 resolution (32x32)
+        # Fine RGB features are the 1st layer of the feature pyramid
+        # at 1/2 resolution (128x128)
+        self.feature_map_pyramid = ['res3']
+        self.downscaling_factor_pyramid = [8]
+
         # Semantic visual features at different scales
-        self.feature_pyramid = FeaturePyramidNetwork(
-            [64, 256, 512, 1024, 2048], embedding_dim
+        output_level = min([int(lvl[3:]) for lvl in self.feature_map_pyramid])
+        output_level = f"res{output_level}"
+        self.feature_pyramid = EfficientFeaturePyramidNetwork(
+            [64, 256, 512, 1024, 2048], embedding_dim, output_level=output_level
         )
-        if self.image_size == (128, 128):
-            # Coarse RGB features are the 2nd layer of the feature pyramid
-            # at 1/4 resolution (32x32)
-            # Fine RGB features are the 1st layer of the feature pyramid
-            # at 1/2 resolution (64x64)
-            self.feature_map_pyramid = ['res4', 'res3', 'res2', 'res1']
-            self.downscaling_factor_pyramid = [16, 8, 4, 2]
-        elif self.image_size == (256, 256):
-            # Coarse RGB features are the 3rd layer of the feature pyramid
-            # at 1/8 resolution (32x32)
-            # Fine RGB features are the 1st layer of the feature pyramid
-            # at 1/2 resolution (128x128)
-            self.feature_map_pyramid = ['res3', 'res3', 'res1', 'res1']
-            self.downscaling_factor_pyramid = [8, 8, 2, 2]
 
         # 3D relative positional embeddings
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
@@ -67,7 +59,7 @@ class Encoder(nn.Module):
         # Current gripper learnable features
         self.curr_gripper_embed = nn.Embedding(nhist, embedding_dim)
         self.gripper_context_head = FFWRelativeCrossAttentionModule(
-            embedding_dim, num_attn_heads, num_layers=3, use_adaln=False
+            embedding_dim, num_attn_heads, num_layers=2, use_adaln=False
         )
 
         # Goal gripper learnable features
@@ -231,7 +223,7 @@ class Encoder(nn.Module):
         # Dummy positional embeddings, all 0s
         instr_dummy_pos = torch.zeros(
             len(instruction), instr_feats.shape[1], 3,
-            device=instruction.device
+            device=instr_feats.device
         )
         instr_dummy_pos = self.relative_pe_layer(instr_dummy_pos)
         return instr_feats, instr_dummy_pos
@@ -242,14 +234,6 @@ class Encoder(nn.Module):
         # outputs of analogous shape, with smaller Np
         npts, bs, ch = context_features.shape
 
-        # Sample points with FPS
-        #sampled_inds = dgl_geo.farthest_point_sampler(
-        #    einops.rearrange(
-        #        context_features,
-        #        "npts b c -> b npts c"
-        #    ).to(torch.float64),
-        #    max(npts // self.fps_subsampling_factor, 1), 0
-        #).long()
         batch_indices = torch.arange(
             bs, device=context_features.device).long()
         batch_indices = batch_indices[:, None].repeat(1, npts)
