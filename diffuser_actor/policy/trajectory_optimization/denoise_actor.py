@@ -106,8 +106,8 @@ class DenoiseActor(nn.Module):
         context = pcd_pyramid[0]
 
         if self._mae and self.training:
-            # drop_ratio = np.random.uniform(0.3, 0.6)
-            drop_ratio = np.random.uniform(0.2, 0.4)
+            drop_ratio = np.random.uniform(0.3, 0.6)
+            # drop_ratio = np.random.uniform(0.2, 0.4)
             keep_num = int(context_feats.shape[1] * (1 - drop_ratio))
             device = context_feats.device
             keep_inds = [

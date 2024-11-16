@@ -6,6 +6,7 @@ eval_data_dir=data/peract/Peract_packaged/val
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
+lr_scheduler=cosine
 dense_interpolation=1
 interpolation_length=2
 num_history=1
@@ -27,7 +28,7 @@ num_workers=4
 dataset=GNFactor
 ngpus=2
 
-run_log_dir=C$C-B$B-lr$lr-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 # checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 checkpoint=none
 eval_only=false
@@ -56,6 +57,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --batch_size_val $B_val \
     --keypose_only $keypose_only \
     --lr $lr\
+    --lr_scheduler $lr_scheduler \
     --num_history $num_history \
     --eval_only $eval_only \
     --checkpoint $checkpoint \

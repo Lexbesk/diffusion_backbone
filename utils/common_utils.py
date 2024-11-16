@@ -1,3 +1,5 @@
+import argparse
+
 import pickle
 from typing import Dict, Optional, Sequence
 from pathlib import Path
@@ -7,6 +9,22 @@ import numpy as np
 
 
 Instructions = Dict[str, Dict[int, torch.Tensor]]
+
+
+def str_none(value):
+    if value.lower() in ['none', 'null', 'nil'] or len(value) == 0:
+        return None
+    else:
+        return value
+
+
+def str2bool(value):
+    if value.lower() in ['true', '1', 't', 'y', 'yes']:
+        return True
+    elif value.lower() in ['false', '0', 'f', 'n', 'no']:
+        return False
+    else:
+        raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
 def round_floats(o):

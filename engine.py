@@ -3,10 +3,13 @@
 import os
 import pickle
 import random
+import json
+from omegaconf import OmegaConf
 
 import numpy as np
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
 from torch.utils.data import DataLoader, default_collate
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
@@ -21,19 +24,19 @@ class BaseTrainTester:
     def __init__(self, args):
         """Initialize."""
         if dist.get_rank() == 0:
-            args.save(str(args.log_dir / "hparams.json"))
+            args_dict = vars(args)
+            conf = OmegaConf.create(args_dict)
+            output_file = str(args.log_dir / "config.yaml")
+            OmegaConf.save(conf, output_file)
 
         self.args = args
 
         if dist.get_rank() == 0:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
-    @staticmethod
-    def get_datasets():
+    def get_datasets(self):
         """Initialize datasets."""
-        train_dataset = None
-        test_dataset = None
-        return train_dataset, test_dataset
+        raise NotImplementedError
 
     def get_loaders(self, collate_fn=default_collate):
         """Initialize data loaders."""
@@ -75,16 +78,23 @@ class BaseTrainTester:
         )
         return train_loader, test_loader
 
-    @staticmethod
-    def get_model():
+    def get_model(self):
         """Initialize the model."""
-        return None
+        raise NotImplementedError
+
+    def get_workspace_normalizer(self, data_loader):
+        """Compute workspace normalizer."""
+        raise NotImplementedError
+
+    def get_text_encoder(self):
+        """Initialize the model."""
+        raise NotImplementedError
 
     @staticmethod
     def get_criterion():
         """Get loss criterion for training."""
         # criterion is a class, must have compute_loss and compute_metrics
-        return None
+        raise NotImplementedError
 
     def get_optimizer(self, model):
         """Initialize optimizer."""
@@ -101,6 +111,19 @@ class BaseTrainTester:
         optimizer = optim.AdamW(optimizer_grouped_parameters)
         return optimizer
 
+    def get_lr_scheduler(self, optimizer):
+        """Initialize learning rate scheduler."""
+        if self.args.lr_scheduler == "constant":
+            scheduler = ConstantLR(
+                optimizer, factor=1.0, total_iters=self.args.train_iters
+            )
+        elif self.args.lr_scheduler == "cosine":
+            scheduler = CosineAnnealingLR(optimizer, T_max=self.args.train_iters)
+        else:
+            raise NotImplementedError
+
+        return scheduler
+
     def main(self, collate_fn=default_collate):
         """Run main training/testing pipeline."""
         # Get loaders
@@ -114,15 +137,8 @@ class BaseTrainTester:
 
         # Get optimizer
         optimizer = self.get_optimizer(model)
+        lr_scheduler = self.get_lr_scheduler(optimizer)
         scaler = torch.GradScaler()
-
-        # Move model to devices
-        if torch.cuda.is_available():
-            model = model.cuda()
-        model = DistributedDataParallel(
-            model, device_ids=[self.args.local_rank],
-            broadcast_buffers=False, find_unused_parameters=True
-        )
 
         # Check for a checkpoint
         start_iter, best_loss = 0, None
@@ -130,18 +146,35 @@ class BaseTrainTester:
             assert os.path.isfile(self.args.checkpoint)
             start_iter, best_loss = self.load_checkpoint(model, optimizer)
 
+        if model.workspace_normalizer is None:
+            normalizer = self.get_workspace_normalizer(train_loader)
+            model.workspace_normalizer = normalizer
+
+        # Get text encoder
+        text_encoder = self.get_text_encoder().cuda()
+
+        # Move model to devices
+        if torch.cuda.is_available():
+            model = model.cuda()
+
+        model = DistributedDataParallel(
+            model, device_ids=[self.args.local_rank],
+            broadcast_buffers=False, find_unused_parameters=True
+        )
+
         # Eval only
         if bool(self.args.eval_only):
             print("Test evaluation.......")
             model.eval()
             new_loss = self.evaluate_nsteps(
-                model, criterion, test_loader, step_id=-1,
-                val_iters=max(
-                    5,
-                    int(4 * len(self.args.tasks)/self.args.batch_size_val)
-                )
+                model, text_encoder, criterion, test_loader, step_id=-1,
+                val_iters=max(5, self.args.val_iters)
             )
             return model
+
+        # Step the lr scheduler to the current step
+        for _ in range(start_iter):
+            lr_scheduler.step()
 
         # Training loop
         iter_loader = iter(train_loader)
@@ -153,26 +186,24 @@ class BaseTrainTester:
                 iter_loader = iter(train_loader)
                 sample = next(iter_loader)
 
-            self.train_one_step(model, criterion, optimizer, scaler, step_id, sample)
+            self.train_one_step(
+                model, text_encoder, criterion, optimizer, scaler, lr_scheduler,
+                step_id, sample
+            )
+
             if (step_id + 1) % self.args.val_freq == 0:
                 print("Train evaluation.......")
                 model.eval()
                 new_loss = self.evaluate_nsteps(
-                    model, criterion, train_loader, step_id,
-                    val_iters=max(
-                        5,
-                        int(4 * len(self.args.tasks)/self.args.batch_size_val)
-                    ),
+                    model, text_encoder, criterion, train_loader, step_id,
+                    val_iters=max(5, self.args.val_iters),
                     split='train'
                 )
                 print("Test evaluation.......")
                 model.eval()
                 new_loss = self.evaluate_nsteps(
-                    model, criterion, test_loader, step_id,
-                    val_iters=max(
-                        5,
-                        int(4 * len(self.args.tasks)/self.args.batch_size_val)
-                    )
+                    model, text_encoder, criterion, test_loader, step_id,
+                    val_iters=max(5, self.args.val_iters),
                 )
                 if dist.get_rank() == 0:  # save model
                     best_loss = self.save_checkpoint(
@@ -181,41 +212,33 @@ class BaseTrainTester:
                     )
                 model.train()
 
-            if (step_id + 1) % self.args.save_freq == 0:
-                print("Test evaluation.......")
-                model.eval()
-                new_loss = self.evaluate_nsteps(
-                    model, criterion, test_loader, step_id,
-                    val_iters=max(
-                        5,
-                        int(4 * len(self.args.tasks)/self.args.batch_size_val)
-                    )
-                )
-                if dist.get_rank() == 0:  # save model
-                    best_loss = self.save_checkpoint(
-                        model, optimizer, step_id,
-                        new_loss, best_loss
-                    )
-
-
         return model
 
-    def train_one_step(self, model, criterion, optimizer, step_id, sample):
+    def train_one_step(self, model, text_encoder, criterion,
+                       optimizer, scaler, lr_scheduler, step_id, sample):
         """Run a single training step."""
-        pass
+        raise NotImplementedError
 
     @torch.no_grad()
-    def evaluate_nsteps(self, model, criterion, loader, step_id, val_iters,
-                        split='val'):
+    def evaluate_nsteps(self, model, text_encoder, criterion,
+                        loader, step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
-        return None
+        raise NotImplementedError
+
+    def compute_workspace_bounds(self, dataloader):
+        raise NotImplementedError
 
     def load_checkpoint(self, model, optimizer):
         """Load from checkpoint."""
         print("=> loading checkpoint '{}'".format(self.args.checkpoint))
 
-        model_dict = torch.load(self.args.checkpoint, map_location="cpu")
-        model.load_state_dict(model_dict["weight"])
+        model_dict = torch.load(self.args.checkpoint, map_location="cpu",
+                                weights_only=True)
+        weight_dict = {
+            k.replace('module.', ''): v
+            for k, v in model_dict["weight"].items()
+        }
+        model.load_state_dict(weight_dict)
         if 'optimizer' in model_dict:
             optimizer.load_state_dict(model_dict["optimizer"])
             for p in range(len(optimizer.param_groups)):
@@ -247,8 +270,6 @@ class BaseTrainTester:
             "best_loss": best_loss
         }, self.args.log_dir / "last.pth")
         return best_loss
-
-
 
     def synchronize_between_processes(self, a_dict):
         all_dicts = all_gather(a_dict)
