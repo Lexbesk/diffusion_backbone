@@ -282,6 +282,14 @@ class RLBenchDataset(BaseDataset):
 
 class GNFactorDataset(RLBenchDataset):
     """RLBench dataset under GNFactor setup."""
+    tasks = [
+        "close_jar", "open_drawer", "sweep_to_dustpan_of_size",
+        "meat_off_grill", "turn_tap", "slide_block_to_color_target",
+        "put_item_in_drawer", "reach_and_drag", "push_buttons",
+        "stack_blocks"
+    ]
+    variations = range(0, 199)
+    cameras=("front", )
 
     def __init__(
         self,
@@ -293,19 +301,10 @@ class GNFactorDataset(RLBenchDataset):
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
     ):
-        tasks = [
-            "close_jar", "open_drawer", "sweep_to_dustpan_of_size",
-            "meat_off_grill", "turn_tap", "slide_block_to_color_target",
-            "put_item_in_drawer", "reach_and_drag", "push_buttons",
-            "stack_blocks"
-        ]
-        variations = range(0, 199)
-        taskvar = [(task, var) for task in tasks for var in variations]
+        taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 200 if training else 0
-
         max_episode_length = 100
         max_episodes_per_task = 20
-        cameras=("front", )
         color_aug = False
         bimanual = False
         relative_action = False
@@ -318,7 +317,7 @@ class GNFactorDataset(RLBenchDataset):
             max_episode_length=max_episode_length,
             cache_size=cache_size,
             max_episodes_per_task=max_episodes_per_task,
-            cameras=cameras,
+            cameras=self.cameras,
             training=training,
             image_rescale=image_rescale,
             color_aug=color_aug,
@@ -331,6 +330,17 @@ class GNFactorDataset(RLBenchDataset):
 
 class PeractDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
+    tasks = [
+        "place_cups", "close_jar", "insert_onto_square_peg",
+        "light_bulb_in", "meat_off_grill", "open_drawer",
+        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
+        "push_buttons", "put_groceries_in_cupboard",
+        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
+        "slide_block_to_color_target", "stack_blocks", "stack_cups",
+        "sweep_to_dustpan_of_size", "turn_tap"
+    ]
+    variations = range(0, 199)
+    cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
 
     def __init__(
         self,
@@ -342,22 +352,10 @@ class PeractDataset(RLBenchDataset):
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
     ):
-        tasks = [
-            "place_cups", "close_jar", "insert_onto_square_peg",
-            "light_bulb_in", "meat_off_grill", "open_drawer",
-            "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-            "push_buttons", "put_groceries_in_cupboard",
-            "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-            "slide_block_to_color_target", "stack_blocks", "stack_cups",
-            "sweep_to_dustpan_of_size", "turn_tap"
-        ]
-        variations = range(0, 199)
-        taskvar = [(task, var) for task in tasks for var in variations]
+        taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 0
-
         max_episode_length = 100
         max_episodes_per_task = -1
-        cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
         color_aug = False
         bimanual = False
         relative_action = False
@@ -370,7 +368,7 @@ class PeractDataset(RLBenchDataset):
             max_episode_length=max_episode_length,
             cache_size=cache_size,
             max_episodes_per_task=max_episodes_per_task,
-            cameras=cameras,
+            cameras=self.cameras,
             training=training,
             image_rescale=image_rescale,
             color_aug=color_aug,
@@ -383,6 +381,19 @@ class PeractDataset(RLBenchDataset):
 
 class Peract2Dataset(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
+    tasks = [
+        "bimanual_pick_laptop", "bimanual_pick_plate",
+        "bimanual_straighten_rope", "bimanual_sweep_to_dustpan",
+        "coordinated_lift_ball", "coordinated_lift_tray",
+        "coordinated_push_box", "coordinated_put_bottle_in_fridge",
+        "coordinated_put_item_in_drawer", "coordinated_take_tray_out_of_oven",
+        "dual_push_buttons", "handover_item_easy", "handover_item"
+    ]
+    variations = range(0, 199)
+    cameras = (
+        "over_shoulder_left", "over_shoulder_right",
+        "wrist_left", "wrist_right", "front"
+    )
 
     def __init__(
         self,
@@ -394,24 +405,10 @@ class Peract2Dataset(RLBenchDataset):
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
     ):
-        tasks = [
-            "bimanual_pick_laptop", "bimanual_pick_plate",
-            "bimanual_straighten_rope", "bimanual_sweep_to_dustpan",
-            "coordinated_lift_ball", "coordinated_lift_tray",
-            "coordinated_push_box", "coordinated_put_bottle_in_fridge",
-            "coordinated_put_item_in_drawer", "coordinated_take_tray_out_of_oven",
-            "dual_push_buttons", "handover_item_easy", "handover_item"
-        ]
-        variations = range(0, 199)
-        taskvar = [(task, var) for task in tasks for var in variations]
+        taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 0
-
         max_episode_length = 100
         max_episodes_per_task = -1
-        cameras = (
-            "over_shoulder_left", "over_shoulder_right",
-            "wrist_left", "wrist_right", "front"
-        )
         color_aug = False
         bimanual = True
         relative_action = False
@@ -424,7 +421,7 @@ class Peract2Dataset(RLBenchDataset):
             max_episode_length=max_episode_length,
             cache_size=cache_size,
             max_episodes_per_task=max_episodes_per_task,
-            cameras=cameras,
+            cameras=self.cameras,
             training=training,
             image_rescale=image_rescale,
             color_aug=color_aug,

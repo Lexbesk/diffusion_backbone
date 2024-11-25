@@ -137,13 +137,11 @@ class Actioner:
         instructions=None,
         apply_cameras=("left_shoulder", "right_shoulder", "wrist"),
         action_dim=7,
-        predict_trajectory=True
     ):
         self._policy = policy
         self._instructions = instructions
         self._apply_cameras = apply_cameras
         self._action_dim = action_dim
-        self._predict_trajectory = predict_trajectory
 
         self._actions = {}
         self._instr = None
@@ -201,7 +199,7 @@ class Actioner:
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
         """
-        output = {"action": None, "trajectory": None}
+        output = {"action": None}
 
         rgbs = rgbs / 2 + 0.5  # in [0, 1]
 
@@ -212,33 +210,21 @@ class Actioner:
         self._task_id = self._task_id.to(rgbs.device)
 
         # Predict trajectory
-        if self._predict_trajectory:
-            print('Predict Trajectory')
-            fake_traj = torch.full(
-                [1, interpolation_length - 1, gripper.shape[-1]], 0
-            ).to(rgbs.device)
-            traj_mask = torch.full(
-                [1, interpolation_length - 1], False
-            ).to(rgbs.device)
-            output["trajectory"] = self._policy(
-                fake_traj,
-                traj_mask,
-                rgbs[:, -1],
-                pcds[:, -1],
-                self._instr,
-                gripper[..., :7],
-                run_inference=True
-            )
-        else:
-            print('Predict Keypose')
-            pred = self._policy(
-                rgbs[:, -1],
-                pcds[:, -1],
-                self._instr,
-                gripper[:, -1, :self._action_dim],
-            )
-            # Hackish, assume self._policy is an instance of Act3D
-            output["action"] = self._policy.prepare_action(pred)
+        fake_traj = torch.full(
+            [1, interpolation_length - 1, gripper.shape[-1]], 0
+        ).to(rgbs.device)
+        traj_mask = torch.full(
+            [1, interpolation_length - 1], False
+        ).to(rgbs.device)
+        output["action"] = self._policy(
+            fake_traj,
+            traj_mask,
+            rgbs[:, -1],
+            pcds[:, -1],
+            self._instr,
+            gripper[..., :7],
+            run_inference=True
+        )
 
         return output
 
@@ -279,7 +265,6 @@ class RLBenchEnv:
         apply_pc=False,
         headless=False,
         apply_cameras=("left_shoulder", "right_shoulder", "wrist", "front"),
-        fine_sampling_ball_diameter=None,
         collision_checking=False
     ):
 
@@ -289,7 +274,6 @@ class RLBenchEnv:
         self.apply_depth = apply_depth
         self.apply_pc = apply_pc
         self.apply_cameras = apply_cameras
-        self.fine_sampling_ball_diameter = fine_sampling_ball_diameter
 
         # setup RLBench environments
         self.obs_config = self.create_obs_config(
@@ -551,28 +535,11 @@ class RLBenchEnv:
                 # Update the observation based on the predicted action
                 try:
                     # Execute entire predicted trajectory step by step
-                    if output.get("trajectory", None) is not None:
-                        trajectory = output["trajectory"][-1].cpu().numpy()
-                        trajectory[:, -1] = trajectory[:, -1].round()
+                    actions = output["action"][-1].cpu().numpy()
+                    actions[:, -1] = actions[:, -1].round()
 
-                        # execute
-                        for action in tqdm(trajectory):
-                            #try:
-                            #    collision_checking = self._collision_checking(task_str, step_id)
-                            #    obs, reward, terminate, _ = move(action_np, collision_checking=collision_checking)
-                            #except:
-                            #    terminate = True
-                            #    pass
-                            collision_checking = self._collision_checking(task_str, step_id)
-                            obs, reward, terminate, _ = move(action, collision_checking=collision_checking)
-
-                    # Or plan to reach next predicted keypoint
-                    else:
-                        print("Plan with RRT")
-                        action = output["action"]
-                        action[..., -1] = torch.round(action[..., -1])
-                        action = action[-1].detach().cpu().numpy()
-
+                    # execute
+                    for action in tqdm(actions):
                         collision_checking = self._collision_checking(task_str, step_id)
                         obs, reward, terminate, _ = move(action, collision_checking=collision_checking)
 
@@ -588,7 +555,6 @@ class RLBenchEnv:
                 except (IKError, ConfigurationPathError, InvalidActionError) as e:
                     print(task_str, demo, step_id, success_rate, e)
                     reward = 0
-                    #break
 
             total_reward += max_reward
             if reward == 0:
@@ -620,24 +586,7 @@ class RLBenchEnv:
 
     def _collision_checking(self, task_str, step_id):
         """Collision checking for planner."""
-        # collision_checking = True
         collision_checking = False
-        # if task_str == 'close_door':
-        #     collision_checking = True
-        # if task_str == 'open_fridge' and step_id == 0:
-        #     collision_checking = True
-        # if task_str == 'open_oven' and step_id == 3:
-        #     collision_checking = True
-        # if task_str == 'hang_frame_on_hanger' and step_id == 0:
-        #     collision_checking = True
-        # if task_str == 'take_frame_off_hanger' and step_id == 0:
-        #     for i in range(300):
-        #         self.env._scene.step()
-        #     collision_checking = True
-        # if task_str == 'put_books_on_bookshelf' and step_id == 0:
-        #     collision_checking = True
-        # if task_str == 'slide_cabinet_open_and_place_cups' and step_id == 0:
-        #     collision_checking = True
         return collision_checking
 
     def verify_demos(

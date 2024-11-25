@@ -7,69 +7,58 @@ import os
 
 import torch
 import numpy as np
-import tap
+import argparse
 
-from diffuser_actor.keypose_optimization.act3d import Act3D
-from diffuser_actor.trajectory_optimization.diffuser_actor import DiffuserActor
+from diffuser_actor.policy.trajectory_optimization.denoise_actor import DenoiseActor
 from utils.common_utils import (
     load_instructions,
-    get_gripper_loc_bounds,
     round_floats
 )
 from utils.utils_with_rlbench import RLBenchEnv, Actioner, load_episodes
+from utils.common_utils import str2bool, str_none
+from datasets.dataset_rlbench import (
+    GNFactorDataset,
+    PeractDataset,
+    Peract2Dataset
+)
 
 
-class Arguments(tap.Tap):
-    checkpoint: Path = ""
-    seed: int = 2
-    device: str = "cuda"
-    num_episodes: int = 1
-    headless: int = 0
-    max_tries: int = 10
-    tasks: Optional[Tuple[str, ...]] = None
-    instructions: Optional[Path] = "instructions.pkl"
-    variations: Tuple[int, ...] = (-1,)
-    data_dir: Path = Path(__file__).parent / "demos"
-    cameras: Tuple[str, ...] = ("left_shoulder", "right_shoulder", "wrist")
-    image_size: str = "256,256"
-    verbose: int = 0
-    output_file: Path = Path(__file__).parent / "eval.json"
-    max_steps: int = 25
-    test_model: str = "3d_diffuser_actor"
-    collision_checking: int = 0
-    gripper_loc_bounds_file: str = "tasks/74_hiveformer_tasks_location_bounds.json"
-    gripper_loc_bounds_buffer: float = 0.04
-    single_task_gripper_loc_bounds: int = 0
-    predict_trajectory: int = 1
+def parse_arguments():
+    parser = argparse.ArgumentParser("Parse arguments for evaluate_policy.py")
+    # Trainign and testing
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--checkpoint', type=str_none, default=None)
+    parser.add_argument('--device', type=str, default="cuda")
+    parser.add_argument('--image_size', type=str, default="256,256")
+    parser.add_argument('--num_episodes', type=int, default=1)
+    parser.add_argument('--headless', type=str2bool, default=False)
+    parser.add_argument('--predict_trajectory', type=str2bool, default=False)
+    parser.add_argument('--max_tries', type=int, default=10)
+    parser.add_argument('--dataset', type=str, default="Peract")
+    parser.add_argument('--instructions', type=str, default="instructions.pkl")
+    parser.add_argument('--data_dir', type=str, default=str(Path(__file__).parent / "demos"))
+    parser.add_argument('--verbose', type=str2bool, default=False)
+    parser.add_argument('--output_file', type=str, default=str(Path(__file__).parent / "eval.json"))
+    parser.add_argument('--max_steps', type=int, default=25)
+    parser.add_argument('--collision_checking', type=str2bool, default=False)
+    parser.add_argument('--denoise_timesteps', type=int, default=10)
+    parser.add_argument('--denoise_model', type=str, default="rectified_flow",
+                        choices=["ddpm", "rectified_flow"])
+    parser.add_argument('--num_history', type=int, default=1)
+    parser.add_argument('--fps_subsampling_factor', type=int, default=5)
+    parser.add_argument('--dense_interpolation', type=str2bool, default=False)
+    parser.add_argument('--interpolation_length', type=int, default=100)
+    parser.add_argument('--relative_action', type=str2bool, default=False)
+    parser.add_argument('--action_dim', type=int, default=8)
+    parser.add_argument('--backbone', type=str, default="clip")
+    parser.add_argument('--embedding_dim', type=int, default=120)
+    parser.add_argument('--num_attn_heads', type=int, default=9)
+    parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
+    parser.add_argument('--use_instruction', type=int, default=1)
+    parser.add_argument('--rotation_parametrization', type=str, default='quat')
+    parser.add_argument('--quaternion_format', type=str, default='wxyz')
 
-    # Act3D model parameters
-    num_query_cross_attn_layers: int = 2
-    num_ghost_point_cross_attn_layers: int = 2
-    num_ghost_points: int = 10000
-    num_ghost_points_val: int = 10000
-    weight_tying: int = 1
-    gp_emb_tying: int = 1
-    num_sampling_level: int = 3
-    fine_sampling_ball_diameter: float = 0.16
-    regress_position_offset: int = 0
-
-    # 3D Diffuser Actor model parameters
-    diffusion_timesteps: int = 100
-    num_history: int = 3
-    fps_subsampling_factor: int = 5
-    lang_enhanced: int = 0
-    dense_interpolation: int = 1
-    interpolation_length: int = 2
-    relative_action: int = 0
-
-    # Shared model parameters
-    action_dim: int = 8
-    backbone: str = "clip"  # one of "resnet", "clip"
-    embedding_dim: int = 120
-    num_vis_ins_attn_layers: int = 2
-    use_instruction: int = 1
-    rotation_parametrization: str = '6D'
-    quaternion_format: str = 'xyzw'
+    return parser.parse_args()
 
 
 def load_models(args):
@@ -77,59 +66,19 @@ def load_models(args):
 
     print("Loading model from", args.checkpoint, flush=True)
 
-    # Gripper workspace is the union of workspaces for all tasks
-    if args.single_task_gripper_loc_bounds and len(args.tasks) == 1:
-        task = args.tasks[0]
-    else:
-        task = None
-    print('Gripper workspace')
-    gripper_loc_bounds = get_gripper_loc_bounds(
-        args.gripper_loc_bounds_file,
-        task=task, buffer=args.gripper_loc_bounds_buffer,
+    model = DenoiseActor(
+        backbone=args.backbone,
+        embedding_dim=args.embedding_dim,
+        num_vis_ins_attn_layers=args.num_vis_ins_attn_layers,
+        use_instruction=args.use_instruction,
+        fps_subsampling_factor=args.fps_subsampling_factor,
+        rotation_parametrization=args.rotation_parametrization,
+        quaternion_format=args.quaternion_format,
+        denoise_timesteps=args.denoise_timesteps,
+        denoise_model=args.denoise_model,
+        nhist=args.num_history,
+        relative=args.relative_action,
     )
-
-    if args.test_model == "3d_diffuser_actor":
-        model = DiffuserActor(
-            backbone=args.backbone,
-            image_size=tuple(int(x) for x in args.image_size.split(",")),
-            embedding_dim=args.embedding_dim,
-            num_vis_ins_attn_layers=args.num_vis_ins_attn_layers,
-            use_instruction=bool(args.use_instruction),
-            fps_subsampling_factor=args.fps_subsampling_factor,
-            gripper_loc_bounds=gripper_loc_bounds,
-            rotation_parametrization=args.rotation_parametrization,
-            quaternion_format=args.quaternion_format,
-            diffusion_timesteps=args.diffusion_timesteps,
-            nhist=args.num_history,
-            relative=bool(args.relative_action),
-            lang_enhanced=bool(args.lang_enhanced),
-        )
-    elif args.test_model == "act3d":
-        model = Act3D(
-            backbone=args.backbone,
-            image_size=tuple(int(x) for x in args.image_size.split(",")),
-            embedding_dim=args.embedding_dim,
-            num_ghost_point_cross_attn_layers=(
-                args.num_ghost_point_cross_attn_layers),
-            num_query_cross_attn_layers=(
-                args.num_query_cross_attn_layers),
-            num_vis_ins_attn_layers=(
-                args.num_vis_ins_attn_layers),
-            rotation_parametrization=args.rotation_parametrization,
-            gripper_loc_bounds=gripper_loc_bounds,
-            num_ghost_points=args.num_ghost_points,
-            num_ghost_points_val=args.num_ghost_points_val,
-            weight_tying=bool(args.weight_tying),
-            gp_emb_tying=bool(args.gp_emb_tying),
-            num_sampling_level=args.num_sampling_level,
-            fine_sampling_ball_diameter=(
-                args.fine_sampling_ball_diameter),
-            regress_position_offset=bool(
-                args.regress_position_offset),
-            use_instruction=bool(args.use_instruction)
-        ).to(device)
-    else:
-        raise NotImplementedError
 
     # Load model weights
     model_dict = torch.load(args.checkpoint, map_location="cpu")
@@ -145,8 +94,13 @@ def load_models(args):
 
 if __name__ == "__main__":
     # Arguments
-    args = Arguments().parse_args()
-    args.cameras = tuple(x for y in args.cameras for x in y.split(","))
+    args = parse_arguments()
+    dataset_cls = {
+        "Peract": PeractDataset,
+        "Peract2": Peract2Dataset,
+        "GNFactor": GNFactorDataset
+    }[args.dataset]
+
     print("Arguments:")
     print(args)
     print("-" * 100)
@@ -168,7 +122,7 @@ if __name__ == "__main__":
         apply_rgb=True,
         apply_pc=True,
         headless=bool(args.headless),
-        apply_cameras=args.cameras,
+        apply_cameras=dataset_cls.cameras,
         collision_checking=bool(args.collision_checking)
     )
 
@@ -179,21 +133,21 @@ if __name__ == "__main__":
     actioner = Actioner(
         policy=model,
         instructions=instruction,
-        apply_cameras=args.cameras,
+        apply_cameras=dataset_cls.cameras,
         action_dim=args.action_dim,
         predict_trajectory=bool(args.predict_trajectory)
     )
     max_eps_dict = load_episodes()["max_episode_length"]
     task_success_rates = {}
 
-    for task_str in args.tasks:
+    for task_str in dataset_cls.tasks:
         var_success_rates = env.evaluate_task_on_multiple_variations(
             task_str,
             max_steps=(
                 max_eps_dict[task_str] if args.max_steps == -1
                 else args.max_steps
             ),
-            num_variations=args.variations[-1] + 1,
+            num_variations=dataset_cls.variations[-1] + 1,
             num_demos=args.num_episodes,
             actioner=actioner,
             max_tries=args.max_tries,
