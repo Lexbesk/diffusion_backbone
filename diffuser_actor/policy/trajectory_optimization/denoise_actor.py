@@ -33,7 +33,6 @@ class DenoiseActor(nn.Module):
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
                  fps_subsampling_factor=5,
-                 workspace_normalizer=None,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
                  denoise_timesteps=100,
@@ -77,18 +76,21 @@ class DenoiseActor(nn.Module):
                 num_train_timesteps=denoise_timesteps,
                 timestep_spacing="linspace",
                 noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1},
+                noise_sampler_config={'mean': 0, 'std': 1.5},
             )
             self.rotation_noise_scheduler = RFScheduler(
                 num_train_timesteps=denoise_timesteps,
                 timestep_spacing="linspace",
                 noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1},
+                noise_sampler_config={'mean': 0, 'std': 1.5},
             )
         else:
             raise ValueError(f"Unknown denoise model: {denoise_model}")
         self.n_steps = denoise_timesteps
-        self.workspace_normalizer = workspace_normalizer
+        self.workspace_normalizer = nn.Parameter(
+            torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
+            requires_grad=False
+        )
 
         self._mae = True
 

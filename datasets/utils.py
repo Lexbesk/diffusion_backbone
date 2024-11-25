@@ -50,12 +50,12 @@ class ColorAugmentation:
             tfv2.RandomEqualize(),
             tfv2.RandomPosterize(2)
         ])
-        self.ration = ratio
+        self.ratio = ratio
 
     def __call__(self, image, **kwargs):
         image = self.transforms(image)
         random_value = np.random.uniform()
-        if(random_value > self.ration):
+        if(random_value > self.ratio):
             brightness = np.random.uniform(0.5, 1.5)
             image = tfv2.functional.adjust_brightness(
                 image, brightness

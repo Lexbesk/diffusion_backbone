@@ -9,7 +9,7 @@ class DDPMScheduler(BaseScheduler):
     def sample_noise_step(self, num_noise, device):
         timesteps = torch.randint(
             0,
-            self.position_noise_scheduler.config.num_train_timesteps,
+            self.config.num_train_timesteps,
             (num_noise,), device=device
         ).long()
 

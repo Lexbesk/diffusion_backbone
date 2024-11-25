@@ -8,6 +8,7 @@ import pickle
 
 import numpy as np
 import torch
+import einops
 
 from .utils import loader, TrajectoryInterpolator
 from .dataset_base import BaseDataset
@@ -169,6 +170,8 @@ class RLBenchDataset(BaseDataset):
 
         # Get the image tensors for the frame ids we got
         states = to_tensor(episode[1][st_frame:ed_frame])
+        if states.dtype == torch.float64:
+            states = states.float()
 
         # Camera ids
         if episode[3]:
@@ -177,6 +180,12 @@ class RLBenchDataset(BaseDataset):
             index = torch.tensor([cameras.index(c) for c in self._cameras])
             # Re-map states based on camera ids
             states = states[:, index]
+
+        # Augmentations
+        if self._resize is not None:
+            states = einops.rearrange(states, "t n m c h w -> t n (m c) h w")
+            states = self._resize(states=states)["states"]
+            states = einops.rearrange(states, "t n (m c) h w -> t n m c h w", m=2)
 
         # Split RGB and XYZ
         rgbs = states[:, :, 0]
@@ -250,12 +259,6 @@ class RLBenchDataset(BaseDataset):
         traj_mask = torch.zeros(traj.shape[:-1])
         for i, len_ in enumerate(traj_lens.long()):
             traj_mask[i, len_:] = 1
-
-        # Augmentations
-        if self._resize is not None:
-            modals = self._resize(rgbs=rgbs, pcds=pcds)
-            rgbs = modals["rgbs"]
-            pcds = modals["pcds"]
 
         ret_dict = {
             "task": [task for _ in range(st_frame, ed_frame)],
