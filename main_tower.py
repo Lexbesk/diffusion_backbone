@@ -13,7 +13,8 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
+from torch.nn.parallel import DistributedDataParallel
 from tqdm import trange
 
 from engine import BaseTrainTester
@@ -23,7 +24,7 @@ from datasets.dataset_rlbench import (
     Peract2Dataset
 )
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
-from diffuser_actor.policy import DenoiseActor, BimanualDenoiseActor
+from diffuser_actor.policy.trajectory_optimization.denoise_actor_tower import DenoiseActor
 from utils.common_utils import count_parameters, str2bool, str_none
 
 
@@ -181,8 +182,102 @@ class TrainTester(BaseTrainTester):
         """Initialize the model."""
         return ClipTextEncoder(self.args.text_max_length)
 
+    def main(self, collate_fn=default_collate):
+        """Run main training/testing pipeline."""
+        # Get loaders
+        train_loader, test_loader = self.get_loaders(collate_fn)
+
+        # Get model
+        model = self.get_model()
+        if not self.args.checkpoint:
+            normalizer = self.get_workspace_normalizer(train_loader)
+            model.workspace_normalizer.copy_(normalizer)
+
+        # Get criterion
+        criterion = self.get_criterion()
+
+        # Get optimizer
+        optimizer = self.get_optimizer(model)
+        lr_scheduler = self.get_lr_scheduler(optimizer)
+        scaler = torch.GradScaler()
+
+        # Move model to devices
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model = DistributedDataParallel(
+            model, device_ids=[self.args.local_rank],
+            broadcast_buffers=False, find_unused_parameters=True
+        )
+
+        # Check for a checkpoint
+        start_iter, best_loss = 0, None
+        if self.args.checkpoint:
+            assert os.path.isfile(self.args.checkpoint)
+            start_iter, best_loss = self.load_checkpoint(model, optimizer)
+        print(model.module.workspace_normalizer)
+
+        # Get text encoder
+        text_encoder = self.get_text_encoder().cuda()
+
+        # Eval only
+        if bool(self.args.eval_only):
+            print("Test evaluation.......")
+            model.eval()
+            new_loss = self.evaluate_nsteps(
+                model, text_encoder, criterion, test_loader, step_id=-1,
+                val_iters=max(25, self.args.val_iters)
+            )
+            return model
+
+        # Step the lr scheduler to the current step
+        for _ in range(start_iter):
+            lr_scheduler.step()
+
+        is_gripper_camera = [
+            "wrist" in c or "gripper" in c for c in train_loader.dataset.cameras
+        ]
+        is_gripper_camera = torch.Tensor(is_gripper_camera, dtype=torch.bool).cuda()
+
+        # Training loop
+        iter_loader = iter(train_loader)
+        model.train()
+        for step_id in trange(start_iter, self.args.train_iters):
+            try:
+                sample = next(iter_loader)
+            except StopIteration:
+                iter_loader = iter(train_loader)
+                sample = next(iter_loader)
+
+            self.train_one_step(
+                model, text_encoder, criterion, optimizer, scaler, lr_scheduler,
+                step_id, sample, is_gripper_camera
+            )
+
+            if (step_id + 1) % self.args.val_freq == 0:
+                print("Train evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, text_encoder, criterion, train_loader, step_id, is_gripper_camera,
+                    val_iters=max(5, self.args.val_iters),
+                    split='train'
+                )
+                print("Test evaluation.......")
+                new_loss = self.evaluate_nsteps(
+                    model, text_encoder, criterion, test_loader, step_id, is_gripper_camera,
+                    val_iters=max(5, self.args.val_iters),
+                )
+                if dist.get_rank() == 0:  # save model
+                    best_loss = self.save_checkpoint(
+                        model, optimizer, step_id,
+                        new_loss, best_loss
+                    )
+                model.train()
+
+        return model
+
+
     def train_one_step(self, model, text_encoder, criterion,
-                       optimizer, scaler, lr_scheduler, step_id, sample):
+                       optimizer, scaler, lr_scheduler, step_id, sample, is_gripper_camera):
         """Run a single training step."""
         if step_id % self.args.accumulate_grad_batches == 0:
             optimizer.zero_grad()
@@ -209,7 +304,8 @@ class TrainTester(BaseTrainTester):
                 sample["rgbs"],
                 sample["pcds"],
                 instr,
-                proprioception
+                proprioception,
+                is_gripper_camera
             )
 
             # Backward pass
@@ -231,7 +327,7 @@ class TrainTester(BaseTrainTester):
 
     @torch.inference_mode()
     def evaluate_nsteps(self, model, text_encoder, criterion, loader,
-                        step_id, val_iters, split='val'):
+                        step_id, is_gripper_camera, val_iters, split='val'):
         """Run a given number of evaluation steps."""
         if self.args.val_iters != -1:
             val_iters = self.args.val_iters
@@ -260,18 +356,20 @@ class TrainTester(BaseTrainTester):
                     instr = text_encoder(sample['instr'], device)
                 else:
                     instr = sample["instr"].to(device)
-                action = model(
+                gripper_camera_action, non_gripper_camera_action = model(
                     sample["action"].to(device),
                     sample["action_mask"].to(device),
                     sample["rgbs"].to(device),
                     sample["pcds"].to(device),
                     instr,
                     proprioception.to(device),
+                    is_gripper_camera,
                     run_inference=True
                 )
 
                 losses, losses_B = criterion.compute_metrics(
-                    action,
+                    gripper_camera_action,
+                    non_gripper_camera_action,
                     sample["action"].to(device),
                     sample["action_mask"].to(device)
                 )
@@ -292,16 +390,6 @@ class TrainTester(BaseTrainTester):
                     if key not in values:
                         values[key] = torch.Tensor([]).to(device)
                     values[key] = torch.cat([values[key], l_task.unsqueeze(0)])
-
-            # Generate visualizations
-            if i == 0 and dist.get_rank() == 0 and step_id > -1:
-                viz_key = f'{split}-viz/viz'
-                viz = generate_visualizations(
-                    action,
-                    sample["action"].to(device),
-                    sample["action_mask"].to(device)
-                )
-                self.writer.add_image(viz_key, viz, step_id)
 
         # Log all statistics
         values = {k: v.mean().item() for k, v in values.items()}
@@ -353,26 +441,39 @@ class TrajectoryCriterion:
         return pred
 
     @staticmethod
-    def compute_metrics(pred, gt, mask):
+    def compute_metrics(pred, pred_ee, gt, mask):
         # pred/gt are (B, L, 7), mask (B, L)
         pos_l2 = ((pred[..., :3] - gt[..., :3]) ** 2).sum(-1).sqrt()
+        pos_l2_ee = ((pred_ee[..., :3] - gt[..., :3]) ** 2).sum(-1).sqrt()
+        mask_pos_l2 = pos_l2.mean(-1) < pos_l2_ee.mean(-1)
+        pos_l2 = torch.where(mask_pos_l2[:, None], pos_l2, pos_l2_ee)
         # symmetric quaternion eval
         quat_l1 = (pred[..., 3:7] - gt[..., 3:7]).abs().sum(-1)
         quat_l1_ = (pred[..., 3:7] + gt[..., 3:7]).abs().sum(-1)
         select_mask = (quat_l1 < quat_l1_).float()
         quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
+        quat_l1_ee = (pred_ee[..., 3:7] - gt[..., 3:7]).abs().sum(-1)
+        quat_l1_ee_ = (pred_ee[..., 3:7] + gt[..., 3:7]).abs().sum(-1)
+        select_mask_ee = (quat_l1_ee < quat_l1_ee_).float()
+        quat_l1_ee = (select_mask_ee * quat_l1_ee + (1 - select_mask_ee) * quat_l1_ee_)
+
+        mask_quat_l1 = quat_l1.mean(-1) < quat_l1_ee.mean(-1)
+        quat_l1 = torch.where(mask_quat_l1[:, None], quat_l1, quat_l1_ee)
         # gripper openess
         openess = ((pred[..., 7:] >= 0.5) == (gt[..., 7:] > 0.0)).bool()
+        openess_ee = ((pred_ee[..., 7:] >= 0.5) == (gt[..., 7:] > 0.0)).bool()
         tr = 'traj_'
 
         # Trajectory metrics
         ret_1, ret_2 = {
-            tr + 'action_mse': F.mse_loss(pred, gt),
+            tr + 'action_mse_': F.mse_loss(pred, gt),
+            tr + 'action_mse_ee_': F.mse_loss(pred_ee, gt),
             tr + 'pos_l2': pos_l2.mean(),
             tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(),
             tr + 'rot_l1': quat_l1.mean(),
             tr + 'rot_acc_0025': (quat_l1 < 0.025).float().mean(),
-            tr + 'gripper': openess.flatten().float().mean()
+            tr + 'gripper': openess.flatten().float().mean(),
+            tr + 'gripper_ee': openess_ee.flatten().float().mean()
         }, {
             tr + 'pos_l2': pos_l2.mean(-1),
             tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(-1),
@@ -383,14 +484,27 @@ class TrajectoryCriterion:
         # Keypose metrics
         if pred.ndim == gt.ndim == 3:
             pos_l2 = ((pred[:, -1, :3] - gt[:, -1, :3]) ** 2).sum(-1).sqrt()
+            pos_l2_ee = ((pred_ee[:, -1, :3] - gt[:, -1, :3]) ** 2).sum(-1).sqrt()
+            pos_l2 = torch.where(pos_l2 < pos_l2_ee, pos_l2, pos_l2_ee)
             quat_l1 = (pred[:, -1, 3:7] - gt[:, -1, 3:7]).abs().sum(-1)
             quat_l1_ = (pred[:, -1, 3:7] + gt[:, -1, 3:7]).abs().sum(-1)
+            quat_l1_ee = (pred_ee[:, -1, 3:7] - gt[:, -1, 3:7]).abs().sum(-1)
+            quat_l1_ee_ = (pred_ee[:, -1, 3:7] + gt[:, -1, 3:7]).abs().sum(-1)
         else:
             pos_l2 = ((pred[:, -1, :, :3] - gt[:, -1, :, :3]) ** 2).sum(-1).sqrt()
+            pos_l2_ee = ((pred_ee[:, -1, :, :3] - gt[:, -1, :, :3]) ** 2).sum(-1).sqrt()
+            mask_pos_l2 = pos_l2.mean(-1) < pos_l2_ee.mean(-1)
+            pos_l2 = torch.where(mask_pos_l2[:, None], pos_l2, pos_l2_ee)
             quat_l1 = (pred[:, -1, :, 3:7] - gt[:, -1, :, 3:7]).abs().sum(-1)
             quat_l1_ = (pred[:, -1, :, 3:7] + gt[:, -1, :, 3:7]).abs().sum(-1)
+            quat_l1_ee = (pred_ee[:, -1, :, 3:7] - gt[:, -1, :, 3:7]).abs().sum(-1)
+            quat_l1_ee_ = (pred_ee[:, -1, :, 3:7] + gt[:, -1, :, 3:7]).abs().sum(-1)
         select_mask = (quat_l1 < quat_l1_).float()
+        select_mask_ee = (quat_l1_ee < quat_l1_ee_).float()
         quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
+        quat_l1_ee = (select_mask_ee * quat_l1_ee + (1 - select_mask_ee) * quat_l1_ee_)
+        select_mask = quat_l1.mean(-1) < quat_l1_ee.mean(-1)
+        quat_l1 = torch.where(select_mask[:, None], quat_l1, quat_l1_ee)
         ret_1.update({
             'pos_l2_final': pos_l2.mean(),
             'pos_l2_final<0.01': (pos_l2 < 0.01).float().mean(),

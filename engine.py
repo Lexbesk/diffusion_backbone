@@ -131,6 +131,9 @@ class BaseTrainTester:
 
         # Get model
         model = self.get_model()
+        if not self.args.checkpoint:
+            normalizer = self.get_workspace_normalizer(train_loader)
+            model.workspace_normalizer.copy_(normalizer)
 
         # Get criterion
         criterion = self.get_criterion()
@@ -140,27 +143,23 @@ class BaseTrainTester:
         lr_scheduler = self.get_lr_scheduler(optimizer)
         scaler = torch.GradScaler()
 
+        # Move model to devices
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model = DistributedDataParallel(
+            model, device_ids=[self.args.local_rank],
+            broadcast_buffers=False, find_unused_parameters=True
+        )
+
         # Check for a checkpoint
         start_iter, best_loss = 0, None
         if self.args.checkpoint:
             assert os.path.isfile(self.args.checkpoint)
             start_iter, best_loss = self.load_checkpoint(model, optimizer)
-
-        if model.workspace_normalizer is None:
-            normalizer = self.get_workspace_normalizer(train_loader)
-            model.workspace_normalizer = normalizer
+        print(model.module.workspace_normalizer)
 
         # Get text encoder
         text_encoder = self.get_text_encoder().cuda()
-
-        # Move model to devices
-        if torch.cuda.is_available():
-            model = model.cuda()
-
-        model = DistributedDataParallel(
-            model, device_ids=[self.args.local_rank],
-            broadcast_buffers=False, find_unused_parameters=True
-        )
 
         # Eval only
         if bool(self.args.eval_only):
@@ -168,7 +167,7 @@ class BaseTrainTester:
             model.eval()
             new_loss = self.evaluate_nsteps(
                 model, text_encoder, criterion, test_loader, step_id=-1,
-                val_iters=max(5, self.args.val_iters)
+                val_iters=max(25, self.args.val_iters)
             )
             return model
 
@@ -200,7 +199,6 @@ class BaseTrainTester:
                     split='train'
                 )
                 print("Test evaluation.......")
-                model.eval()
                 new_loss = self.evaluate_nsteps(
                     model, text_encoder, criterion, test_loader, step_id,
                     val_iters=max(5, self.args.val_iters),
@@ -234,11 +232,7 @@ class BaseTrainTester:
 
         model_dict = torch.load(self.args.checkpoint, map_location="cpu",
                                 weights_only=True)
-        weight_dict = {
-            k.replace('module.', ''): v
-            for k, v in model_dict["weight"].items()
-        }
-        model.load_state_dict(weight_dict)
+        model.load_state_dict(model_dict["weight"])
         if 'optimizer' in model_dict:
             optimizer.load_state_dict(model_dict["optimizer"])
             for p in range(len(optimizer.param_groups)):
