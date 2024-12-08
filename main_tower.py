@@ -219,12 +219,18 @@ class TrainTester(BaseTrainTester):
         # Get text encoder
         text_encoder = self.get_text_encoder().cuda()
 
+        is_gripper_camera = [
+            "wrist" in c or "gripper" in c for c in train_loader.dataset.cameras
+        ]
+        is_gripper_camera = torch.Tensor(is_gripper_camera).cuda().bool()
+
         # Eval only
         if bool(self.args.eval_only):
             print("Test evaluation.......")
             model.eval()
             new_loss = self.evaluate_nsteps(
                 model, text_encoder, criterion, test_loader, step_id=-1,
+                is_gripper_camera=is_gripper_camera,
                 val_iters=max(25, self.args.val_iters)
             )
             return model
@@ -232,11 +238,6 @@ class TrainTester(BaseTrainTester):
         # Step the lr scheduler to the current step
         for _ in range(start_iter):
             lr_scheduler.step()
-
-        is_gripper_camera = [
-            "wrist" in c or "gripper" in c for c in train_loader.dataset.cameras
-        ]
-        is_gripper_camera = torch.Tensor(is_gripper_camera, dtype=torch.bool).cuda()
 
         # Training loop
         iter_loader = iter(train_loader)
@@ -503,8 +504,12 @@ class TrajectoryCriterion:
         select_mask_ee = (quat_l1_ee < quat_l1_ee_).float()
         quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
         quat_l1_ee = (select_mask_ee * quat_l1_ee + (1 - select_mask_ee) * quat_l1_ee_)
-        select_mask = quat_l1.mean(-1) < quat_l1_ee.mean(-1)
-        quat_l1 = torch.where(select_mask[:, None], quat_l1, quat_l1_ee)
+        if quat_l1.ndim == 1:
+            select_mask = quat_l1 < quat_l1_ee
+            quat_l1 = torch.where(select_mask, quat_l1, quat_l1_ee)
+        else:
+            select_mask = quat_l1.mean(-1) < quat_l1_ee.mean(-1)
+            quat_l1 = torch.where(select_mask[:, None], quat_l1, quat_l1_ee)
         ret_1.update({
             'pos_l2_final': pos_l2.mean(),
             'pos_l2_final<0.01': (pos_l2 < 0.01).float().mean(),
