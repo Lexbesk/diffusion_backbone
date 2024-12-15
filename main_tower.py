@@ -21,6 +21,7 @@ from engine import BaseTrainTester
 from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
+    DebugPeractDataset,
     Peract2Dataset
 )
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
@@ -90,6 +91,7 @@ class TrainTester(BaseTrainTester):
         """Initialize datasets."""
         dataset_cls = {
             "Peract": PeractDataset,
+            "DebugPeract": DebugPeractDataset,
             "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset
         }[args.dataset]
@@ -105,6 +107,7 @@ class TrainTester(BaseTrainTester):
             ),
             dense_interpolation=self.args.dense_interpolation,
             interpolation_length=self.args.interpolation_length,
+            relative_action=self.args.relative_action,
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
@@ -116,6 +119,7 @@ class TrainTester(BaseTrainTester):
             ),
             dense_interpolation=self.args.dense_interpolation,
             interpolation_length=self.args.interpolation_length,
+            relative_action=self.args.relative_action,
         )
         return train_dataset, test_dataset
 
@@ -123,7 +127,8 @@ class TrainTester(BaseTrainTester):
         """Initialize the model."""
         # Initialize model with arguments
         if self.args.bimanual:
-            model_class = BimanualDenoiseActor
+            # model_class = BimanualDenoiseActor
+            raise NotImplementedError("Bimanual model not implemented")
         else:
             model_class = DenoiseActor
         _model = model_class(
@@ -369,8 +374,8 @@ class TrainTester(BaseTrainTester):
                 )
 
                 losses, losses_B = criterion.compute_metrics(
-                    gripper_camera_action,
                     non_gripper_camera_action,
+                    gripper_camera_action,
                     sample["action"].to(device),
                     sample["action_mask"].to(device)
                 )
