@@ -22,6 +22,7 @@ from datasets.dataset_rlbench import (
     PeractDataset,
     Peract2Dataset
 )
+from datasets.dataset_calvin import TrainABCTestD_CalvinDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import DenoiseActor, BimanualDenoiseActor
 from utils.common_utils import count_parameters, str2bool, str_none
@@ -37,7 +38,7 @@ def parse_arguments():
     parser.add_argument('--eval_only', type=str2bool, default=False)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr_scheduler', type=str, default="constant")
-    parser.add_argument('--wd', type=float, default=5e-3)
+    parser.add_argument('--wd', type=float, default=5e-4)
     parser.add_argument('--train_iters', type=int, default=200000)
     parser.add_argument('--val_iters', type=int, default=-1)
     # Dataset arguments
@@ -90,7 +91,8 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             "Peract2": Peract2Dataset,
-            "GNFactor": GNFactorDataset
+            "GNFactor": GNFactorDataset,
+            "TrainABCTestD_CalvinDataset": TrainABCTestD_CalvinDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
@@ -104,6 +106,7 @@ class TrainTester(BaseTrainTester):
             ),
             dense_interpolation=self.args.dense_interpolation,
             interpolation_length=self.args.interpolation_length,
+            relative_action=self.args.relative_action,
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
@@ -115,6 +118,7 @@ class TrainTester(BaseTrainTester):
             ),
             dense_interpolation=self.args.dense_interpolation,
             interpolation_length=self.args.interpolation_length,
+            relative_action=self.args.relative_action,
         )
         return train_dataset, test_dataset
 

@@ -24,6 +24,7 @@ from datasets.dataset_rlbench import (
     DebugPeractDataset,
     Peract2Dataset
 )
+from datasets.dataset_calvin import TrainABCTestD_CalvinDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy.trajectory_optimization.denoise_actor_tower import DenoiseActor
 from utils.common_utils import count_parameters, str2bool, str_none
@@ -39,7 +40,7 @@ def parse_arguments():
     parser.add_argument('--eval_only', type=str2bool, default=False)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr_scheduler', type=str, default="constant")
-    parser.add_argument('--wd', type=float, default=5e-3)
+    parser.add_argument('--wd', type=float, default=5e-4)
     parser.add_argument('--train_iters', type=int, default=200000)
     parser.add_argument('--val_iters', type=int, default=-1)
     # Dataset arguments
@@ -93,7 +94,8 @@ class TrainTester(BaseTrainTester):
             "Peract": PeractDataset,
             "DebugPeract": DebugPeractDataset,
             "Peract2": Peract2Dataset,
-            "GNFactor": GNFactorDataset
+            "GNFactor": GNFactorDataset,
+            "TrainABCTestD_CalvinDataset": TrainABCTestD_CalvinDataset
         }[args.dataset]
 
         # Initialize datasets with arguments

@@ -100,7 +100,7 @@ class BaseTrainTester:
         """Initialize optimizer."""
         optimizer_grouped_parameters = [
             {"params": [], "weight_decay": 0.0, "lr": self.args.lr},
-            {"params": [], "weight_decay": 5e-4, "lr": self.args.lr}
+            {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr}
         ]
         no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
         for name, param in model.named_parameters():
