@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import einops
 
+import utils.pytorch3d_transforms as pytorch3d_transforms
 from .utils import loader, TrajectoryInterpolator
 from .dataset_base import BaseDataset
 
@@ -21,6 +22,23 @@ def to_tensor(x):
         return torch.from_numpy(x)
     else:
         return torch.as_tensor(x)
+
+
+def to_relative_action(actions, anchor_actions):
+    assert actions.shape[-1] == 8
+
+    rel_pos = actions[..., :3] - anchor_actions[..., :3]
+
+    # pytorch3d takes wxyz quaternion, the input is xyzw
+    rel_orn = pytorch3d_transforms.quaternion_multiply(
+        actions[..., [6, 3, 4, 5]],
+        pytorch3d_transforms.quaternion_invert(anchor_actions[..., [6,3,4,5]])
+    )[..., [1, 2, 3, 0]]
+
+    gripper = actions[..., -1:]
+    rel_actions = torch.concat([rel_pos, rel_orn, gripper], dim=-1)
+
+    return rel_actions
 
 
 class RLBenchDataset(BaseDataset):
@@ -260,6 +278,10 @@ class RLBenchDataset(BaseDataset):
         for i, len_ in enumerate(traj_lens.long()):
             traj_mask[i, len_:] = 1
 
+        # Compute relative action
+        if self._relative_action:
+            traj = to_relative_action(traj, traj[:, :1])
+
         ret_dict = {
             "task": [task for _ in range(st_frame, ed_frame)],
             "instr": instr,
@@ -300,6 +322,7 @@ class GNFactorDataset(RLBenchDataset):
         image_rescale,  # rescale factor for images
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
+        relative_action=False,  # whether to return relative actions
     ):
         taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 200 if training else 0
@@ -307,7 +330,7 @@ class GNFactorDataset(RLBenchDataset):
         max_episodes_per_task = 20
         color_aug = False
         bimanual = False
-        relative_action = False
+        # relative_action = False
 
         super().__init__(
             root=root,
@@ -351,6 +374,7 @@ class PeractDataset(RLBenchDataset):
         image_rescale,  # rescale factor for images
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
+        relative_action=False,  # whether to return relative actions
     ):
         taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 0
@@ -358,7 +382,52 @@ class PeractDataset(RLBenchDataset):
         max_episodes_per_task = -1
         color_aug = False
         bimanual = False
-        relative_action = False
+        # relative_action = False
+
+        super().__init__(
+            root=root,
+            instructions=instructions,
+            precompute_instruction_encodings=precompute_instruction_encodings,
+            taskvar=taskvar,
+            max_episode_length=max_episode_length,
+            cache_size=cache_size,
+            max_episodes_per_task=max_episodes_per_task,
+            cameras=self.cameras,
+            training=training,
+            image_rescale=image_rescale,
+            color_aug=color_aug,
+            dense_interpolation=dense_interpolation,
+            interpolation_length=interpolation_length,
+            bimanual=bimanual,
+            relative_action=relative_action
+        )
+
+
+class DebugPeractDataset(RLBenchDataset):
+    """RLBench dataset under Peract setup."""
+    tasks = [
+        "place_cups",
+    ]
+    variations = range(0, 199)
+    cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
+
+    def __init__(
+        self,
+        root,  # the directory path of the dataset
+        instructions,  # the path to the instruction file
+        precompute_instruction_encodings,  # whether instruction is latent encoded
+        training,  # whether in training mode
+        image_rescale,  # rescale factor for images
+        dense_interpolation=False,  # whether to interpolate trajectories
+        interpolation_length=100,  # length of interpolated trajectory
+        relative_action=False,  # whether to return relative actions
+    ):
+        taskvar = [(task, var) for task in self.tasks for var in self.variations]
+        cache_size = 0
+        max_episode_length = 100
+        max_episodes_per_task = -1
+        color_aug = False
+        bimanual = False
 
         super().__init__(
             root=root,
@@ -404,6 +473,7 @@ class Peract2Dataset(RLBenchDataset):
         image_rescale,  # rescale factor for images
         dense_interpolation=False,  # whether to interpolate trajectories
         interpolation_length=100,  # length of interpolated trajectory
+        relative_action=False,  # whether to return relative actions
     ):
         taskvar = [(task, var) for task in self.tasks for var in self.variations]
         cache_size = 0
@@ -411,7 +481,7 @@ class Peract2Dataset(RLBenchDataset):
         max_episodes_per_task = -1
         color_aug = False
         bimanual = True
-        relative_action = False
+        # relative_action = False
 
         super().__init__(
             root=root,

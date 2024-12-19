@@ -57,6 +57,7 @@ Create a conda environment with the following command:
 > pip install git+https://github.com/openai/CLIP.git;
 > pip install diffusers blosc moviepy ipdb einops
 > pip install --upgrade https://download.pytorch.org/whl/cu124/xformers-0.0.28.post1-cp310-cp310-manylinux_2_28_x86_64.whl#sha256=cf3f05bb71be32c96c587975798abd2e0886e921bd268f5ecb653ceef402ace3
+> pip install torch-cluster -f https://data.pyg.org/whl/torch-2.4.1%2Bcu124.html
 ```
 
 ### Install CALVIN locally

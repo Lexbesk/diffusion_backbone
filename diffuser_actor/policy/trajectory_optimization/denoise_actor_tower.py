@@ -7,7 +7,8 @@ import numpy as np
 from diffuser_actor.noise_scheduler.rectified_flow import RFScheduler
 from diffuser_actor.noise_scheduler.ddpm import DDPMScheduler
 from diffuser_actor.encoder.encoder import Encoder
-from .denoise_actor import TransformerHead
+# from .denoise_actor import TransformerHead
+from .denoise_actor import DenoiseActor as BaseDenoiseActor
 from diffuser_actor.utils.utils import (
     compute_rotation_matrix_from_ortho6d,
     get_ortho6d_from_rotation_matrix,
@@ -32,321 +33,40 @@ class DenoiseActor(nn.Module):
                  nhist=3,
                  relative=False):
         super().__init__()
-        self._rotation_parametrization = rotation_parametrization
-        self._quaternion_format = quaternion_format
-        self._relative = relative
-        self.use_instruction = use_instruction
-        self.encoder = Encoder(
+        self.non_gripper_actor = BaseDenoiseActor(
             backbone=backbone,
             embedding_dim=embedding_dim,
-            num_sampling_level=1,
-            nhist=nhist,
-            num_attn_heads=9,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
-            fps_subsampling_factor=fps_subsampling_factor
-        )
-        self.prediction_head = TransformerHead(
-            embedding_dim=embedding_dim,
             use_instruction=use_instruction,
+            fps_subsampling_factor=fps_subsampling_factor,
             rotation_parametrization=rotation_parametrization,
+            quaternion_format=quaternion_format,
+            denoise_timesteps=denoise_timesteps,
+            denoise_model=denoise_model,
             nhist=nhist,
-            num_attn_heads=9,
+            relative=relative
         )
-        if denoise_model == "ddpm":
-            self.position_noise_scheduler = DDPMScheduler(
-                num_train_timesteps=denoise_timesteps,
-                beta_schedule="scaled_linear",
-                prediction_type="epsilon"
-            )
-            self.rotation_noise_scheduler = DDPMScheduler(
-                num_train_timesteps=denoise_timesteps,
-                beta_schedule="squaredcos_cap_v2",
-                prediction_type="epsilon"
-            )
-        elif denoise_model == "rectified_flow":
-            self.position_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
-                noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
-            )
-            self.rotation_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
-                noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
-            )
-        else:
-            raise ValueError(f"Unknown denoise model: {denoise_model}")
-        self.n_steps = denoise_timesteps
+        self.gripper_actor = BaseDenoiseActor(
+            backbone=backbone,
+            embedding_dim=embedding_dim,
+            num_vis_ins_attn_layers=num_vis_ins_attn_layers,
+            use_instruction=use_instruction,
+            fps_subsampling_factor=fps_subsampling_factor,
+            rotation_parametrization=rotation_parametrization,
+            quaternion_format=quaternion_format,
+            denoise_timesteps=denoise_timesteps,
+            denoise_model=denoise_model,
+            nhist=nhist,
+            relative=relative
+        )
         self.workspace_normalizer = nn.Parameter(
             torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
             requires_grad=False
         )
-
-        self._mae = False
-
-    def encode_inputs(self, visible_rgb, visible_pcd, instruction,
-                      curr_gripper):
-        # Compute visual features/positional embeddings at different scales
-        rgb_feats_pyramid, pcd_pyramid = self.encoder.encode_images(
-            visible_rgb, visible_pcd
-        )
-        # Keep only low-res scale
-        context_feats = einops.rearrange(
-            rgb_feats_pyramid[0],
-            "b ncam c h w -> b (ncam h w) c"
-        )
-        context = pcd_pyramid[0]
-
-        if self._mae and self.training:
-            drop_ratio = np.random.uniform(0.3, 0.6)
-            # drop_ratio = np.random.uniform(0.2, 0.4)
-            keep_num = int(context_feats.shape[1] * (1 - drop_ratio))
-            device = context_feats.device
-            keep_inds = [
-                torch.randperm(context_feats.shape[1], device=device)[:keep_num]
-                for _ in range(context_feats.shape[0])
-            ]
-            keep_inds = torch.stack(keep_inds, dim=0)
-            context_feats = torch.gather(
-                context_feats, 1,
-                keep_inds.unsqueeze(-1).repeat(1, 1, context_feats.shape[-1])
-            )
-            context = torch.gather(
-                context, 1,
-                keep_inds.unsqueeze(-1).repeat(1, 1, context.shape[-1])
-            )
-
-        # Encode instruction (B, 53, F)
-        instr_feats = None
-        if self.use_instruction:
-            instr_feats, _ = self.encoder.encode_instruction(instruction)
-
-        # Cross-attention vision to language
-        if self.use_instruction:
-            # Attention from vision to language
-            context_feats = self.encoder.vision_language_attention(
-                context_feats, instr_feats
-            )
-
-        # Encode gripper history (B, nhist, F)
-        adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(
-            curr_gripper, context_feats, context
-        )
-
-        # FPS on visual features (N, B, F) and (B, N, F, 2)
-        fps_feats, fps_pos = self.encoder.run_fps(
-            context_feats.transpose(0, 1),
-            self.encoder.relative_pe_layer(context)
-        )
-        return (
-            context_feats, context,  # contextualized visual features
-            instr_feats,  # language features
-            adaln_gripper_feats,  # gripper history features
-            fps_feats, fps_pos  # sampled visual features
-        )
-
-    def policy_forward_pass(self, trajectory, timestep, fixed_inputs):
-        # Parse inputs
-        (
-            context_feats,
-            context,
-            instr_feats,
-            adaln_gripper_feats,
-            fps_feats,
-            fps_pos
-        ) = fixed_inputs
-
-        return self.prediction_head(
-            trajectory,
-            timestep,
-            context_feats=context_feats,
-            context=context,
-            instr_feats=instr_feats,
-            adaln_gripper_feats=adaln_gripper_feats,
-            fps_feats=fps_feats,
-            fps_pos=fps_pos
-        )
-
-    def conditional_sample(self, condition_data, condition_mask, fixed_inputs):
-        self.position_noise_scheduler.set_timesteps(self.n_steps)
-        self.rotation_noise_scheduler.set_timesteps(self.n_steps)
-
-        # Random trajectory, conditioned on start-end
-        noise = torch.randn(
-            size=condition_data.shape,
-            dtype=condition_data.dtype,
-            device=condition_data.device
-        )
-        # Noisy condition data
-        noise_t = torch.ones(
-            (len(condition_data),), device=condition_data.device
-        ).long().mul(self.position_noise_scheduler.timesteps[0])
-        noise_pos = self.position_noise_scheduler.add_noise(
-            condition_data[..., :3], noise[..., :3], noise_t
-        )
-        noise_rot = self.rotation_noise_scheduler.add_noise(
-            condition_data[..., 3:9], noise[..., 3:9], noise_t
-        )
-        noisy_condition_data = torch.cat((noise_pos, noise_rot), -1)
-        trajectory = torch.where(
-            condition_mask, noisy_condition_data, noise
-        )
-
-        # Iterative denoising
-        timesteps = self.position_noise_scheduler.timesteps
-        for t in timesteps:
-            out = self.policy_forward_pass(
-                trajectory,
-                t * torch.ones(len(trajectory)).to(trajectory.device).long(),
-                fixed_inputs
-            )
-            out = out[-1]  # keep only last layer's output
-            pos = self.position_noise_scheduler.step(
-                out[..., :3], t, trajectory[..., :3]
-            ).prev_sample
-            rot = self.rotation_noise_scheduler.step(
-                out[..., 3:9], t, trajectory[..., 3:9]
-            ).prev_sample
-            trajectory = torch.cat((pos, rot), -1)
-
-        trajectory = torch.cat((trajectory, out[..., 9:]), -1)
-
-        return trajectory
-
-    def compute_trajectory(
-        self,
-        trajectory_mask,
-        rgb_obs,
-        pcd_obs,
-        instruction,
-        curr_gripper,
-        is_gripper_camera
-    ):
-        # Normalize all pos
-        pcd_obs = pcd_obs.clone()
-        curr_gripper = curr_gripper.clone()
-        pcd_obs = torch.permute(self.normalize_pos(
-            torch.permute(pcd_obs, [0, 1, 3, 4, 2])
-        ), [0, 1, 4, 2, 3])
-        curr_gripper[..., :3] = self.normalize_pos(curr_gripper[..., :3])
-        curr_gripper = self.convert_rot(curr_gripper)
-
-        # Prepare inputs
-        gripper_camera_fixed_inputs = self.encode_inputs(
-            rgb_obs[:, is_gripper_camera], pcd_obs[:, is_gripper_camera],
-            instruction, curr_gripper
-        )
-        non_gripper_camera_fixed_inputs = self.encode_inputs(
-            rgb_obs[:, ~is_gripper_camera], pcd_obs[:, ~is_gripper_camera],
-            instruction, curr_gripper
-        )
-
-        # Condition on start-end pose
-        B, nhist, D = curr_gripper.shape
-        cond_data = torch.zeros(
-            (B, trajectory_mask.size(1), D),
-            device=rgb_obs.device
-        )
-        cond_mask = torch.zeros_like(cond_data)
-        cond_mask = cond_mask.bool()
-
-        # Sample
-        gripper_camera_trajectory = self.conditional_sample(
-            cond_data,
-            cond_mask,
-            gripper_camera_fixed_inputs
-        )
-        non_gripper_camera_trajectory = self.conditional_sample(
-            cond_data,
-            cond_mask,
-            non_gripper_camera_fixed_inputs
-        )
-
-        # Normalize quaternion
-        if self._rotation_parametrization != '6D':
-            gripper_camera_trajectory[:, :, 3:7] = normalise_quat(
-                gripper_camera_trajectory[:, :, 3:7])
-            non_gripper_camera_trajectory[:, :, 3:7] = normalise_quat(
-                non_gripper_camera_trajectory[:, :, 3:7])
-        # Back to quaternion
-        gripper_camera_trajectory = self.unconvert_rot(gripper_camera_trajectory)
-        non_gripper_camera_trajectory = self.unconvert_rot(non_gripper_camera_trajectory)
-        # unnormalize position
-        gripper_camera_trajectory[:, :, :3] = self.unnormalize_pos(
-            gripper_camera_trajectory[:, :, :3])
-        non_gripper_camera_trajectory[:, :, :3] = self.unnormalize_pos(
-            non_gripper_camera_trajectory[:, :, :3])
-        # Convert gripper status to probaility
-        if gripper_camera_trajectory.shape[-1] > 7:
-            gripper_camera_trajectory[..., 7] = (
-                gripper_camera_trajectory[..., 7].sigmoid())
-        if non_gripper_camera_trajectory.shape[-1] > 7:
-            non_gripper_camera_trajectory[..., 7] = (
-                non_gripper_camera_trajectory[..., 7].sigmoid())
-
-        return gripper_camera_trajectory, non_gripper_camera_trajectory
-
-    def normalize_pos(self, pos):
-        pos_min = self.workspace_normalizer[0].float().to(pos.device)
-        pos_max = self.workspace_normalizer[1].float().to(pos.device)
-        return (pos - pos_min) / (pos_max - pos_min) * 2.0 - 1.0
-
-    def unnormalize_pos(self, pos):
-        pos_min = self.workspace_normalizer[0].float().to(pos.device)
-        pos_max = self.workspace_normalizer[1].float().to(pos.device)
-        return (pos + 1.0) / 2.0 * (pos_max - pos_min) + pos_min
-
-    def convert_rot(self, signal):
-        signal[..., 3:7] = normalise_quat(signal[..., 3:7])
-        if self._rotation_parametrization == '6D':
-            # The following code expects wxyz quaternion format!
-            if self._quaternion_format == 'xyzw':
-                signal[..., 3:7] = signal[..., (6, 3, 4, 5)]
-            rot = quaternion_to_matrix(signal[..., 3:7])
-            res = signal[..., 7:] if signal.size(-1) > 7 else None
-            if len(rot.shape) == 4:
-                B, L, D1, D2 = rot.shape
-                rot = rot.reshape(B * L, D1, D2)
-                rot_6d = get_ortho6d_from_rotation_matrix(rot)
-                rot_6d = rot_6d.reshape(B, L, 6)
-            else:
-                rot_6d = get_ortho6d_from_rotation_matrix(rot)
-            signal = torch.cat([signal[..., :3], rot_6d], dim=-1)
-            if res is not None:
-                signal = torch.cat((signal, res), -1)
-        return signal
-
-    def unconvert_rot(self, signal):
-        if self._rotation_parametrization == '6D':
-            res = signal[..., 9:] if signal.size(-1) > 9 else None
-            if len(signal.shape) == 3:
-                B, L, _ = signal.shape
-                rot = signal[..., 3:9].reshape(B * L, 6)
-                mat = compute_rotation_matrix_from_ortho6d(rot)
-                quat = matrix_to_quaternion(mat)
-                quat = quat.reshape(B, L, 4)
-            else:
-                rot = signal[..., 3:9]
-                mat = compute_rotation_matrix_from_ortho6d(rot)
-                quat = matrix_to_quaternion(mat)
-            signal = torch.cat([signal[..., :3], quat], dim=-1)
-            if res is not None:
-                signal = torch.cat((signal, res), -1)
-            # The above code handled wxyz quaternion format!
-            if self._quaternion_format == 'xyzw':
-                signal[..., 3:7] = signal[..., (4, 5, 6, 3)]
-        return signal
-
-    def convert2rel(self, pcd, curr_gripper):
-        """Convert coordinate system relaative to current gripper."""
-        center = curr_gripper[:, -1, :3]  # (batch_size, 3)
-        bs = center.shape[0]
-        pcd = pcd - center.view(bs, 1, 3, 1, 1)
-        curr_gripper = curr_gripper.clone()
-        curr_gripper[..., :3] = curr_gripper[..., :3] - center.view(bs, 1, 3)
-        return pcd, curr_gripper
+        del self.non_gripper_actor.workspace_normalizer
+        del self.gripper_actor.workspace_normalizer
+        self.non_gripper_actor.workspace_normalizer = self.workspace_normalizer
+        self.gripper_actor.workspace_normalizer = self.workspace_normalizer
 
     def forward(
         self,
@@ -375,98 +95,45 @@ class DenoiseActor(nn.Module):
             is ALWAYS expressed as a quaternion form.
             The model converts it to 6D internally if needed.
         """
-        if self._relative:
-            pcd_obs, curr_gripper = self.convert2rel(pcd_obs, curr_gripper)
-        if gt_trajectory is not None:
-            gt_openess = gt_trajectory[..., 7:]
-            gt_trajectory = gt_trajectory[..., :7]
-        curr_gripper = curr_gripper[..., :7]
-
         # gt_trajectory is expected to be in the quaternion format
         if run_inference:
-            return self.compute_trajectory(
+            gripper_action = self.gripper_actor(
+                gt_trajectory,
                 trajectory_mask,
-                rgb_obs,
-                pcd_obs,
+                rgb_obs[:, is_gripper_camera],
+                pcd_obs[:, is_gripper_camera],
                 instruction,
                 curr_gripper,
-                is_gripper_camera
+                run_inference=True
             )
+            non_gripper_action = self.non_gripper_actor(
+                gt_trajectory,
+                trajectory_mask,
+                rgb_obs[:, is_gripper_camera],
+                pcd_obs[:, is_gripper_camera],
+                instruction,
+                curr_gripper,
+                run_inference=True
+            )
+            return gripper_action, non_gripper_action
 
-        # Normalize all pos
-        gt_trajectory = gt_trajectory.clone()
-        pcd_obs = pcd_obs.clone()
-        curr_gripper = curr_gripper.clone()
-        gt_trajectory[:, :, :3] = self.normalize_pos(gt_trajectory[:, :, :3])
-        pcd_obs = torch.permute(self.normalize_pos(
-            torch.permute(pcd_obs, [0, 1, 3, 4, 2])
-        ), [0, 1, 4, 2, 3])
-        curr_gripper[..., :3] = self.normalize_pos(curr_gripper[..., :3])
-
-        # Convert rotation parametrization
-        gt_trajectory = self.convert_rot(gt_trajectory)
-        curr_gripper = self.convert_rot(curr_gripper)
-
-        # Prepare inputs
-        gripper_camera_fixed_inputs = self.encode_inputs(
-            rgb_obs[:, is_gripper_camera], pcd_obs[:, is_gripper_camera],
-            instruction, curr_gripper
+        gripper_loss = self.gripper_actor(
+            gt_trajectory,
+            trajectory_mask,
+            rgb_obs[:, is_gripper_camera],
+            pcd_obs[:, is_gripper_camera],
+            instruction,
+            curr_gripper,
+            run_inference=False      
         )
-        non_gripper_camera_fixed_inputs = self.encode_inputs(
-            rgb_obs[:, ~is_gripper_camera], pcd_obs[:, ~is_gripper_camera],
-            instruction, curr_gripper
-        )
-        import ipdb; ipdb.set_trace()
-
-        # Condition on start-end pose
-        cond_data = torch.zeros_like(gt_trajectory)
-        cond_mask = torch.zeros_like(cond_data)
-        cond_mask = cond_mask.bool()
-
-        # Sample noise
-        noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
-
-        # Sample a random timestep
-        timesteps = self.position_noise_scheduler.sample_noise_step(
-            num_noise=len(noise), device=noise.device
+        non_gripper_loss = self.non_gripper_actor(
+            gt_trajectory,
+            trajectory_mask,
+            rgb_obs[:, ~is_gripper_camera],
+            pcd_obs[:, ~is_gripper_camera],
+            instruction,
+            curr_gripper,
+            run_inference=False      
         )
 
-        # Add noise to the clean trajectories
-        pos = self.position_noise_scheduler.add_noise(
-            gt_trajectory[..., :3], noise[..., :3],
-            timesteps
-        )
-        rot = self.rotation_noise_scheduler.add_noise(
-            gt_trajectory[..., 3:9], noise[..., 3:9],
-            timesteps
-        )
-        noisy_trajectory = torch.cat((pos, rot), -1)
-        noisy_trajectory[cond_mask] = cond_data[cond_mask]  # condition
-        assert not cond_mask.any()
-
-        # Predict the noise residual
-        gripper_camera_pred = self.policy_forward_pass(
-            noisy_trajectory, timesteps, gripper_camera_fixed_inputs
-        )
-        non_gripper_camera_pred = self.policy_forward_pass(
-            noisy_trajectory, timesteps, non_gripper_camera_fixed_inputs
-        )
-
-        # Compute loss
-        total_loss = 0
-        for pred in [gripper_camera_pred, non_gripper_camera_pred]:
-            for layer_pred in pred:
-                trans = layer_pred[..., :3]
-                rot = layer_pred[..., 3:9]
-                denoise_target = self.position_noise_scheduler.prepare_target(
-                    noise, gt_trajectory
-                )
-                loss = (
-                    30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')
-                    + 10 * F.l1_loss(rot, denoise_target[..., 3:9], reduction='mean')
-                )
-                if torch.numel(gt_openess) > 0:
-                    openess = layer_pred[..., 9:]
-                    loss += F.binary_cross_entropy_with_logits(openess, gt_openess)
-                total_loss = total_loss + loss
-        return total_loss
+        return gripper_loss + non_gripper_loss
