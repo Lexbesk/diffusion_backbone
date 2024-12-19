@@ -31,3 +31,5 @@ calvin/
 
 # data directory
 data/
+observations/
+test.py
