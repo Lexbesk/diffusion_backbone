@@ -19,6 +19,7 @@ from tqdm import trange
 
 from engine import BaseTrainTester
 from datasets.dataset_rlbench_zarr import (
+    GNFactorDataset,
     PeractDataset
 )
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
@@ -100,7 +101,7 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             # "Peract2": Peract2Dataset,
-            # "GNFactor": GNFactorDataset
+            "GNFactor": GNFactorDataset
         }[args.dataset]
 
         # Initialize datasets with arguments

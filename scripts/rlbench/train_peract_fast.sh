@@ -1,8 +1,18 @@
-main_dir=Actor_18Peract_20Demo_10GNFactortask_RF
-main_dir=GNFactor
 
-train_data_dir=data/peract/Peract_packaged/train
-eval_data_dir=data/peract/Peract_packaged/val
+# if [ ! -d /scratch/Peract_packaged ]; then
+#     cd /scratch
+#     wget https://huggingface.co/katefgroup/3d_diffuser_actor/resolve/main/Peract_packaged.zip
+#     unzip Peract_packaged.zip
+#     rm Peract_packaged.zip
+# fi
+# cd /home/ngkanats/repos/lbs/analogical_manipulation
+
+main_dir=Peract
+
+train_data_dir=/scratch/Peract_packaged/train
+eval_data_dir=/scratch/Peract_packaged/val
+train_data_dir=/scratch/Peract_zarr/train_randomized.zarr
+eval_data_dir=/scratch/Peract_zarr/val_randomized.zarr
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
@@ -17,16 +27,16 @@ quaternion_format=wxyz
 rotation_parametrization=6D
 use_instruction=true
 workspace_normalizer_buffer=0.05
-B=24
-B_val=24
+B=128
+B_val=64
 C=144
 train_iters=200000
 val_freq=4000
-workspace_normalizer_iter=16
+workspace_normalizer_iter=128
 precompute_instruction_encodings=true
 num_workers=4
-dataset=GNFactor
-ngpus=2
+dataset=Peract
+ngpus=4
 ngpus=1
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
@@ -35,7 +45,7 @@ checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main.py \
+    main_fast.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \

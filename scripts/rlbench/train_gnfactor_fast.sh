@@ -1,8 +1,10 @@
-main_dir=Actor_18Peract_20Demo_10GNFactortask_RF
-main_dir=GNFactor
+rm -r /scratch/GNFactor_zarr
+cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
 
-train_data_dir=data/peract/Peract_packaged/train
-eval_data_dir=data/peract/Peract_packaged/val
+main_dir=GNFactorFast
+
+train_data_dir=/scratch/GNFactor_zarr/train_randomized.zarr
+eval_data_dir=/scratch/GNFactor_zarr/val_randomized.zarr
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
@@ -17,8 +19,8 @@ quaternion_format=wxyz
 rotation_parametrization=6D
 use_instruction=true
 workspace_normalizer_buffer=0.05
-B=24
-B_val=24
+B=128
+B_val=64
 C=144
 train_iters=200000
 val_freq=4000
@@ -26,7 +28,7 @@ workspace_normalizer_iter=16
 precompute_instruction_encodings=true
 num_workers=4
 dataset=GNFactor
-ngpus=2
+ngpus=4
 ngpus=1
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
@@ -35,7 +37,7 @@ checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main.py \
+    main_fast.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \

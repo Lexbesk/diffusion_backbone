@@ -150,15 +150,31 @@ def all_tasks_main():
     ]
     camera_order = ['left', 'right', 'wrist', 'front']
     task2id = {task: t for t, task in enumerate(tasks)}
+    max_episodes_per_task = 20
     variations = range(0, 199)
     # Collect all episodes
     episodes = []
     for task in tasks:
+        num_vars = 0
         for var in variations:
             _path = Path(f'{ROOT}/{task}+{var}/')
             if not _path.is_dir():
                 continue
-            episodes.extend([(task, var, ep) for ep in _path.glob("*.dat")])
+            else:
+                num_vars += 1
+
+        num_episode_per_var = max_episodes_per_task // num_vars
+        task_episodes = []
+        for var in variations:
+            _path = Path(f'{ROOT}/{task}+{var}/')
+            if not _path.is_dir():
+                continue
+            task_episodes.extend(
+                [(task, var, ep) for ep in _path.glob("*.dat")][:num_episode_per_var+1]
+            )
+        if len(task_episodes) > max_episodes_per_task:
+            task_episodes = random.sample(task_episodes, max_episodes_per_task)
+        episodes.extend(task_episodes)
     random.shuffle(episodes)
 
     # Read once to get the number of keyposes
@@ -250,6 +266,7 @@ def all_tasks_main():
             zarr_file['task_id'][start:end] = np.array(tids)[inds].astype(np.uint8)
             zarr_file['variation'][start:end] = np.array(_vars)[inds].astype(np.uint8)
             start = end
+        import ipdb; ipdb.set_trace()
 
 
 def randomize_order():
