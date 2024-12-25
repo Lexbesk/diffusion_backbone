@@ -1,38 +1,13 @@
 import json
-from pathlib import Path
 import pickle
 import random
 
-import numpy as np
 import torch
-import zarr
-from zarr.storage import DirectoryStore
-from zarr import LRUStoreCache
 
-from .dataset_base import BaseDataset
+from .utils import to_tensor, read_zarr_with_cache, to_relative_action
 
 
-def to_tensor(x):
-    if isinstance(x, torch.Tensor):
-        return x
-    elif isinstance(x, np.ndarray):
-        return torch.from_numpy(x)
-    else:
-        return torch.as_tensor(x)
-
-
-def read_zarr_with_cache(fname):
-    # Configure the underlying store
-    store = DirectoryStore(fname)
-
-    # Wrap the store with a cache
-    cached_store = LRUStoreCache(store, max_size=16 * 2**30)  # 16 GB cache
-
-    # Open Zarr file with caching
-    return zarr.open_group(cached_store, mode="r")
-
-
-class RLBenchDataset(BaseDataset):
+class RLBenchDataset:
     """RLBench dataset."""
 
     def __init__(
@@ -42,16 +17,7 @@ class RLBenchDataset(BaseDataset):
         precompute_instruction_encodings,
         relative_action=False  # whether to return relative actions
     ):
-        if isinstance(root, (Path, str)):
-            root = [Path(root)]
-
-        super().__init__(
-            root=root,
-            training=False,
-            image_rescale=(1.0, 1.0),
-            relative_action=relative_action,
-            color_aug=False
-        )
+        self._relative_action = relative_action
 
         # Load instructions
         self._precompute_instr_encs = precompute_instruction_encodings
@@ -64,7 +30,7 @@ class RLBenchDataset(BaseDataset):
             instructions = None
 
         # Load all annotations lazily
-        self.annos = read_zarr_with_cache(self._root[0])
+        self.annos = read_zarr_with_cache(root)
 
     def __getitem__(self, idx):
         """
@@ -81,9 +47,6 @@ class RLBenchDataset(BaseDataset):
         # Split RGB and XYZ
         rgbs = to_tensor(self.annos['rgb'][idx])
         pcds = to_tensor(self.annos['depth'][idx])
-
-        if self._color_aug is not None:
-            rgbs = self._color_aug(rgbs)
 
         # Sample one instruction feature
         t_ = int(self.annos['task_id'][idx])
@@ -103,6 +66,10 @@ class RLBenchDataset(BaseDataset):
         # Get gripper tensors for respective frame ids
         action = to_tensor(self.annos['action'][idx])
         gripper_history = to_tensor(self.annos['proprioception'][idx])
+
+        # Compute relative action
+        if self._relative_action:
+            action = to_relative_action(action, action[:1])
 
         ret_dict = {
             "task": [task],
@@ -131,25 +98,15 @@ class PeractDataset(RLBenchDataset):
         "slide_block_to_color_target", "stack_blocks", "stack_cups",
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
-    variations = range(0, 199)
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
 
-    def __init__(
-        self,
-        root,  # the directory path of the dataset
-        instructions,  # the path to the instruction file
-        precompute_instruction_encodings,  # whether instruction is latent encoded
-    ):
-        taskvar = [(task, var) for task in self.tasks for var in self.variations]
-        cache_size = 0
-        max_episode_length = 100
-        max_episodes_per_task = -1
-        color_aug = False
-        bimanual = False
-        relative_action = False
 
-        super().__init__(
-            root=root,
-            instructions=instructions,
-            precompute_instruction_encodings=precompute_instruction_encodings
-        )
+class GNFactorDataset(RLBenchDataset):
+    """RLBench dataset under GNFactor setup."""
+    tasks = [
+        "close_jar", "open_drawer", "sweep_to_dustpan_of_size",
+        "meat_off_grill", "turn_tap", "slide_block_to_color_target",
+        "put_item_in_drawer", "reach_and_drag", "push_buttons",
+        "stack_blocks"
+    ]
+    cameras = ("front",)

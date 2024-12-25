@@ -9,9 +9,32 @@ import torch
 import torchvision.transforms as transforms
 from torchvision.transforms import v2 as tfv2
 import torchvision.transforms.functional as transforms_f
+import zarr
+from zarr.storage import DirectoryStore
+from zarr import LRUStoreCache
 
 from diffuser_actor.utils.utils import normalise_quat
-from utils.pytorch3d_transforms import euler_angles_to_matrix
+import utils.pytorch3d_transforms as pytorch3d_transforms
+
+
+def to_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x
+    elif isinstance(x, np.ndarray):
+        return torch.from_numpy(x)
+    else:
+        return torch.as_tensor(x)
+
+
+def read_zarr_with_cache(fname):
+    # Configure the underlying store
+    store = DirectoryStore(fname)
+
+    # Wrap the store with a cache
+    cached_store = LRUStoreCache(store, max_size=16 * 2**30)  # 16 GB cache
+
+    # Open Zarr file with caching
+    return zarr.open_group(cached_store, mode="r")
 
 
 def loader(file):
@@ -164,6 +187,7 @@ class TrajectoryInterpolator:
             resampled[:, 11:15] = normalise_quat(resampled[:, 11:15])
         return resampled
 
+
 def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
                              translate_range):
     """Apply random rotation and translation to the given pcd
@@ -206,7 +230,9 @@ def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
         roll_range[0], pitch_range[0], yaw_range[0]
     ], device=pcd.device)
 
-    R = euler_angles_to_matrix(euler_angles, convention='XYZ')
+    R = pytorch3d_transforms.euler_angles_to_matrix(
+        euler_angles, convention='XYZ'
+    )
     T = torch.rand((bs, 1, 3), dtype=pcd.dtype, device=pcd.device)
     T = T * (translate_range[1] - translate_range[0])
     T = T + translate_range[0]
@@ -216,3 +242,20 @@ def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
     pcd = flat_pcd.reshape(pcd.shape)
 
     return pcd
+
+
+def to_relative_action(actions, anchor_actions):
+    assert actions.shape[-1] == 8
+
+    rel_pos = actions[..., :3] - anchor_actions[..., :3]
+
+    # pytorch3d takes wxyz quaternion, the input is xyzw
+    rel_orn = pytorch3d_transforms.quaternion_multiply(
+        actions[..., [6, 3, 4, 5]],
+        pytorch3d_transforms.quaternion_invert(anchor_actions[..., [6,3,4,5]])
+    )[..., [1, 2, 3, 0]]
+
+    gripper = actions[..., -1:]
+    rel_actions = torch.concat([rel_pos, rel_orn, gripper], dim=-1)
+
+    return rel_actions

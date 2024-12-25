@@ -10,16 +10,11 @@ import torch
 from tqdm import tqdm
 
 
-SINGLE_FILE = True
 ROOT = '/scratch/Peract_packaged/val'
-STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/val'
-if SINGLE_FILE:
-    READ_EVERY = 100  # in episodes
-    STORE_EVERY = 1  # in keyposes
-    RAND_STORE_EVERY = 1  # in keyposes
-else:
-    READ_EVERY = 100  # in episodes
-    STORE_EVERY = 5  # in keyposes
+STORE_PATH = '/data/user_data/ngkanats/GNFactor_zarr/val'
+READ_EVERY = 100  # in episodes
+STORE_EVERY = 1  # in keyposes
+RAND_STORE_EVERY = 1  # in keyposes
 IM_SIZE = 256
 
 
@@ -146,113 +141,12 @@ def to_numpy(x):
         return np.array(x)
 
 
-def task_to_zarr(task, variations):
-    # Collect all episodes
-    episodes = []
-    for var in variations:
-        _path = Path(f'{ROOT}/{task}+{var}/')
-        if not _path.is_dir():
-            continue
-        episodes.extend([(var, ep) for ep in _path.glob("*.dat")])
-    random.shuffle(episodes)
-
-    # Read once to get the number of keyposes
-    n_keyposes = 0
-    for _, ep in episodes:
-        with open(ep, "rb") as f:
-            content = pickle.loads(blosc.decompress(f.read()))
-        n_keyposes += len(content[0])
-
-    # Initialize zarr
-    compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}/{task}.zarr", mode="w") as zarr_file:
-        zarr_file.create_dataset(
-            "observation",
-            shape=(n_keyposes, 4, 3+3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, 3+3, IM_SIZE, IM_SIZE),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "variation", shape=(n_keyposes,), chunks=(STORE_EVERY,),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "proprioception",
-            shape=(n_keyposes, 1, 8),
-            chunks=(STORE_EVERY, 1, 8),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "action",
-            shape=(n_keyposes, 2, 8),
-            chunks=(STORE_EVERY, 2, 8),
-            compressor=compressor
-        )
-
-        # Read every READ_EVERY
-        obs, prop, actions, _vars = [], [], [], []
-        for s in range(0, len(episodes), READ_EVERY):
-            # collect data
-            for var, ep in episodes[s:s + READ_EVERY]:
-                with open(ep, "rb") as f:
-                    content = pickle.loads(blosc.decompress(f.read()))
-                obs.append(np.concatenate(
-                    (content[1][:, :, 0] / 2 + 0.5, content[1][:, :, 1]), 2
-                ))
-                prop.extend([to_numpy(tens) for tens in content[4]])
-                actions.extend([to_numpy(tens) for tens in content[2]])
-                _vars.extend([var] * len(content[0]))
-            # concatenate
-            obs = np.concatenate(obs)
-            prop = np.concatenate(prop)
-            actions = np.concatenate(actions)
-            actions = np.stack((prop, actions), 1)
-            _vars = np.array(_vars)
-            # shuffle
-            inds = np.random.permutation(len(obs))
-            obs = obs[inds]
-            prop = prop[inds]
-            actions = actions[inds]
-            _vars = _vars[inds]
-            # if len not divisible by chunk size, pad
-            if len(obs) % STORE_EVERY != 0:
-                pad_ = STORE_EVERY - (len(obs) % STORE_EVERY)
-                obs = np.concatenate((obs, obs[:pad_]))
-                prop = np.concatenate((prop, prop[:pad_]))
-                actions = np.concatenate((actions, actions[:pad_]))
-                _vars = np.concatenate((_vars, _vars[:pad_]))
-            # write
-            zarr_file['observation'] = obs
-            zarr_file['proprioception'] = prop
-            zarr_file['action'] = actions
-            zarr_file['variation'] = _vars
-
-
-def per_task_main():
-    tasks = [
-        "place_cups", "close_jar", "insert_onto_square_peg",
-        "light_bulb_in", "meat_off_grill", "open_drawer",
-        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-        "push_buttons", "put_groceries_in_cupboard",
-        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-        "slide_block_to_color_target", "stack_blocks", "stack_cups",
-        "sweep_to_dustpan_of_size", "turn_tap"
-    ]
-    variations = range(0, 199)
-    for task in tasks:
-        print(task)
-        task_to_zarr(task, variations)
-
-
 def all_tasks_main():
     tasks = [
-        "place_cups", "close_jar", "insert_onto_square_peg",
-        "light_bulb_in", "meat_off_grill", "open_drawer",
-        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-        "push_buttons", "put_groceries_in_cupboard",
-        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-        "slide_block_to_color_target", "stack_blocks", "stack_cups",
-        "sweep_to_dustpan_of_size", "turn_tap"
+        "close_jar", "open_drawer", "sweep_to_dustpan_of_size",
+        "meat_off_grill", "turn_tap", "slide_block_to_color_target",
+        "put_item_in_drawer", "reach_and_drag", "push_buttons",
+        "stack_blocks"
     ]
     camera_order = ['left', 'right', 'wrist', 'front']
     task2id = {task: t for t, task in enumerate(tasks)}
@@ -279,15 +173,15 @@ def all_tasks_main():
     with zarr.open_group(f"{STORE_PATH}.zarr", mode="w") as zarr_file:
         zarr_file.create_dataset(
             "rgb",
-            shape=(n_keyposes, 4, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, 3, IM_SIZE, IM_SIZE),
+            shape=(n_keyposes, 1, 3, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, 1, 3, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="uint8"
         )
         zarr_file.create_dataset(
             "depth",
-            shape=(n_keyposes, 4, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, IM_SIZE, IM_SIZE),
+            shape=(n_keyposes, 1, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, 1, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="float16"
         )
@@ -324,7 +218,7 @@ def all_tasks_main():
             for task, var, ep in tqdm(episodes[s:s + READ_EVERY]):
                 with open(ep, "rb") as f:
                     content = pickle.loads(blosc.decompress(f.read()))
-                rgb.append((127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8))
+                rgb.append((127.5 * (content[1][:, -1:, 0] + 1)).astype(np.uint8))
                 batch_depth = np.stack([
                     inverse_depth_batched(
                         content[1][:, c, 1].transpose(0, 2, 3, 1),
@@ -332,6 +226,7 @@ def all_tasks_main():
                         cameras[cam]['intrinsics']
                     )
                     for c, cam in enumerate(camera_order)
+                    if cam == 'front'
                 ], 1)
                 depth.append(batch_depth.astype(np.float16))
                 prop.extend([
@@ -366,15 +261,15 @@ def randomize_order():
         with zarr.open_group(f"{STORE_PATH}_randomized.zarr", mode="w") as fid:
             fid.create_dataset(
                 "rgb",
-                shape=(n_keyposes, 4, 3, IM_SIZE, IM_SIZE),
-                chunks=(RAND_STORE_EVERY, 4, 3, IM_SIZE, IM_SIZE),
+                shape=(n_keyposes, 1, 3, IM_SIZE, IM_SIZE),
+                chunks=(RAND_STORE_EVERY, 1, 3, IM_SIZE, IM_SIZE),
                 compressor=compressor,
                 dtype="uint8"
             )
             fid.create_dataset(
                 "depth",
-                shape=(n_keyposes, 4, IM_SIZE, IM_SIZE),
-                chunks=(RAND_STORE_EVERY, 4, IM_SIZE, IM_SIZE),
+                shape=(n_keyposes, 1, IM_SIZE, IM_SIZE),
+                chunks=(RAND_STORE_EVERY, 1, IM_SIZE, IM_SIZE),
                 compressor=compressor,
                 dtype="float16"
             )
@@ -415,8 +310,5 @@ def randomize_order():
 
 
 if __name__ == "__main__":
-    if SINGLE_FILE:
-        all_tasks_main()
-        randomize_order()
-    else:
-        per_task_main()
+    all_tasks_main()
+    randomize_order()
