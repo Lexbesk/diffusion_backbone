@@ -19,12 +19,15 @@ from tqdm import trange
 
 from engine import BaseTrainTester
 from datasets.dataset_rlbench_zarr import (
-    GNFactorDataset,
-    PeractDataset
+    PeractDataset,
+    GNFactorDataset
 )
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import DenoiseActor, BimanualDenoiseActor
-from diffuser_actor.depth2cloud.rlbench import PeractDepth2Cloud
+from diffuser_actor.depth2cloud.rlbench import (
+    PeractDepth2Cloud,
+    GNFactorDepth2Cloud
+)
 from utils.common_utils import count_parameters, str2bool, str_none
 
 
@@ -88,7 +91,12 @@ class TrainTester(BaseTrainTester):
 
     def __init__(self, args):
         super().__init__(args)
-        self.depth2cloud = PeractDepth2Cloud((256, 256))
+        _cls = {
+            "Peract": PeractDepth2Cloud,
+            # "Peract2": Peract2Dataset,
+            "GNFactor": GNFactorDepth2Cloud
+        }[args.dataset]
+        self.depth2cloud = _cls((256, 256))
         self.aug = RandomAffine(
             degrees=0,
             scale=(0.75, 1.25),
@@ -108,7 +116,8 @@ class TrainTester(BaseTrainTester):
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
             instructions=self.args.instructions,
-            precompute_instruction_encodings=self.args.precompute_instruction_encodings
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            copies=self.args.train_iters
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
@@ -141,11 +150,23 @@ class TrainTester(BaseTrainTester):
 
         return _model
 
-    def get_workspace_normalizer(self, data_loader, total_iter=None):
+    def get_workspace_normalizer(self, data_loader=None, total_iter=None):
         print("Computing workspace normalizer...")
+        dataset_cls = {
+            "Peract": PeractDataset,
+            # "Peract2": Peract2Dataset,
+            "GNFactor": GNFactorDataset
+        }[args.dataset]
+
+        # Initialize datasets with arguments
+        train_dataset = dataset_cls(
+            root=self.args.train_data_dir,
+            instructions=self.args.instructions,
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings
+        )
 
         data_loader = DataLoader(
-            data_loader.dataset,
+            train_dataset,
             batch_size=self.args.batch_size,
             collate_fn=traj_collate_fn,
             shuffle=False,

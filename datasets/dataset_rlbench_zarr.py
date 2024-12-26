@@ -15,8 +15,10 @@ class RLBenchDataset:
         root,  # the directory path of the dataset
         instructions,
         precompute_instruction_encodings,
+        copies=1,  # how many copies of the dataset to load
         relative_action=False  # whether to return relative actions
     ):
+        self.copies = copies
         self._relative_action = relative_action
 
         # Load instructions
@@ -44,6 +46,8 @@ class RLBenchDataset:
             [trajectories]  # wrt frame_ids, (N_i, 8)
         ]
         """
+        idx = idx % len(self.annos['variation'])
+
         # Split RGB and XYZ
         rgbs = to_tensor(self.annos['rgb'][idx])
         pcds = to_tensor(self.annos['depth'][idx])
@@ -84,7 +88,7 @@ class RLBenchDataset:
         return ret_dict
 
     def __len__(self):
-        return len(self.annos['variation'])
+        return self.copies * len(self.annos['variation'])
 
 
 class PeractDataset(RLBenchDataset):
