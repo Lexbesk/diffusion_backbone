@@ -1,5 +1,5 @@
-rm -r /scratch/GNFactor_zarr
-cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
+# rm -r /scratch/GNFactor_zarr
+# cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
 
 main_dir=GNFactorFast
 
@@ -24,7 +24,6 @@ B_val=64
 C=144
 train_iters=200000
 val_freq=4000
-workspace_normalizer_iter=16
 precompute_instruction_encodings=true
 num_workers=4
 dataset=GNFactor
@@ -44,7 +43,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --instructions $instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
-    --workspace_normalizer_iter $workspace_normalizer_iter \
     --num_workers $num_workers \
     --train_iters $train_iters \
     --embedding_dim $C \

@@ -1,18 +1,12 @@
-
-# if [ ! -d /scratch/Peract_packaged ]; then
-#     cd /scratch
-#     wget https://huggingface.co/katefgroup/3d_diffuser_actor/resolve/main/Peract_packaged.zip
-#     unzip Peract_packaged.zip
-#     rm Peract_packaged.zip
-# fi
-# cd /home/ngkanats/repos/lbs/analogical_manipulation
+# rm -r /scratch/Peract_zarr/
+# cp -r /data/user_data/ngkanats/Peract_zarr /scratch/
 
 main_dir=Peract
 
 train_data_dir=/scratch/Peract_packaged/train
 eval_data_dir=/scratch/Peract_packaged/val
-train_data_dir=/scratch/Peract_zarr/train_randomized.zarr
-eval_data_dir=/scratch/Peract_zarr/val_randomized.zarr
+train_data_dir=/scratch/Peract_zarr/train.zarr
+eval_data_dir=/scratch/Peract_zarr/val.zarr
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4

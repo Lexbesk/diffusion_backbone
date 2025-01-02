@@ -9,6 +9,7 @@ from ..utils.position_encodings import RotaryPositionEncoding3D
 from ..utils.layers import FFWRelativeCrossAttentionModule, ParallelAttention
 from .vision.resnet import load_resnet50, load_resnet18
 from .vision.clip import load_clip
+from .vision.tiny_vit import load_tiny
 from .vision.fpn import EfficientFeaturePyramidNetwork
 
 
@@ -17,16 +18,14 @@ class Encoder(nn.Module):
     def __init__(self,
                  backbone="clip",
                  embedding_dim=60,
-                 num_sampling_level=1,
                  nhist=1,
                  num_attn_heads=9,
                  num_vis_ins_attn_layers=2,
-                 fps_subsampling_factor=5):
+                 fps_subsampling_factor=5,
+                 finetune_backbone=False):
         super().__init__()
-        assert backbone in ["resnet50", "resnet18", "clip"]
-        assert num_sampling_level in [1, 2, 3, 4]
+        assert backbone in ["resnet50", "resnet18", "clip", "tiny"]
 
-        self.num_sampling_level = num_sampling_level
         self.fps_subsampling_factor = fps_subsampling_factor
 
         # Frozen backbone
@@ -36,22 +35,28 @@ class Encoder(nn.Module):
             self.backbone, self.normalize = load_resnet18()
         elif backbone == "clip":
             self.backbone, self.normalize = load_clip()
+        elif backbone == "tiny":
+            self.backbone, self.normalize = load_tiny()
         for p in self.backbone.parameters():
-            p.requires_grad = False
+            p.requires_grad = finetune_backbone
 
         # Coarse RGB features are the 3rd layer of the feature pyramid
         # at 1/8 resolution (32x32)
-        # Fine RGB features are the 1st layer of the feature pyramid
-        # at 1/2 resolution (128x128)
         self.feature_map_pyramid = ['res3']
-        self.downscaling_factor_pyramid = [8]
 
         # Semantic visual features at different scales
         output_level = min([int(lvl[3:]) for lvl in self.feature_map_pyramid])
         output_level = f"res{output_level}"
-        self.feature_pyramid = EfficientFeaturePyramidNetwork(
-            [64, 256, 512, 1024, 2048], embedding_dim, output_level=output_level
-        )
+        if backbone != 'tiny':
+            self.feature_pyramid = EfficientFeaturePyramidNetwork(
+                [64, 256, 512, 1024, 2048],
+                embedding_dim, output_level=output_level
+            )
+        else:
+            self.feature_pyramid = EfficientFeaturePyramidNetwork(
+                [64, 128, 160, 320],
+                embedding_dim, output_level=output_level
+            )
 
         # 3D relative positional embeddings
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
@@ -180,7 +185,7 @@ class Encoder(nn.Module):
 
         rgb_feats_pyramid = []
         pcd_pyramid = []
-        for i in range(self.num_sampling_level):
+        for i in range(len(self.feature_map_pyramid)):
             # Isolate level's visual features
             rgb_features_i = rgb_features[self.feature_map_pyramid[i]]
 
@@ -193,7 +198,6 @@ class Encoder(nn.Module):
             )
 
             # Merge different cameras for clouds, separate for rgb features
-            h, w = pcd_i.shape[-2:]
             pcd_i = einops.rearrange(
                 pcd_i,
                 "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
@@ -232,6 +236,9 @@ class Encoder(nn.Module):
         # context_features (Np, B, F)
         # context_pos (B, Np, F, 2)
         # outputs of analogous shape, with smaller Np
+        if self.fps_subsampling_factor == 1:
+            return context_features, context_pos
+
         npts, bs, ch = context_features.shape
 
         batch_indices = torch.arange(

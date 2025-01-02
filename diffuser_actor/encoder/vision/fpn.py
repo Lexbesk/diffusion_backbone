@@ -1,11 +1,11 @@
 from typing import OrderedDict
 
-import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.ops import FeaturePyramidNetwork
 
 
 class EfficientFeaturePyramidNetwork(FeaturePyramidNetwork):
+
     def __init__(
         self,
         in_channels_list,
@@ -43,17 +43,20 @@ class EfficientFeaturePyramidNetwork(FeaturePyramidNetwork):
         results = []
         results.append(self.get_result_from_layer_blocks(last_inner, -1))
 
-        for idx in range(len(x) - 2, -1, -1):
-            inner_lateral = self.get_result_from_inner_blocks(x[idx], idx)
-            feat_shape = inner_lateral.shape[-2:]
-            inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
-            last_inner = inner_lateral + inner_top_down
-            results.insert(0, self.get_result_from_layer_blocks(last_inner, idx))
+        if names[-1] != self.output_level:
+            for idx in range(len(x) - 2, -1, -1):
+                inner_lateral = self.get_result_from_inner_blocks(x[idx], idx)
+                feat_shape = inner_lateral.shape[-2:]
+                inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
+                last_inner = inner_lateral + inner_top_down
+                results.insert(0, self.get_result_from_layer_blocks(last_inner, idx))
 
-            # Don't go over all levels to save compute
-            if names[idx] == self.output_level:
-                names = names[idx:]
-                break
+                # Don't go over all levels to save compute
+                if names[idx] == self.output_level:
+                    names = names[idx:]
+                    break
+        else:
+            names = names[-1:]
 
         if self.extra_blocks is not None:
             results, names = self.extra_blocks(results, x, names)

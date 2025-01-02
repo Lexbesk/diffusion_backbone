@@ -1,21 +1,17 @@
 """Online evaluation script on RLBench."""
 import random
-from typing import Tuple, Optional
 from pathlib import Path
 import json
 import os
+import pickle
 
 import torch
 import numpy as np
 import argparse
 
 from diffuser_actor.policy.trajectory_optimization.denoise_actor import DenoiseActor
-from utils.common_utils import (
-    load_instructions,
-    round_floats
-)
 from utils.utils_with_rlbench import RLBenchEnv, Actioner, load_episodes
-from utils.common_utils import str2bool, str_none
+from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
@@ -126,9 +122,8 @@ if __name__ == "__main__":
         collision_checking=bool(args.collision_checking)
     )
 
-    instruction = load_instructions(args.instructions)
-    if instruction is None:
-        raise NotImplementedError()
+    with open(args.instructions, "rb") as fid:
+        instruction = pickle.load(fid)
 
     actioner = Actioner(
         policy=model,

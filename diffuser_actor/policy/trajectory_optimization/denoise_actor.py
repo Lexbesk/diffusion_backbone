@@ -47,7 +47,6 @@ class DenoiseActor(nn.Module):
         self.encoder = Encoder(
             backbone=backbone,
             embedding_dim=embedding_dim,
-            num_sampling_level=1,
             nhist=nhist,
             num_attn_heads=9,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
@@ -149,6 +148,7 @@ class DenoiseActor(nn.Module):
             context_feats.transpose(0, 1),
             self.encoder.relative_pe_layer(context)
         )
+
         return (
             context_feats, context,  # contextualized visual features
             instr_feats,  # language features
@@ -396,11 +396,6 @@ class DenoiseActor(nn.Module):
             rgb_obs, pcd_obs, instruction, curr_gripper
         )
 
-        # Condition on start-end pose
-        cond_data = torch.zeros_like(gt_trajectory)
-        cond_mask = torch.zeros_like(cond_data)
-        cond_mask = cond_mask.bool()
-
         # Sample noise
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
@@ -419,8 +414,6 @@ class DenoiseActor(nn.Module):
             timesteps
         )
         noisy_trajectory = torch.cat((pos, rot), -1)
-        noisy_trajectory[cond_mask] = cond_data[cond_mask]  # condition
-        assert not cond_mask.any()
 
         # Predict the noise residual
         pred = self.policy_forward_pass(

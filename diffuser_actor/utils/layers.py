@@ -397,7 +397,7 @@ class FFWRelativeCrossAttentionModule(nn.Module):
             ))
 
     def forward(self, query, value, diff_ts=None,
-                query_pos=None, value_pos=None):
+                query_pos=None, value_pos=None, context=None, context_pos=None):
         output = []
         for i in range(self.num_layers):
             query = self.attn_layers[i](

@@ -1,6 +1,5 @@
 from pathlib import Path
 import pickle
-import random
 
 import blosc
 from numcodecs import Blosc
@@ -10,16 +9,11 @@ import torch
 from tqdm import tqdm
 
 
-SINGLE_FILE = True
-ROOT = '/scratch/Peract_packaged/val'
-STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/val'
-if SINGLE_FILE:
-    READ_EVERY = 100  # in episodes
-    STORE_EVERY = 1  # in keyposes
-    RAND_STORE_EVERY = 1  # in keyposes
-else:
-    READ_EVERY = 100  # in episodes
-    STORE_EVERY = 5  # in keyposes
+ROOT = '/scratch/Peract_packaged/'
+STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/'
+READ_EVERY = 100  # in episodes
+STORE_EVERY = 1  # in keyposes
+NCAM = 4
 IM_SIZE = 256
 
 
@@ -87,31 +81,6 @@ cameras = {
 }
 
 
-def inverse_depth(xyz, extrinsics, intrinsics):
-    """Convert point cloud in world frame to depth."""
-    # Construct camera projection
-    C = np.expand_dims(extrinsics[:3, 3], 0).T
-    R = extrinsics[:3, :3]
-    R_inv = R.T  # inverse of rot matrix is transpose
-    R_inv_C = np.matmul(R_inv, C)
-    extrinsics = np.concatenate((R_inv, -R_inv_C), -1)
-    cam_proj_mat = np.matmul(intrinsics, extrinsics)
-    cam_proj_mat_homo = np.concatenate(
-        [cam_proj_mat, [np.array([0, 0, 0, 1])]]
-    )
-    cam_proj_mat_inv = np.linalg.inv(cam_proj_mat_homo)
-
-    # World space to pixel space
-    h, w = xyz.shape[:2]
-    xyz = np.concatenate([xyz, np.ones((h, w, 1))], -1)
-    xyz = np.reshape(xyz, (h * w, -1)).T
-    xyz = np.matmul(np.linalg.inv(cam_proj_mat_inv), xyz)
-    xyz = np.reshape(xyz.T, (h, w, -1))[..., :3]
-    
-    # Isolate the influence of depth
-    return xyz[..., -1]
-
-
 def inverse_depth_batched(xyz, extrinsics, intrinsics):
     """Convert point cloud in world frame to depth."""
     # Construct camera projection
@@ -146,105 +115,7 @@ def to_numpy(x):
         return np.array(x)
 
 
-def task_to_zarr(task, variations):
-    # Collect all episodes
-    episodes = []
-    for var in variations:
-        _path = Path(f'{ROOT}/{task}+{var}/')
-        if not _path.is_dir():
-            continue
-        episodes.extend([(var, ep) for ep in _path.glob("*.dat")])
-    random.shuffle(episodes)
-
-    # Read once to get the number of keyposes
-    n_keyposes = 0
-    for _, ep in episodes:
-        with open(ep, "rb") as f:
-            content = pickle.loads(blosc.decompress(f.read()))
-        n_keyposes += len(content[0])
-
-    # Initialize zarr
-    compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}/{task}.zarr", mode="w") as zarr_file:
-        zarr_file.create_dataset(
-            "observation",
-            shape=(n_keyposes, 4, 3+3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, 3+3, IM_SIZE, IM_SIZE),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "variation", shape=(n_keyposes,), chunks=(STORE_EVERY,),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "proprioception",
-            shape=(n_keyposes, 1, 8),
-            chunks=(STORE_EVERY, 1, 8),
-            compressor=compressor
-        )
-        zarr_file.create_dataset(
-            "action",
-            shape=(n_keyposes, 2, 8),
-            chunks=(STORE_EVERY, 2, 8),
-            compressor=compressor
-        )
-
-        # Read every READ_EVERY
-        obs, prop, actions, _vars = [], [], [], []
-        for s in range(0, len(episodes), READ_EVERY):
-            # collect data
-            for var, ep in episodes[s:s + READ_EVERY]:
-                with open(ep, "rb") as f:
-                    content = pickle.loads(blosc.decompress(f.read()))
-                obs.append(np.concatenate(
-                    (content[1][:, :, 0] / 2 + 0.5, content[1][:, :, 1]), 2
-                ))
-                prop.extend([to_numpy(tens) for tens in content[4]])
-                actions.extend([to_numpy(tens) for tens in content[2]])
-                _vars.extend([var] * len(content[0]))
-            # concatenate
-            obs = np.concatenate(obs)
-            prop = np.concatenate(prop)
-            actions = np.concatenate(actions)
-            actions = np.stack((prop, actions), 1)
-            _vars = np.array(_vars)
-            # shuffle
-            inds = np.random.permutation(len(obs))
-            obs = obs[inds]
-            prop = prop[inds]
-            actions = actions[inds]
-            _vars = _vars[inds]
-            # if len not divisible by chunk size, pad
-            if len(obs) % STORE_EVERY != 0:
-                pad_ = STORE_EVERY - (len(obs) % STORE_EVERY)
-                obs = np.concatenate((obs, obs[:pad_]))
-                prop = np.concatenate((prop, prop[:pad_]))
-                actions = np.concatenate((actions, actions[:pad_]))
-                _vars = np.concatenate((_vars, _vars[:pad_]))
-            # write
-            zarr_file['observation'] = obs
-            zarr_file['proprioception'] = prop
-            zarr_file['action'] = actions
-            zarr_file['variation'] = _vars
-
-
-def per_task_main():
-    tasks = [
-        "place_cups", "close_jar", "insert_onto_square_peg",
-        "light_bulb_in", "meat_off_grill", "open_drawer",
-        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
-        "push_buttons", "put_groceries_in_cupboard",
-        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
-        "slide_block_to_color_target", "stack_blocks", "stack_cups",
-        "sweep_to_dustpan_of_size", "turn_tap"
-    ]
-    variations = range(0, 199)
-    for task in tasks:
-        print(task)
-        task_to_zarr(task, variations)
-
-
-def all_tasks_main():
+def all_tasks_main(split):
     tasks = [
         "place_cups", "close_jar", "insert_onto_square_peg",
         "light_bulb_in", "meat_off_grill", "open_drawer",
@@ -257,15 +128,15 @@ def all_tasks_main():
     camera_order = ['left', 'right', 'wrist', 'front']
     task2id = {task: t for t, task in enumerate(tasks)}
     variations = range(0, 199)
+
     # Collect all episodes
     episodes = []
     for task in tasks:
         for var in variations:
-            _path = Path(f'{ROOT}/{task}+{var}/')
+            _path = Path(f'{ROOT}{split}/{task}+{var}/')
             if not _path.is_dir():
                 continue
             episodes.extend([(task, var, ep) for ep in _path.glob("*.dat")])
-    random.shuffle(episodes)
 
     # Read once to get the number of keyposes
     n_keyposes = 0
@@ -276,18 +147,18 @@ def all_tasks_main():
 
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}.zarr", mode="w") as zarr_file:
+    with zarr.open_group(f"{STORE_PATH}{split}.zarr", mode="w") as zarr_file:
         zarr_file.create_dataset(
             "rgb",
-            shape=(n_keyposes, 4, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, 3, IM_SIZE, IM_SIZE),
+            shape=(n_keyposes, NCAM, 3, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, NCAM, 3, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="uint8"
         )
         zarr_file.create_dataset(
             "depth",
-            shape=(n_keyposes, 4, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, 4, IM_SIZE, IM_SIZE),
+            shape=(n_keyposes, NCAM, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, NCAM, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="float16"
         )
@@ -342,81 +213,20 @@ def all_tasks_main():
                 ])
                 tids.extend([task2id[task]] * len(content[0]))
                 _vars.extend([var] * len(content[0]))
-            # shuffle
-            inds = np.random.permutation(len(_vars))
+
             # write
-            end = start + len(inds)
-            zarr_file['rgb'][start:end] = np.concatenate(rgb)[inds]
-            zarr_file['depth'][start:end] = np.concatenate(depth)[inds]
-            zarr_file['proprioception'][start:end] = np.stack(prop)[inds]
+            end = start + len(_vars)
+            zarr_file['rgb'][start:end] = np.concatenate(rgb)
+            zarr_file['depth'][start:end] = np.concatenate(depth)
+            zarr_file['proprioception'][start:end] = np.stack(prop)
             zarr_file['action'][start:end] = np.stack(
                 (np.concatenate(prop), np.concatenate(actions)), 1
-            )[inds]
-            zarr_file['task_id'][start:end] = np.array(tids)[inds].astype(np.uint8)
-            zarr_file['variation'][start:end] = np.array(_vars)[inds].astype(np.uint8)
+            )
+            zarr_file['task_id'][start:end] = np.array(tids).astype(np.uint8)
+            zarr_file['variation'][start:end] = np.array(_vars).astype(np.uint8)
             start = end
 
 
-def randomize_order():
-    print('Randomizing order')
-    with zarr.open_group(f"{STORE_PATH}.zarr", mode="r") as read_file:
-        n_keyposes = read_file['variation'].shape[0]
-        print(f'found {n_keyposes} keyposes')
-        compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-        with zarr.open_group(f"{STORE_PATH}_randomized.zarr", mode="w") as fid:
-            fid.create_dataset(
-                "rgb",
-                shape=(n_keyposes, 4, 3, IM_SIZE, IM_SIZE),
-                chunks=(RAND_STORE_EVERY, 4, 3, IM_SIZE, IM_SIZE),
-                compressor=compressor,
-                dtype="uint8"
-            )
-            fid.create_dataset(
-                "depth",
-                shape=(n_keyposes, 4, IM_SIZE, IM_SIZE),
-                chunks=(RAND_STORE_EVERY, 4, IM_SIZE, IM_SIZE),
-                compressor=compressor,
-                dtype="float16"
-            )
-            fid.create_dataset(
-                "task_id", shape=(n_keyposes,), chunks=(RAND_STORE_EVERY,),
-                compressor=compressor,
-                dtype="uint8"
-            )
-            fid.create_dataset(
-                "variation", shape=(n_keyposes,), chunks=(RAND_STORE_EVERY,),
-                compressor=compressor,
-                dtype="uint8"
-            )
-            fid.create_dataset(
-                "proprioception",
-                shape=(n_keyposes, 1, 8),
-                chunks=(RAND_STORE_EVERY, 1, 8),
-                compressor=compressor,
-                dtype="float32"
-            )
-            fid.create_dataset(
-                "action",
-                shape=(n_keyposes, 2, 8),
-                chunks=(RAND_STORE_EVERY, 2, 8),
-                compressor=compressor,
-                dtype="float32"
-            )
-            # shuffle
-            inds = np.random.permutation(n_keyposes)
-            # write
-            fields = [
-                'rgb', 'depth', 'task_id', 'variation',
-                'proprioception', 'action'
-            ]
-            for i, ind in tqdm(enumerate(inds)):
-                for field in fields:
-                    fid[field][i] = read_file[field][ind]
-
-
 if __name__ == "__main__":
-    if SINGLE_FILE:
-        all_tasks_main()
-        randomize_order()
-    else:
-        per_task_main()
+    for split in ['train', 'val']:
+        all_tasks_main(split)

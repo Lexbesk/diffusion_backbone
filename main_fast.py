@@ -7,7 +7,7 @@ import random
 import argparse
 
 import cv2
-from kornia.augmentation import RandomAffine
+from kornia import augmentation as K
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
@@ -23,7 +23,8 @@ from datasets.dataset_rlbench_zarr import (
     GNFactorDataset
 )
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
-from diffuser_actor.policy import DenoiseActor, BimanualDenoiseActor
+from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
+# from diffuser_actor.policy.trajectory_optimization.denoise_actor_knn import DenoiseActor
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     GNFactorDepth2Cloud
@@ -62,7 +63,6 @@ def parse_arguments():
     # Model
     parser.add_argument('--bimanual', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
-    parser.add_argument('--workspace_normalizer_iter', type=int, default=256)
     parser.add_argument('--use_flow_matching', type=str2bool, default=False)
     parser.add_argument('--dense_interpolation', type=str2bool, default=False)
     parser.add_argument('--interpolation_length', type=int, default=100)
@@ -97,11 +97,15 @@ class TrainTester(BaseTrainTester):
             "GNFactor": GNFactorDepth2Cloud
         }[args.dataset]
         self.depth2cloud = _cls((256, 256))
-        self.aug = RandomAffine(
-            degrees=0,
-            scale=(0.75, 1.25),
-            padding_mode="reflection",
-            p=1.0
+        self.aug = K.AugmentationSequential(
+            K.RandomHorizontalFlip(p=0.5),
+            K.RandomAffine(
+                degrees=0,
+                scale=(0.75, 1.25),
+                padding_mode="reflection",
+                p=0.98
+            ),
+            # K.RandomPerspective(p=0.2)
         ).cuda()
 
     def get_datasets(self):
@@ -150,7 +154,7 @@ class TrainTester(BaseTrainTester):
 
         return _model
 
-    def get_workspace_normalizer(self, data_loader=None, total_iter=None):
+    def get_workspace_normalizer(self, data_loader=None):
         print("Computing workspace normalizer...")
         dataset_cls = {
             "Peract": PeractDataset,
@@ -174,15 +178,7 @@ class TrainTester(BaseTrainTester):
         )
 
         bounds = []
-        iter_loader = iter(data_loader)
-        if total_iter is None:
-            total_iter = max(len(iter_loader), self.args.workspace_normalizer_iter)
-        for _ in trange(total_iter):
-            try:
-                sample = next(iter_loader)
-            except StopIteration:
-                iter_loader = iter(data_loader)
-                sample = next(iter_loader)
+        for sample in trange(data_loader):
             bounds.append(sample["action"][..., :3].reshape([-1, 3]))
 
         bounds = torch.cat(bounds, dim=0)
@@ -211,16 +207,20 @@ class TrainTester(BaseTrainTester):
             sample["action"] = sample["action"][:, 1:]
             sample["action_mask"] = sample["action_mask"][:, 1:]
         # Observations
-        b, nc, _, h, w = sample['rgbs'].shape
-        obs = torch.cat((
-            sample['rgbs'].cuda(non_blocking=True).half() / 255,
-            sample['pcds'].cuda(non_blocking=True)[:, :, None]
-        ), 2)  # (B, ncam, 4, H, W)
-        obs = obs.reshape(-1, 4, h, w)
+        pcds = self.depth2cloud(sample['pcds'].cuda(non_blocking=True))
         if augment:
+            b, nc, _, h, w = sample['rgbs'].shape
+            obs = torch.cat((
+                sample['rgbs'].cuda(non_blocking=True).half() / 255,
+                pcds
+            ), 2)  # (B, ncam, 6, H, W)
+            obs = obs.reshape(-1, 6, h, w)
             obs = self.aug(obs)
-        rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
-        pcds = self.depth2cloud(obs[:, -1].reshape(b, nc, h, w)).float()
+            rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
+            pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
+        else:
+            rgbs = sample['rgbs'].cuda(non_blocking=True).float() / 255
+            pcds = pcds.float()
         # Instructions
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             if not self.args.precompute_instruction_encodings:
