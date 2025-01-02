@@ -16,6 +16,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
+from utils.tristage_scheduler import TriStageLRScheduler
 
 
 class BaseTrainTester:
@@ -119,6 +120,8 @@ class BaseTrainTester:
             )
         elif self.args.lr_scheduler == "cosine":
             scheduler = CosineAnnealingLR(optimizer, T_max=self.args.train_iters)
+        elif self.args.lr_scheduler == "tristage":
+            scheduler = TriStageLRScheduler(optimizer)
         else:
             raise NotImplementedError
 

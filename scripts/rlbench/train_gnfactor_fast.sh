@@ -8,7 +8,7 @@ eval_data_dir=/scratch/GNFactor_zarr/val_randomized.zarr
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
-lr_scheduler=constant
+lr_scheduler=tristage
 dense_interpolation=1
 interpolation_length=2
 num_history=1

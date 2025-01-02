@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from tqdm import trange
+from tqdm import tqdm
 
 from engine import BaseTrainTester
 from datasets.dataset_rlbench_zarr import (
@@ -178,7 +178,7 @@ class TrainTester(BaseTrainTester):
         )
 
         bounds = []
-        for sample in trange(data_loader):
+        for sample in tqdm(data_loader):
             bounds.append(sample["action"][..., :3].reshape([-1, 3]))
 
         bounds = torch.cat(bounds, dim=0)
