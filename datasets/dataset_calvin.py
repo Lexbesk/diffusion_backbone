@@ -39,6 +39,7 @@ class CalvinDataset(BaseDataset):
         cache_size=0,  # number of episodes to cache
         max_episodes_per_scene=100,  # maximum number of episodes per scene
         cameras=("CAMERA_NAME", ),  # camera names
+        aug_cameras=(),  # camera for augmentation
         # for augmentations
         training=True,
         image_rescale=(1.0, 1.0),
@@ -66,6 +67,7 @@ class CalvinDataset(BaseDataset):
         self._cache = {}
         self._cache_size = cache_size
         self._cameras = cameras
+        self._aug_cameras = aug_cameras if len(aug_cameras) > 0 else cameras
         self._max_episode_length = max_episode_length
         self._scene = scene
 
@@ -174,9 +176,17 @@ class CalvinDataset(BaseDataset):
 
         # Augmentations
         if self._resize is not None:
-            states = einops.rearrange(states, "t n m c h w -> t n (m c) h w")
-            states = self._resize(states=states)["states"]
-            states = einops.rearrange(states, "t n (m c) h w -> t n m c h w", m=2)
+            if episode[3]:
+                aug_indices = [i for i, c in enumerate(self._cameras)
+                               if c in self._aug_cameras]
+            else:
+                aug_indices = list(range(states.shape[1]))
+            aug_states = einops.rearrange(
+                states[:, aug_indices], "t n m c h w -> t n (m c) h w")
+            aug_states = self._resize(states=aug_states)["states"]
+            aug_states = einops.rearrange(
+                aug_states, "t n (m c) h w -> t n m c h w", m=2)
+            states[:, aug_indices] = aug_states
 
         # Split RGB and XYZ
         rgbs = states[:, :, 0, :, 20:180, 20:180]
@@ -295,7 +305,8 @@ class TrainABCTestD_CalvinDataset(CalvinDataset):
     scenes = [
         "A", "B", "C", "D",
     ]
-    cameras=("front", "wrist")
+    cameras = ("front", "wrist")
+    aug_cameras = cameras
 
     def __init__(
         self,
@@ -327,6 +338,7 @@ class TrainABCTestD_CalvinDataset(CalvinDataset):
             cache_size=cache_size,
             max_episodes_per_scene=max_episodes_per_scene,
             cameras=self.cameras,
+            aug_cameras=self.aug_cameras,
             training=training,
             image_rescale=image_rescale,
             color_aug=color_aug,
@@ -334,3 +346,13 @@ class TrainABCTestD_CalvinDataset(CalvinDataset):
             interpolation_length=interpolation_length,
             relative_action=relative_action
         )
+
+
+class TrainABCTestD_Mix2D3D_CalvinDataset(TrainABCTestD_CalvinDataset):
+    """CALVIN dataset under the setup of training with scene A, B, C
+    and testing with scene D."""
+    scenes = [
+        "A", "B", "C", "D",
+    ]
+    cameras = ("front", "wrist")
+    aug_cameras = ("front", )
