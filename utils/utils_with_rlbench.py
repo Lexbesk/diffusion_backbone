@@ -60,7 +60,7 @@ def task_file_to_task_class(task_file):
 
 
 def load_episodes() -> Dict[str, Any]:
-    with open(Path(__file__).parent.parent / "data_preprocessing/episodes.json") as fid:
+    with open(Path(__file__).parent.parent / "data_processing/episodes.json") as fid:
         return json.load(fid)
 
 

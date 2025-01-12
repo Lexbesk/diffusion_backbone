@@ -60,7 +60,6 @@ def parse_arguments():
     parser.add_argument('--bimanual', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
     parser.add_argument('--workspace_normalizer_iter', type=int, default=256)
-    parser.add_argument('--use_flow_matching', type=str2bool, default=False)
     parser.add_argument('--dense_interpolation', type=str2bool, default=False)
     parser.add_argument('--interpolation_length', type=int, default=100)
     parser.add_argument('--backbone', type=str, default="clip")
