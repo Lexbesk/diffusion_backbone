@@ -27,7 +27,7 @@ eval_logs/
 temp/
 
 # third-party modules
-calvin/
+/calvin/
 
 # data directory
 data/

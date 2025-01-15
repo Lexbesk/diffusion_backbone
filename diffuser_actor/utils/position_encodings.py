@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+import einops
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -18,6 +19,36 @@ class SinusoidalPosEmb(nn.Module):
         emb = x[:, None] * emb[None, :]
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
+
+
+class SinusoidalPosEmb2D(nn.Module):
+
+    def __init__(self, dim, temperature=10000.):
+        super().__init__()
+        self.dim = dim
+        self.temperature = temperature
+        assert self.dim % 4 == 0, \
+            'Embed dimension must be divisible by 4 for 2D position embedding'
+
+    def forward(self, h, w, dtype=torch.float32, device="cuda"):
+        grid_w = torch.arange(w, dtype=dtype, device=device)
+        grid_h = torch.arange(h, dtype=dtype, device=device)
+        grid_h, grid_w = torch.meshgrid(grid_h, grid_w)
+        pos_dim = self.dim // 4
+        omega = torch.arange(pos_dim, dtype=dtype, device=device)
+        omega = omega / pos_dim
+        omega = 1. / (self.temperature**omega)
+        out_w = torch.einsum('m,d->md', [grid_w.flatten(), omega])
+        out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
+        pos_emb = torch.cat([
+            torch.sin(out_w),
+            torch.cos(out_w),
+            torch.sin(out_h),
+            torch.cos(out_h)
+        ], dim=1)
+        pos_emb = einops.rearrange(pos_emb, '(h w) c -> h w c', h=h, w=w)
+
+        return pos_emb
 
 
 class RotaryPositionEncoding(nn.Module):
