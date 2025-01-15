@@ -349,7 +349,6 @@ class DenoiseActor(nn.Module):
         Arguments:
             gt_trajectory: (B, trajectory_length, 3+4+X)
             trajectory_mask: (B, trajectory_length)
-            timestep: (B, 1)
             rgb_obs: (B, num_cameras, 3, H, W) in [0, 1]
             pcd_obs: (B, num_cameras, 3, H, W) in world coordinates
             instruction: (B, max_instruction_length, 512)
