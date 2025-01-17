@@ -135,13 +135,11 @@ class Actioner:
         self,
         policy=None,
         instructions=None,
-        apply_cameras=("left_shoulder", "right_shoulder", "wrist"),
-        action_dim=7,
+        apply_cameras=("left_shoulder", "right_shoulder", "wrist")
     ):
         self._policy = policy
         self._instructions = instructions
         self._apply_cameras = apply_cameras
-        self._action_dim = action_dim
 
         self._actions = {}
         self._instr = None
