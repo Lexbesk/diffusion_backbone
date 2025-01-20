@@ -60,7 +60,7 @@ def task_file_to_task_class(task_file):
 
 
 def load_episodes() -> Dict[str, Any]:
-    with open(Path(__file__).parent.parent / "data_preprocessing/episodes.json") as fid:
+    with open(Path(__file__).parent.parent / "data_processing/episodes.json") as fid:
         return json.load(fid)
 
 
@@ -135,13 +135,11 @@ class Actioner:
         self,
         policy=None,
         instructions=None,
-        apply_cameras=("left_shoulder", "right_shoulder", "wrist"),
-        action_dim=7,
+        apply_cameras=("left_shoulder", "right_shoulder", "wrist")
     ):
         self._policy = policy
         self._instructions = instructions
         self._apply_cameras = apply_cameras
-        self._action_dim = action_dim
 
         self._actions = {}
         self._instr = None

@@ -1,23 +1,23 @@
 # rm -r /scratch/GNFactor_zarr
 # cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
 
-main_dir=GNFactorFast
+main_dir=Isaac
 
-train_data_dir=/scratch/GNFactor_zarr/train_randomized.zarr
-eval_data_dir=/scratch/GNFactor_zarr/val_randomized.zarr
-instructions=instructions/peract/instructions.pkl
+train_data_dir=/data/user_data/ngkanats/isaac_zarr.zarr
+eval_data_dir=/data/user_data/ngkanats/isaac_zarr.zarr/
 
 lr=1e-4
 lr_scheduler=constant
 num_history=1
 denoise_timesteps=10
 denoise_model=rectified_flow
-keypose_only=true
+keypose_only=false
 quaternion_format=wxyz
 rotation_parametrization=6D
-fps_subsampling_factor=5
+fps_subsampling_factor=8
 backbone=clip
-use_instruction=true
+use_instruction=false
+relative_action=true
 workspace_normalizer_buffer=0.05
 B=128
 B_val=64
@@ -26,27 +26,27 @@ train_iters=200000
 val_freq=4000
 precompute_instruction_encodings=true
 num_workers=4
-dataset=GNFactor
+dataset=Isaac
 ngpus=4
 ngpus=1
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=none
-eval_only=false
+run_log_dir=all_ca_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+# checkpoint=none
+eval_only=true
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_fast.py \
+    main_fast_isaac.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
-    --instructions $instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
     --num_workers $num_workers \
     --train_iters $train_iters \
     --embedding_dim $C \
     --use_instruction $use_instruction \
+    --relative_action $relative_action \
     --rotation_parametrization $rotation_parametrization \
     --fps_subsampling_factor $fps_subsampling_factor \
     --backbone $backbone \

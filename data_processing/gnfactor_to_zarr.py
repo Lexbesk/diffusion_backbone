@@ -266,7 +266,6 @@ def all_tasks_main():
             zarr_file['task_id'][start:end] = np.array(tids)[inds].astype(np.uint8)
             zarr_file['variation'][start:end] = np.array(_vars)[inds].astype(np.uint8)
             start = end
-        import ipdb; ipdb.set_trace()
 
 
 def randomize_order():
