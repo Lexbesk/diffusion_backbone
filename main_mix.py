@@ -26,6 +26,7 @@ from datasets.dataset_rlbench import (
 from datasets.dataset_calvin import TrainABCTestD_Mix2D3D_CalvinDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy.trajectory_optimization.denoise_actor_mix import DenoiseMixActor
+from diffuser_actor.policy.trajectory_optimization.bimanual_denoise_actor_mix import BimanualDenoiseMixActor
 from utils.common_utils import count_parameters, str2bool, str_none
 
 
@@ -127,8 +128,7 @@ class TrainTester(BaseTrainTester):
         """Initialize the model."""
         # Initialize model with arguments
         if self.args.bimanual:
-            # model_class = BimanualDenoiseActor
-            raise NotImplementedError("Bimanual model not implemented")
+            model_class = BimanualDenoiseMixActor
         else:
             model_class = DenoiseMixActor
         _model = model_class(

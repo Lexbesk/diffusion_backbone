@@ -618,6 +618,7 @@ class TransformerHead(nn.Module):
         traj_feats = self.traj_encoder(trajectory)  # (B, L, F)
 
         # Concatenate traj_feats with gripcam features
+        num_gripcam = gripcam_context_feats.shape[1]
         traj_feats = torch.cat([gripcam_context_feats, traj_feats], dim=1)
         trajectory = torch.cat([gripcam_context, trajectory], dim=1)
 
@@ -648,9 +649,9 @@ class TransformerHead(nn.Module):
             non_gripcam_fps_feats, non_gripcam_fps_pos,
             instr_feats
         )
-        pos_pred = pos_pred[:, 1:]
-        rot_pred = rot_pred[:, 1:]
-        openess_pred = openess_pred[:, 1:]
+        pos_pred = pos_pred[:, num_gripcam:]
+        rot_pred = rot_pred[:, num_gripcam:]
+        openess_pred = openess_pred[:, num_gripcam:]
 
         return [torch.cat((pos_pred, rot_pred, openess_pred), -1)]
 

@@ -109,8 +109,8 @@ class DenoiseActor(nn.Module):
             non_gripper_action = self.non_gripper_actor(
                 gt_trajectory,
                 trajectory_mask,
-                rgb_obs[:, is_gripper_camera],
-                pcd_obs[:, is_gripper_camera],
+                rgb_obs[:, ~is_gripper_camera],
+                pcd_obs[:, ~is_gripper_camera],
                 instruction,
                 curr_gripper,
                 run_inference=True

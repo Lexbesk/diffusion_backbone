@@ -25,12 +25,13 @@ nvidia-smi
 #     rm Peract_packaged.zip
 # fi
 if [ ! -d /scratch/calvin ]; then
-    cd /scratch
-    rsync -avP babel-0-19:/scratch/calvin /scratch
+   cd /scratch
+   rsync -avP /data/user_data/ngkanats/calvin /scratch
 fi
 
 
 cd /home/ngkanats/repos/dev_bimanual_3dda
 # bash scripts/rlbench/train_.sh
-bash scripts/rlbench/train_gnfactor.sh
-# bash scripts/calvin/train_mix.sh
+# bash scripts/rlbench/train_gnfactor.sh
+# bash scripts/rlbench/train_gnfactor_fast.sh
+bash scripts/calvin/train_mix.sh
