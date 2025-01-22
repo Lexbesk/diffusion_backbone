@@ -52,7 +52,7 @@ Create a conda environment with the following command:
 > conda create --name 3dda-pt24 python=3.10
 > conda install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
 > pip install  dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
-> pip install numpy pillow einops typed-argument-parser tqdm transformers absl-py matplotlib scipy tensorboard opencv-python open3d trimesh wandb;
+> pip install numpy pillow einops typed-argument-parser tqdm transformers absl-py matplotlib scipy tensorboard opencv-python open3d trimesh wandb timm zarr;
 > pip install --upgrade pydantic>=2.0
 > pip install git+https://github.com/openai/CLIP.git;
 > pip install diffusers blosc moviepy ipdb einops
