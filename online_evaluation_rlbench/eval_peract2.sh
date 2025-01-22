@@ -1,7 +1,8 @@
 exp=flow_3dda
 
-data_dir=./data/peract/raw/test/
-instructions=instructions/peract/instructions.pkl
+data_dir=./data/peract2/raw/test/
+dataset=Peract2
+instructions=instructions/peract2/instructions.pkl
 num_episodes=100
 max_tries=2
 verbose=true
@@ -21,6 +22,7 @@ checkpoint=train_logs/Peract/C144-B12-lr1e-4-constant-H1-rectified_flow-DT10/las
 
 python online_evaluation_rlbench/evaluate_policy.py \
     --checkpoint $checkpoint \
+    --dataset $dataset \
     --denoise_timesteps $denoise_timesteps \
     --fps_subsampling_factor $fps_subsampling_factor \
     --relative_action $relative_action \
