@@ -15,10 +15,10 @@ class RLBenchDataset:
         root,  # the directory path of the dataset
         instructions,
         precompute_instruction_encodings,
-        copies=1,  # how many copies of the dataset to load
+        copies=None,
         relative_action=False  # whether to return relative actions
     ):
-        self.copies = copies
+        self.copies = self.train_copies if copies is None else copies
         self._relative_action = relative_action
 
         # Load instructions
@@ -103,6 +103,7 @@ class PeractDataset(RLBenchDataset):
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
+    train_copies = 1  # how many copies of the dataset to load
 
 
 class GNFactorDataset(RLBenchDataset):
@@ -114,3 +115,4 @@ class GNFactorDataset(RLBenchDataset):
         "stack_blocks"
     ]
     cameras = ("front",)
+    train_copies = 20  # how many copies of the dataset to load

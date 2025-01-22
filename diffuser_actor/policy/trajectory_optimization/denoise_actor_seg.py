@@ -77,6 +77,7 @@ class DenoiseActor(BaseActor):
         ).reshape(len(seg_mask), -1)[..., None]  # B (nc*h*w) 1
         emb_mask = seg_mask * self.fg_emb.weight[None]  # B (nc*h*w) F
         context_feats = context_feats + emb_mask
+        from ipdb import set_trace as st; st()
 
         # Encode gripper history (B, nhist, F)
         adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(

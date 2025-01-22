@@ -32,6 +32,7 @@ class DenoiseActor(nn.Module):
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
+                 num_attn_heads=9,
                  fps_subsampling_factor=5,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
@@ -48,7 +49,7 @@ class DenoiseActor(nn.Module):
             backbone=backbone,
             embedding_dim=embedding_dim,
             nhist=nhist,
-            num_attn_heads=9,
+            num_attn_heads=num_attn_heads,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor
         )
@@ -57,7 +58,7 @@ class DenoiseActor(nn.Module):
             use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist,
-            num_attn_heads=9,
+            num_attn_heads=num_attn_heads
         )
         if denoise_model == "ddpm":
             self.position_noise_scheduler = DDPMScheduler(

@@ -1,59 +1,64 @@
-main_dir=Actor_18Peract_20Demo_10GNFactortask_RF_closejar
-main_dir=GNFactor
+# rm -r /scratch/GNFactor_zarr
+# cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
 
-train_data_dir=/scratch/Peract_packaged/train
-eval_data_dir=/scratch/Peract_packaged/val
+main_dir=GNFactorFast
+
+train_data_dir=/scratch/GNFactor_zarr/train_randomized.zarr
+eval_data_dir=/scratch/GNFactor_zarr/val_randomized.zarr
 instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
 lr_scheduler=constant
-dense_interpolation=1
-interpolation_length=2
 num_history=1
-denoise_timesteps=10
-denoise_model=rectified_flow
+denoise_timesteps=100  # 10
+denoise_model=ddpm  # rectified_flow
 keypose_only=true
-quaternion_format=wxyz
+quaternion_format=xyzw
 rotation_parametrization=6D
+fps_subsampling_factor=5
+backbone=clip
 use_instruction=true
-workspace_normalizer_buffer=0.05
-B=24
-B_val=24
-C=144
-train_iters=200000
+workspace_normalizer_buffer=0.08  # 0.05
+B=128
+B_val=64
+C=120  # 144
+num_attn_heads=8
+num_vis_ins_attn_layers=3
+train_iters=600000
 val_freq=4000
-workspace_normalizer_iter=16
 precompute_instruction_encodings=true
 num_workers=4
 dataset=GNFactor
-ngpus=2
+ngpus=4
 ngpus=1
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=reproduce2gpu_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 # checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 checkpoint=none
+# checkpoint=/home/ngkanats/repos/lbs/analogical_manipulation/train_logs/GNFactorFast/clip_debugged144-B128-lr1e-4-constant-H1-rectified_flow-DT10/last.pth
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main.py \
+    main_fast.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
     --instructions $instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
-    --workspace_normalizer_iter $workspace_normalizer_iter \
     --num_workers $num_workers \
     --train_iters $train_iters \
     --embedding_dim $C \
+    --num_attn_heads $num_attn_heads \
+    --num_vis_ins_attn_layers $num_vis_ins_attn_layers \
     --use_instruction $use_instruction \
     --rotation_parametrization $rotation_parametrization \
+    --fps_subsampling_factor $fps_subsampling_factor \
+    --backbone $backbone \
     --quaternion_format $quaternion_format \
     --denoise_timesteps $denoise_timesteps \
     --denoise_model $denoise_model \
     --val_freq $val_freq \
-    --dense_interpolation $dense_interpolation \
-    --interpolation_length $interpolation_length \
     --batch_size $B \
     --batch_size_val $B_val \
     --keypose_only $keypose_only \

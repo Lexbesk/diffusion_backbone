@@ -4,9 +4,9 @@
 #SBATCH --output=job_%j.out         # Output file (with job ID)
 #SBATCH --time=48:00:00             # Time limit (hh:mm:ss)
 #SBATCH --ntasks=1                  # Number of tasks (processes)
-#SBATCH --gpus=1                    # Number of tasks (processes)
+#SBATCH --gpus=2                    # Number of tasks (processes)
 #SBATCH --cpus-per-task=16          # Number of cores per task
-#SBATCH --mem=48G                  # Memory limit per node
+#SBATCH --mem=96G                  # Memory limit per node
 #SBATCH --partition=preempt # Partition name
 
 # Load any necessary modules (example: Python)
@@ -24,13 +24,14 @@ nvidia-smi
 #     unzip Peract_packaged.zip
 #     rm Peract_packaged.zip
 # fi
-if [ ! -d /scratch/calvin ]; then
+if [ ! -d /scratch/GNFactor_zarr ]; then
     cd /scratch
-    rsync -avP babel-0-19:/scratch/calvin /scratch
+    cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
 fi
 
 
-cd /home/ngkanats/repos/dev_bimanual_3dda
+cd /home/ngkanats/repos/lbs/analogical_manipulation
 # bash scripts/rlbench/train_.sh
-bash scripts/rlbench/train_gnfactor.sh
+# bash scripts/rlbench/train_gnfactor_fast.sh
 # bash scripts/calvin/train_mix.sh
+bash debug.sh

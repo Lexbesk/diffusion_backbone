@@ -22,9 +22,9 @@ from datasets.dataset_rlbench_zarr import (
     PeractDataset,
     GNFactorDataset
 )
+from datasets.dataset_comp import RLBenchCompDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
-# from diffuser_actor.policy.trajectory_optimization.denoise_actor_knn import DenoiseActor
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     GNFactorDepth2Cloud
@@ -91,11 +91,12 @@ class TrainTester(BaseTrainTester):
         _cls = {
             "Peract": PeractDepth2Cloud,
             # "Peract2": Peract2Dataset,
-            "GNFactor": GNFactorDepth2Cloud
+            "GNFactor": GNFactorDepth2Cloud,
+            "RLComp": GNFactorDepth2Cloud
         }[args.dataset]
         self.depth2cloud = _cls((256, 256))
         self.aug = K.AugmentationSequential(
-            K.RandomHorizontalFlip(p=0.5),
+            # K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
                 scale=(0.75, 1.25),
@@ -110,20 +111,21 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             # "Peract2": Peract2Dataset,
-            "GNFactor": GNFactorDataset
+            "GNFactor": GNFactorDataset,
+            "RLComp": RLBenchCompDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
             instructions=self.args.instructions,
-            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            copies=self.args.train_iters
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
             instructions=self.args.instructions,
-            precompute_instruction_encodings=self.args.precompute_instruction_encodings
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            copies=1
         )
         return train_dataset, test_dataset
 
@@ -139,13 +141,14 @@ class TrainTester(BaseTrainTester):
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
             use_instruction=self.args.use_instruction,
+            num_attn_heads=self.args.num_attn_heads,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
-            relative=self.args.relative_action,
+            relative=self.args.relative_action
         )
         print("Model parameters:", count_parameters(_model))
 
@@ -156,14 +159,16 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             # "Peract2": Peract2Dataset,
-            "GNFactor": GNFactorDataset
+            "GNFactor": GNFactorDataset,
+            "RLComp": RLBenchCompDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
             instructions=self.args.instructions,
-            precompute_instruction_encodings=self.args.precompute_instruction_encodings
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            copies=1
         )
 
         data_loader = DataLoader(
@@ -179,12 +184,9 @@ class TrainTester(BaseTrainTester):
             bounds.append(sample["action"][..., :3].reshape([-1, 3]))
 
         bounds = torch.cat(bounds, dim=0)
-        min_bound = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
-        max_bound = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
-        normalizer = nn.Parameter(torch.stack([min_bound, max_bound]),
-                                  requires_grad=False)
-
-        return normalizer
+        min_ = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
+        max_ = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
+        return nn.Parameter(torch.stack([min_, max_]), requires_grad=False)
 
     @staticmethod
     def get_criterion():
@@ -258,17 +260,14 @@ class TrainTester(BaseTrainTester):
         # Step the lr scheduler
         lr_scheduler.step()
 
-        # Log
-        if dist.get_rank() == 0 and (step_id + 1) % self.args.val_freq == 0:
-            self.writer.add_scalar("lr", self.args.lr, step_id)
-            self.writer.add_scalar("train-loss/noise_mse", loss, step_id)
-
     @torch.inference_mode()
     def evaluate_nsteps(self, model, text_encoder, criterion, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
         if self.args.val_iters != -1:
             val_iters = self.args.val_iters
+        if split == 'val':
+            val_iters = -1
         values = {}
         device = next(model.parameters()).device
         model.eval()
@@ -342,7 +341,7 @@ def traj_collate_fn(batch):
 
     # Values for these come as lists
     list_keys = ["task"]
-    if isinstance(batch[0].get("instr", None), str):
+    if isinstance(batch[0].get("instr", None), list):
         list_keys.append("instr")
     for key in list_keys:
         ret_dict[key] = [item[key][0] for item in batch]

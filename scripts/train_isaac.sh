@@ -31,8 +31,8 @@ ngpus=4
 ngpus=1
 
 run_log_dir=all_ca_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=none
+# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+checkpoint=none
 eval_only=true
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
