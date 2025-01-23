@@ -115,4 +115,4 @@ class GNFactorDataset(RLBenchDataset):
         "stack_blocks"
     ]
     cameras = ("front",)
-    train_copies = 20  # how many copies of the dataset to load
+    train_copies = 2000  # how many copies of the dataset to load

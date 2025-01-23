@@ -119,13 +119,15 @@ class TrainTester(BaseTrainTester):
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
             instructions=self.args.instructions,
-            precompute_instruction_encodings=self.args.precompute_instruction_encodings
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            relative_action=self.args.relative_action
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
             instructions=self.args.instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            copies=1
+            copies=1,
+            relative_action=self.args.relative_action
         )
         return train_dataset, test_dataset
 
@@ -168,7 +170,8 @@ class TrainTester(BaseTrainTester):
             root=self.args.train_data_dir,
             instructions=self.args.instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            copies=1
+            copies=1,
+            relative_action=self.args.relative_action
         )
 
         data_loader = DataLoader(
