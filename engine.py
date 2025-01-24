@@ -3,7 +3,6 @@
 import os
 import pickle
 import random
-import json
 from omegaconf import OmegaConf
 
 import numpy as np
@@ -64,19 +63,20 @@ class BaseTrainTester:
             drop_last=True,
             generator=g
         )
-        test_sampler = DistributedSampler(test_dataset, shuffle=True)
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=self.args.batch_size_val,
-            shuffle=False,
-            num_workers=0,
-            worker_init_fn=seed_worker,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            sampler=test_sampler,
-            drop_last=False,
-            generator=g
-        )
+        # No sampler for val!
+        if dist.get_rank() == 0:
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.args.batch_size_val,
+                shuffle=False,
+                num_workers=self.args.num_workers,
+                collate_fn=collate_fn,
+                pin_memory=True,
+                sampler=None,
+                drop_last=False
+            )
+        else:
+            test_loader = None
         return train_loader, test_loader
 
     def get_model(self):
@@ -137,6 +137,7 @@ class BaseTrainTester:
         if not self.args.checkpoint:
             normalizer = self.get_workspace_normalizer(train_loader)
             model.workspace_normalizer.copy_(normalizer)
+            dist.barrier()
 
         # Get criterion
         criterion = self.get_criterion()
@@ -166,12 +167,14 @@ class BaseTrainTester:
 
         # Eval only
         if bool(self.args.eval_only):
-            print("Test evaluation.......")
-            model.eval()
-            new_loss = self.evaluate_nsteps(
-                model, text_encoder, criterion, test_loader, step_id=-1,
-                val_iters=max(25, self.args.val_iters)
-            )
+            if dist.get_rank() == 0:
+                print("Test evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, text_encoder, criterion, test_loader, step_id=-1,
+                    val_iters=max(25, self.args.val_iters)
+                )
+            dist.barrier()
             return model
 
         # Step the lr scheduler to the current step
@@ -193,7 +196,7 @@ class BaseTrainTester:
                 step_id, sample
             )
 
-            if (step_id + 1) % self.args.val_freq == 0:
+            if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
                 print("Train evaluation.......")
                 model.eval()
                 new_loss = self.evaluate_nsteps(
@@ -206,12 +209,13 @@ class BaseTrainTester:
                     model, text_encoder, criterion, test_loader, step_id,
                     val_iters=max(5, self.args.val_iters),
                 )
-                if dist.get_rank() == 0:  # save model
-                    best_loss = self.save_checkpoint(
-                        model, optimizer, step_id,
-                        new_loss, best_loss
-                    )
+                # save model
+                best_loss = self.save_checkpoint(
+                    model, optimizer, step_id,
+                    new_loss, best_loss
+                )
                 model.train()
+            dist.barrier()
 
         return model
 
