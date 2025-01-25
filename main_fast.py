@@ -23,6 +23,7 @@ from datasets.dataset_rlbench_zarr import (
     GNFactorDataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
+from datasets.dataset_calvin_zarr import ABC_DDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from diffuser_actor.policy.trajectory_optimization.denoise_sa_actor import DenoiseActor as DenoiseActorSA
@@ -94,9 +95,13 @@ class TrainTester(BaseTrainTester):
             "Peract": PeractDepth2Cloud,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDepth2Cloud,
-            "RLComp": GNFactorDepth2Cloud
+            "RLComp": GNFactorDepth2Cloud,
+            "ABC_D": None
         }[args.dataset]
-        self.depth2cloud = _cls((256, 256))
+        if _cls is not None:
+            self.depth2cloud = _cls((256, 256))
+        else:
+            self.depth2cloud = None
         self.aug = K.AugmentationSequential(
             # K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
@@ -114,7 +119,8 @@ class TrainTester(BaseTrainTester):
             "Peract": PeractDataset,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
-            "RLComp": RLBenchCompDataset
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
@@ -166,7 +172,8 @@ class TrainTester(BaseTrainTester):
             "Peract": PeractDataset,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
-            "RLComp": RLBenchCompDataset
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
@@ -213,7 +220,10 @@ class TrainTester(BaseTrainTester):
             sample["action"] = sample["action"][:, 1:]
             sample["action_mask"] = sample["action_mask"][:, 1:]
         # Observations
-        pcds = self.depth2cloud(sample['pcds'].cuda(non_blocking=True))
+        if self.depth2cloud is not None:
+            pcds = self.depth2cloud(sample['pcds'].cuda(non_blocking=True))
+        else:
+            pcds = sample['pcds'].cuda(non_blocking=True)
         if augment:
             b, nc, _, h, w = sample['rgbs'].shape
             obs = torch.cat((

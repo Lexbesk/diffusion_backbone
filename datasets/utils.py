@@ -244,16 +244,25 @@ def calibration_augmentation(pcd, roll_range, pitch_range, yaw_range,
     return pcd
 
 
-def to_relative_action(actions, anchor_actions):
+def to_relative_action(actions, anchor_actions, qform='xyzw'):
     assert actions.shape[-1] == 8
 
     rel_pos = actions[..., :3] - anchor_actions[..., :3]
 
-    # pytorch3d takes wxyz quaternion, the input is xyzw
-    rel_orn = pytorch3d_transforms.quaternion_multiply(
-        actions[..., [6, 3, 4, 5]],
-        pytorch3d_transforms.quaternion_invert(anchor_actions[..., [6,3,4,5]])
-    )[..., [1, 2, 3, 0]]
+    if qform == 'xyzw':
+        # pytorch3d takes wxyz quaternion, the input is xyzw
+        rel_orn = pytorch3d_transforms.quaternion_multiply(
+            actions[..., [6, 3, 4, 5]],
+            pytorch3d_transforms.quaternion_invert(anchor_actions[..., [6,3,4,5]])
+        )[..., [1, 2, 3, 0]]
+    elif qform == 'wxyz':
+        # pytorch3d takes wxyz quaternion, the input is xyzw
+        rel_orn = pytorch3d_transforms.quaternion_multiply(
+            actions[..., 3:7],
+            pytorch3d_transforms.quaternion_invert(anchor_actions[..., 3:7])
+        )
+    else:
+        assert False
 
     gripper = actions[..., -1:]
     rel_actions = torch.concat([rel_pos, rel_orn, gripper], dim=-1)
