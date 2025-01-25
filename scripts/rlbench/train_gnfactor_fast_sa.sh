@@ -31,13 +31,14 @@ num_workers=4
 dataset=GNFactor
 ngpus=4
 
-run_log_dir=bestC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=sa_varC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main_fast.py \
+    --sa_var true \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \

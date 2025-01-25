@@ -80,7 +80,7 @@ class RLBenchDataset:
             "instr": instr,  # [str] or tensor(53, 512)
             "rgbs": rgbs,  # tensor(n_cam, 3, H, W)
             "pcds": pcds,  # tensor(n_cam, H, W)
-            "proprioception": gripper_history,  # tensor(1, 8)
+            "proprioception": gripper_history,  # tensor(nhist, 8)
             "action": action,  # tensor(T, 8)
             "action_mask": torch.zeros(action.shape[:-1]).bool()  # tensor (T,)
         }

@@ -25,6 +25,7 @@ from datasets.dataset_rlbench_zarr import (
 from datasets.dataset_comp import RLBenchCompDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
+from diffuser_actor.policy.trajectory_optimization.denoise_sa_actor import DenoiseActor as DenoiseActorSA
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     GNFactorDepth2Cloud
@@ -79,6 +80,7 @@ def parse_arguments():
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
+    parser.add_argument('--sa_var', type=str2bool, default=False)
 
     return parser.parse_args()
 
@@ -134,7 +136,9 @@ class TrainTester(BaseTrainTester):
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        if self.args.bimanual:
+        if self.args.sa_var:
+            model_class = DenoiseActorSA
+        elif self.args.bimanual:
             model_class = BimanualDenoiseActor
         else:
             model_class = DenoiseActor

@@ -3,7 +3,7 @@
 
 main_dir=GNFactorFast
 
-train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/GNFactor_zarr/train.zarr
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/GNFactor_zarr/dense_train.zarr
 eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios//GNFactor_zarr/val.zarr
 instructions=instructions/peract/instructions.pkl
 
@@ -31,7 +31,7 @@ num_workers=4
 dataset=GNFactor
 ngpus=4
 
-run_log_dir=bestC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=denseC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=none
 eval_only=false
