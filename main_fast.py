@@ -69,8 +69,10 @@ def parse_arguments():
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
-    parser.add_argument('--instructions', type=Path, required=True)
-    parser.add_argument('--precompute_instruction_encodings', type=str2bool, required=True)
+    parser.add_argument('--instructions', type=Path, required=False)
+    parser.add_argument('--train_instructions', type=Path, required=False, default='')
+    parser.add_argument('--val_instructions', type=Path, required=False, default='')
+    parser.add_argument('--precompute_instruction_encodings', type=str2bool, default=True)
     parser.add_argument('--use_instruction', type=str2bool, default=False)
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
     parser.add_argument('--quaternion_format', type=str, default='wxyz')
@@ -82,6 +84,7 @@ def parse_arguments():
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
     parser.add_argument('--sa_var', type=str2bool, default=False)
+    parser.add_argument('--not_seed', type=str2bool, default=False)
 
     return parser.parse_args()
 
@@ -126,13 +129,13 @@ class TrainTester(BaseTrainTester):
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            instructions=self.args.instructions,
+            instructions=self.args.train_instructions if self.args.train_instructions != '' else self.args.instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             relative_action=self.args.relative_action
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
-            instructions=self.args.instructions,
+            instructions=self.args.val_instructions if self.args.val_instructions != '' else self.args.instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             copies=1,
             relative_action=self.args.relative_action
@@ -179,7 +182,7 @@ class TrainTester(BaseTrainTester):
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            instructions=self.args.instructions,
+            instructions=self.args.train_instructions if self.args.train_instructions != '' else self.args.instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             copies=1,
             relative_action=self.args.relative_action
@@ -515,9 +518,10 @@ if __name__ == '__main__':
     args.local_rank = int(os.environ["LOCAL_RANK"])
 
     # Seeds
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
+    if not args.not_seed:
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)

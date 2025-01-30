@@ -31,8 +31,9 @@ precompute_instruction_encodings=true
 num_workers=4
 dataset=GNFactor
 ngpus=4
+not_seed=true
 
-run_log_dir=best_ddpm_custom_dataC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=best_ddpm_custom_data_noseedC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=none
 eval_only=false
@@ -68,4 +69,5 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --eval_only $eval_only \
     --checkpoint $checkpoint \
     --exp_log_dir $main_dir \
-    --run_log_dir ${run_log_dir}
+    --run_log_dir ${run_log_dir} \
+    --not_seed $not_seed

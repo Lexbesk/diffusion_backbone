@@ -12,10 +12,11 @@ do
        --ntasks=1 \
        --gpus 4 \
        --cpus-per-task 24 \
-       --mem=128G \
+       --mem=64G \
        --unbuffered \
+       --exclusive \
        -t 04:00:00 \
-       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_gnfactor_fast_dense.sh"
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_gnfactor_fast_ddpm.sh"
 
     sleep 1m
 

@@ -9,8 +9,8 @@ import torch
 from tqdm import tqdm
 
 
-ROOT = '/scratch/Peract_packaged'
-STORE_PATH = '/data/user_data/ngkanats/GNFactor_zarr'
+ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_packaged'
+STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/GNFactor_zarr_custom'
 STORE_EVERY = 1  # in keyposes
 IM_SIZE = 256
 
@@ -81,30 +81,12 @@ def all_tasks_main(split):
     variations = range(0, 199)
 
     # Collect all episodes
-    episodes = []
-    for task in tasks:
-        # Count variations
-        _vars = [
-            var for var in variations
-            if Path(f'{ROOT}/{split}/{task}+{var}/').is_dir()
-        ]
-
-        # Split episodes equally per variations
-        var2neps = {var: eps_per_task // len(_vars) for var in _vars}
-        _sum = sum(var2neps.values())
-        for i in range(eps_per_task - _sum):
-            var2neps[list(var2neps.keys())[i]] += 1
-
-        # Keep per task/var episodes
-        task_episodes = []
-        for var in _vars:
-            if var2neps[var] == 0:
-                continue
-            _path = Path(f'{ROOT}/{split}/{task}+{var}/')
-            task_episodes.extend([
-                (task, var, ep) for ep in sorted(_path.glob("*.dat"))
-            ][:var2neps[var]])
-        episodes.extend(task_episodes)
+    with open(f'eps_{split}.pkl', 'rb') as fid:
+        episodes = pickle.load(fid)
+    episodes = [
+        (ep0, ep1, Path(str(ep2).replace('/data/user_data/ngkanats/', '/lustre/fsw/portfolios/nvr/users/ngkanatsios/')))
+        for ep0, ep1, ep2 in episodes
+    ]
 
     # Read once to get the number of keyposes
     n_keyposes = 0

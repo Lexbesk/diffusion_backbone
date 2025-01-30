@@ -13,17 +13,23 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from tqdm import trange
 
 from engine import BaseTrainTester
-from datasets.dataset_isaac import IsaacDataset
+from datasets.dataset_rlbench import (
+    PeractDataset,
+    GNFactorDataset
+)
+from datasets.dataset_comp import RLBenchCompDataset
+from datasets.dataset_calvin_zarr import ABC_DDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
-from diffuser_actor.policy.trajectory_optimization.denoise_actor_seg import DenoiseActor
-from diffuser_actor.depth2cloud.isaac import IsaacDepth2Cloud
+from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
+from diffuser_actor.depth2cloud.rlbench import (
+    PeractDepth2Cloud,
+    GNFactorDepth2Cloud
+)
 from utils.common_utils import count_parameters, str2bool, str_none
 
 
@@ -62,6 +68,7 @@ def parse_arguments():
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
+    parser.add_argument('--instructions', type=Path, required=True)
     parser.add_argument('--precompute_instruction_encodings', type=str2bool, required=True)
     parser.add_argument('--use_instruction', type=str2bool, default=False)
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
@@ -82,8 +89,19 @@ class TrainTester(BaseTrainTester):
 
     def __init__(self, args):
         super().__init__(args)
+        _cls = {
+            "Peract": PeractDepth2Cloud,
+            # "Peract2": Peract2Dataset,
+            "GNFactor": GNFactorDepth2Cloud,
+            "RLComp": GNFactorDepth2Cloud,
+            "ABC_D": None
+        }[args.dataset]
+        if _cls is not None:
+            self.depth2cloud = _cls((256, 256))
+        else:
+            self.depth2cloud = None
         self.aug = K.AugmentationSequential(
-            K.RandomHorizontalFlip(p=0.5),
+            # K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
                 scale=(0.75, 1.25),
@@ -92,42 +110,54 @@ class TrainTester(BaseTrainTester):
             ),
             # K.RandomPerspective(p=0.2)
         ).cuda()
-        self._depth2cloud = IsaacDepth2Cloud()
 
     def get_datasets(self):
         """Initialize datasets."""
-        dataset_cls = IsaacDataset
+        dataset_cls = {
+            "Peract": PeractDataset,
+            # "Peract2": Peract2Dataset,
+            "GNFactor": GNFactorDataset,
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset
+        }[args.dataset]
 
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            copies=1,
-            relative_action=self.args.relative_action,
-            mem_limit=8
+            instructions=self.args.instructions,
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            training=True,
+            relative_action=self.args.relative_action
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
-            relative_action=self.args.relative_action,
-            mem_limit=0.1
+            instructions=self.args.instructions,
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            training=False,
+            relative_action=self.args.relative_action
         )
         return train_dataset, test_dataset
 
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        _model = DenoiseActor(
+        if self.args.bimanual:
+            model_class = BimanualDenoiseActor
+        else:
+            model_class = DenoiseActor
+        _model = model_class(
             backbone=self.args.backbone,
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
-            num_attn_heads=self.args.num_attn_heads,
             use_instruction=self.args.use_instruction,
+            num_attn_heads=self.args.num_attn_heads,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
-            relative=self.args.relative_action,
+            relative=self.args.relative_action
         )
         print("Model parameters:", count_parameters(_model))
 
@@ -135,12 +165,21 @@ class TrainTester(BaseTrainTester):
 
     def get_workspace_normalizer(self, data_loader=None):
         print("Computing workspace normalizer...")
+        dataset_cls = {
+            "Peract": PeractDataset,
+            # "Peract2": Peract2Dataset,
+            "GNFactor": GNFactorDataset,
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset
+        }[args.dataset]
 
         # Initialize datasets with arguments
-        train_dataset = IsaacDataset(
+        train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            relative_action=self.args.relative_action,
-            mem_limit=0.1
+            instructions=self.args.instructions,
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            training=False,
+            relative_action=self.args.relative_action
         )
 
         data_loader = DataLoader(
@@ -156,12 +195,9 @@ class TrainTester(BaseTrainTester):
             bounds.append(sample["action"][..., :3].reshape([-1, 3]))
 
         bounds = torch.cat(bounds, dim=0)
-        min_bound = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
-        max_bound = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
-        normalizer = nn.Parameter(torch.stack([min_bound, max_bound]),
-                                  requires_grad=False)
-
-        return normalizer
+        min_ = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
+        max_ = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
+        return nn.Parameter(torch.stack([min_, max_]), requires_grad=False)
 
     @staticmethod
     def get_criterion():
@@ -181,129 +217,37 @@ class TrainTester(BaseTrainTester):
             sample["action"] = sample["action"][:, 1:]
             sample["action_mask"] = sample["action_mask"][:, 1:]
         # Observations
-        pcds = self._depth2cloud(
-            sample['pcds'].cuda(non_blocking=True),
-            sample['proj_matrix'].cuda(non_blocking=True),
-            sample['extrinsics'].cuda(non_blocking=True)
-        )
-        segs = sample['segs'].cuda(non_blocking=True)
-        if augment:
-            b, nc, _, h, w = sample['rgbs'].shape
-            obs = torch.cat((
-                sample['rgbs'].cuda(non_blocking=True).half() / 255,
-                pcds,
-                segs[:, :, None].half()
-            ), 2)  # (B, ncam, 7, H, W)
-            obs = obs.reshape(-1, 7, h, w)
-            obs = self.aug(obs)
-            rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
-            pcds = obs[:, 3:6].reshape(b, nc, 3, h, w).float()
-            segs = obs[:, 6].reshape(b, nc, h, w).bool()
-        else:
-            rgbs = sample['rgbs'].cuda(non_blocking=True).float() / 255
-            pcds = pcds.float()
-        if rgbs.shape[-1] != 256:
-            b, nc, c, h, w = sample['rgbs'].shape
-            rgbs = F.interpolate(
-                rgbs.reshape(b * nc, c, h, w),
-                (256, 256),
-                mode='nearest'
-            ).reshape(b, nc, c, 256, 256)
+        # if self.depth2cloud is not None:
+        #     pcds = self.depth2cloud(sample['pcds'].cuda(non_blocking=True))
+        # else:
+        pcds = sample['pcds'].cuda(non_blocking=True)
+        # if augment:
+        #     b, nc, _, h, w = sample['rgbs'].shape
+        #     obs = torch.cat((
+        #         sample['rgbs'].cuda(non_blocking=True).half() / 255,
+        #         pcds
+        #     ), 2)  # (B, ncam, 6, H, W)
+        #     obs = obs.reshape(-1, 6, h, w)
+        #     obs = self.aug(obs)
+        #     rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
+        #     pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
+        # else:
+        rgbs = sample['rgbs'].cuda(non_blocking=True).float()
+        pcds = pcds.float()
+        # Instructions
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            if not self.args.precompute_instruction_encodings:
+                instr = text_encoder(sample['instr'], "cuda")
+            else:
+                instr = sample["instr"]
         return (
             sample["action"].cuda(non_blocking=True),
             sample["action_mask"].cuda(non_blocking=True),
             rgbs,
             pcds,
-            segs,
+            instr,
             sample["proprioception"].cuda(non_blocking=True)
         )
-
-    def main(self, collate_fn=None):
-        """Run main training/testing pipeline."""
-        # Get loaders
-        train_loader, test_loader = self.get_loaders(collate_fn)
-
-        # Get model
-        model = self.get_model()
-        if not self.args.checkpoint:
-            normalizer = self.get_workspace_normalizer(train_loader)
-            model.workspace_normalizer.copy_(normalizer)
-            dist.barrier()
-
-        # Get criterion
-        criterion = self.get_criterion()
-
-        # Get optimizer
-        optimizer = self.get_optimizer(model)
-        lr_scheduler = self.get_lr_scheduler(optimizer)
-        scaler = torch.GradScaler()
-
-        # Move model to devices
-        if torch.cuda.is_available():
-            model = model.cuda()
-        model = DistributedDataParallel(
-            model, device_ids=[self.args.local_rank],
-            broadcast_buffers=False, find_unused_parameters=True
-        )
-
-        # Check for a checkpoint
-        start_iter, best_loss = 0, None
-        if self.args.checkpoint:
-            assert os.path.isfile(self.args.checkpoint)
-            start_iter, best_loss = self.load_checkpoint(model, optimizer)
-        print(model.module.workspace_normalizer)
-
-        # Get text encoder
-        text_encoder = self.get_text_encoder().cuda()
-
-        # Eval only
-        if bool(self.args.eval_only):
-            if dist.get_rank() == 0:
-                print("Test evaluation.......")
-                model.eval()
-                new_loss = self.evaluate_nsteps(
-                    model, text_encoder, criterion, test_loader, step_id=-1,
-                    val_iters=max(25, self.args.val_iters)
-                )
-            dist.barrier()
-            return model
-
-        # Step the lr scheduler to the current step
-        for _ in range(start_iter):
-            lr_scheduler.step()
-
-        # Training loop
-        iter_loader = iter(train_loader)
-        model.train()
-        for step_id in trange(start_iter, self.args.train_iters):
-            try:
-                sample = next(iter_loader)
-            except StopIteration:
-                iter_loader = iter(train_loader)
-                sample = next(iter_loader)
-
-            self.train_one_step(
-                model, text_encoder, criterion, optimizer, scaler, lr_scheduler,
-                step_id, sample
-            )
-
-            if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
-                print("Train evaluation.......")
-                model.eval()
-                new_loss = self.evaluate_nsteps(
-                    model, text_encoder, criterion, train_loader, step_id,
-                    val_iters=max(5, self.args.val_iters),
-                    split='train'
-                )
-                # save model
-                best_loss = self.save_checkpoint(
-                    model, optimizer, step_id,
-                    new_loss, best_loss
-                )
-                model.train()
-            dist.barrier()
-
-        return model
 
     def train_one_step(self, model, text_encoder, criterion,
                        optimizer, scaler, lr_scheduler, step_id, sample):
@@ -312,11 +256,11 @@ class TrainTester(BaseTrainTester):
             optimizer.zero_grad()
 
         # Forward pass
-        action, action_mask, rgbs, pcds, segs, prop = self.prepare_batch(
+        action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
             sample, text_encoder, augment=True
         )
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            out = model(action, action_mask, rgbs, pcds, segs, prop)
+            out = model(action, action_mask, rgbs, pcds, instr, prop)
 
             # Backward pass
             loss = criterion.compute_loss(out)
@@ -330,35 +274,28 @@ class TrainTester(BaseTrainTester):
         # Step the lr scheduler
         lr_scheduler.step()
 
-    def store(self, rgbs):
-        # b, nc, h, w
-        from matplotlib import pyplot as plt
-        for r, rgb in enumerate(rgbs):
-            rgb = rgb.reshape(-1, rgb.shape[-1])
-            plt.imshow(rgb.detach().cpu())
-            plt.savefig(f'{r}.jpg')
-
     @torch.inference_mode()
     def evaluate_nsteps(self, model, text_encoder, criterion, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
         if self.args.val_iters != -1:
             val_iters = self.args.val_iters
+        if split == 'val':
+            val_iters = -1
         values = {}
         device = next(model.parameters()).device
         model.eval()
 
-        for i, sample in tqdm(enumerate(loader)):
+        for i, sample in enumerate(loader):
             if i == val_iters:
                 break
 
-            action, action_mask, rgbs, pcds, segs, prop = self.prepare_batch(
+            action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
                 sample, text_encoder, augment=True
             )
-            # self.store(segs)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 pred_action = model(
-                    action, action_mask, rgbs, pcds, segs, prop,
+                    action, action_mask, rgbs, pcds, instr, prop,
                     run_inference=True
                 )
 
@@ -372,6 +309,16 @@ class TrainTester(BaseTrainTester):
                 if key not in values:
                     values[key] = torch.Tensor([]).to(device)
                 values[key] = torch.cat([values[key], l.unsqueeze(0)])
+
+            # Gather per-task statistics
+            tasks = np.array(sample["task"])
+            for n, l in losses_B.items():
+                for task in np.unique(tasks):
+                    key = f"{split}-loss/{task}/{n}"
+                    l_task = l[tasks == task].mean()
+                    if key not in values:
+                        values[key] = torch.Tensor([]).to(device)
+                    values[key] = torch.cat([values[key], l_task.unsqueeze(0)])
 
             # Generate visualizations
             if i == 0 and dist.get_rank() == 0 and step_id > -1:
@@ -400,10 +347,20 @@ def traj_collate_fn(batch):
     # Values for these come as tensors
     keys = [
         "action", "action_mask", "proprioception",
-        "rgbs", "pcds", "segs", "extrinsics", "proj_matrix"
+        "rgbs", "pcds"
     ]
-    ret_dict = {k_: torch.stack([item[k_] for item in batch]) for k_ in keys}
+    if isinstance(batch[0].get("instr", None), torch.Tensor):
+        keys.append("instr")
+    ret_dict = {k_: torch.cat([item[k_] for item in batch]) for k_ in keys}
 
+    # Values for these come as lists
+    list_keys = ["task"]
+    if isinstance(batch[0].get("instr", None), list):
+        list_keys.append("instr")
+    for key in list_keys:
+        ret_dict[key] = []
+        for item in batch:
+            ret_dict[key].extend(item[key])
     return ret_dict
 
 
@@ -557,9 +514,9 @@ if __name__ == '__main__':
     args.local_rank = int(os.environ["LOCAL_RANK"])
 
     # Seeds
-    # torch.manual_seed(args.seed)
-    # np.random.seed(args.seed)
-    # random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)
