@@ -4,55 +4,45 @@ import random
 
 import torch
 
-from .utils import to_tensor, read_zarr_with_cache, to_relative_action
+from .dataset_base_zarr import BaseDataset
 
 
-class RLBenchDataset:
+class RLBenchDataset(BaseDataset):
     """RLBench dataset."""
+    quat_format= 'xyzw'
 
     def __init__(
         self,
-        root,  # the directory path of the dataset
+        root,
         instructions,
         precompute_instruction_encodings,
         copies=None,
-        relative_action=False  # whether to return relative actions
+        relative_action=False,
+        mem_limit=8
     ):
-        self.copies = self.train_copies if copies is None else copies
-        self._relative_action = relative_action
+        super.__init__(
+            root=root,
+            instructions=instructions,
+            precompute_instruction_encodings=precompute_instruction_encodings,
+            copies=copies,
+            relative_action=relative_action,
+            mem_limit=mem_limit
+        )
 
-        # Load instructions
-        self._precompute_instr_encs = precompute_instruction_encodings
-        if instructions:
-            if precompute_instruction_encodings:
-                self._instructions = pickle.load(open(instructions, "rb"))
+    def _load_instructions(self, instruction_file=None):
+        if instruction_file:
+            if self._precompute_instr_encs:
+                instructions = pickle.load(open(instruction_file, "rb"))
             else:
-                self._instructions = json.load(open(instructions))
+                instructions = json.load(open(instruction_file))
         else:
             instructions = None
+        return instructions
 
-        # Load all annotations lazily
-        self.annos = read_zarr_with_cache(root)
+    def _get_task(self, idx):
+        return [self.tasks[int(self.annos['task_id'][idx])]]
 
-    def __getitem__(self, idx):
-        """
-        the episode item: [
-            [frame_ids],  # we use chunk and max_episode_length to index it
-            [obs_tensors],  # wrt frame_ids, (n_cam, 2, 3, 256, 256)
-                obs_tensors[i][:, 0] is RGB, obs_tensors[i][:, 1] is XYZ
-            [action_tensors],  # wrt frame_ids, (1, 8)
-            [camera_dicts],
-            [gripper_tensors],  # wrt frame_ids, (1, 8)
-            [trajectories]  # wrt frame_ids, (N_i, 8)
-        ]
-        """
-        idx = idx % len(self.annos['variation'])
-
-        # Split RGB and XYZ
-        rgbs = to_tensor(self.annos['rgb'][idx])
-        pcds = to_tensor(self.annos['depth'][idx])
-
-        # Sample one instruction feature
+    def _get_instr(self, idx):
         t_ = int(self.annos['task_id'][idx])
         v_ = int(self.annos['variation'][idx])
         task = self.tasks[t_]
@@ -66,29 +56,20 @@ class RLBenchDataset:
                 instr = [random.choice(self._instructions[task][str(v_)])]
             else:
                 instr = [""]
+        return instr
 
-        # Get gripper tensors for respective frame ids
-        action = to_tensor(self.annos['action'][idx])
-        gripper_history = to_tensor(self.annos['proprioception'][idx])
-
-        # Compute relative action
-        if self._relative_action:
-            action = to_relative_action(action, action[:1])
-
-        ret_dict = {
-            "task": [task],
-            "instr": instr,  # [str] or tensor(53, 512)
-            "rgbs": rgbs,  # tensor(n_cam, 3, H, W)
-            "pcds": pcds,  # tensor(n_cam, H, W)
-            "proprioception": gripper_history,  # tensor(nhist, 8)
-            "action": action,  # tensor(T, 8)
-            "action_mask": torch.zeros(action.shape[:-1]).bool()  # tensor (T,)
+    def __getitem__(self, idx):
+        """
+        self.annos: {
+            action: (N, T, 8) float
+            pcd: (N, n_cam, H, W) float16 (depth)
+            proprioception: (N, nhist, 8) float
+            rgb: (N, n_cam, 3, H, W) uint8
+            task_id: (N,) uint8
+            variation: (N,) uint8
         }
-
-        return ret_dict
-
-    def __len__(self):
-        return self.copies * len(self.annos['variation'])
+        """
+        return super().__getitem__(idx)
 
 
 class PeractDataset(RLBenchDataset):

@@ -69,9 +69,8 @@ def parse_arguments():
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
-    parser.add_argument('--instructions', type=Path, required=False)
-    parser.add_argument('--train_instructions', type=Path, required=False, default='')
-    parser.add_argument('--val_instructions', type=Path, required=False, default='')
+    parser.add_argument('--train_instructions', type=Path, default='')
+    parser.add_argument('--val_instructions', type=Path, default='')
     parser.add_argument('--precompute_instruction_encodings', type=str2bool, default=True)
     parser.add_argument('--use_instruction', type=str2bool, default=False)
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
@@ -85,6 +84,7 @@ def parse_arguments():
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
     parser.add_argument('--sa_var', type=str2bool, default=False)
     parser.add_argument('--not_seed', type=str2bool, default=False)
+    parser.add_argument('--memory_limit', type=float, default=8)
 
     return parser.parse_args()
 
@@ -129,16 +129,18 @@ class TrainTester(BaseTrainTester):
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            instructions=self.args.train_instructions if self.args.train_instructions != '' else self.args.instructions,
+            instructions=self.args.train_instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            relative_action=self.args.relative_action
+            relative_action=self.args.relative_action,
+            mem_limit=self.args.memory_limit
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
-            instructions=self.args.val_instructions if self.args.val_instructions != '' else self.args.instructions,
+            instructions=self.args.val_instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             copies=1,
-            relative_action=self.args.relative_action
+            relative_action=self.args.relative_action,
+            mem_limit=0.1
         )
         return train_dataset, test_dataset
 
@@ -182,10 +184,11 @@ class TrainTester(BaseTrainTester):
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            instructions=self.args.train_instructions if self.args.train_instructions != '' else self.args.instructions,
+            instructions=self.args.train_instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             copies=1,
-            relative_action=self.args.relative_action
+            relative_action=self.args.relative_action,
+            mem_limit=0.1
         )
 
         data_loader = DataLoader(
@@ -352,12 +355,15 @@ class TrainTester(BaseTrainTester):
 def traj_collate_fn(batch):
     # Values for these come as tensors
     keys = [
-        "action", "action_mask", "proprioception",
+        "action", "proprioception",
         "rgbs", "pcds"
     ]
     if isinstance(batch[0].get("instr", None), torch.Tensor):
         keys.append("instr")
     ret_dict = {k_: torch.stack([item[k_] for item in batch]) for k_ in keys}
+    ret_dict["action_mask"] = torch.zeros(
+        ret_dict["action"].shape[:-1], dtype=bool
+    )
 
     # Values for these come as lists
     list_keys = ["task"]
