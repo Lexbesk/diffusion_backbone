@@ -42,21 +42,23 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
-    --instructions $instructions \
+    --train_instructions $train_instructions \
+    --val_instructions $val_instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
-    --workspace_normalizer_iter $workspace_normalizer_iter \
     --num_workers $num_workers \
     --train_iters $train_iters \
     --embedding_dim $C \
+    --num_attn_heads $num_attn_heads \
+    --num_vis_ins_attn_layers $num_vis_ins_attn_layers \
     --use_instruction $use_instruction \
     --rotation_parametrization $rotation_parametrization \
+    --fps_subsampling_factor $fps_subsampling_factor \
+    --backbone $backbone \
     --quaternion_format $quaternion_format \
     --denoise_timesteps $denoise_timesteps \
     --denoise_model $denoise_model \
     --val_freq $val_freq \
-    --dense_interpolation $dense_interpolation \
-    --interpolation_length $interpolation_length \
     --batch_size $B \
     --batch_size_val $B_val \
     --keypose_only $keypose_only \

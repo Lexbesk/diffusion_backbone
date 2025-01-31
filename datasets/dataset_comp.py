@@ -16,7 +16,7 @@ class RLBenchCompDataset(BaseDataset):
         relative_action=False,
         mem_limit=8
     ):
-        super.__init__(
+        super().__init__(
             root=root,
             instructions=instructions,
             precompute_instruction_encodings=precompute_instruction_encodings,

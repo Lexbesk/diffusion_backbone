@@ -15,6 +15,7 @@ class BaseDataset(Dataset):
         relative_action=False,  # whether to return relative actions
         mem_limit=8  # cache limit per dataset class in GigaBytes
     ):
+        super().__init__()
         self._precompute_instr_encs = precompute_instruction_encodings
         self.copies = self.train_copies if copies is None else copies
         self._relative_action = relative_action
@@ -38,7 +39,7 @@ class BaseDataset(Dataset):
         return to_tensor(self.annos['rgb'][idx])
 
     def _get_pcd(self, idx):
-        return to_tensor(self.annos['pcd'][idx])
+        return to_tensor(self.annos['depth'][idx])
 
     def _get_proprioception(self, idx):
         return to_tensor(self.annos['proprioception'][idx])
@@ -53,7 +54,7 @@ class BaseDataset(Dataset):
         """
         self.annos: {
             action: (N, T, 8) float
-            pcd: (N, n_cam, H, W) float16 (depth)
+            depth: (N, n_cam, H, W) float16
             proprioception: (N, nhist, 8) float
             rgb: (N, n_cam, 3, H, W) uint8
         }

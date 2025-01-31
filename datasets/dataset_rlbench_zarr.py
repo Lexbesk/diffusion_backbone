@@ -21,7 +21,7 @@ class RLBenchDataset(BaseDataset):
         relative_action=False,
         mem_limit=8
     ):
-        super.__init__(
+        super().__init__(
             root=root,
             instructions=instructions,
             precompute_instruction_encodings=precompute_instruction_encodings,
@@ -112,10 +112,10 @@ class PeractSingleCamDataset(RLBenchDataset):
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
-    train_copies = 1  # how many copies of the dataset to load
+    train_copies = 100  # how many copies of the dataset to load
 
     def _get_rgb(self, idx):
-        return to_tensor(self.annos['rgb'][idx])[:, -1:]
+        return to_tensor(self.annos['rgb'][idx])[-1:]
 
     def _get_pcd(self, idx):
-        return to_tensor(self.annos['pcd'][idx])[:, -1:]
+        return to_tensor(self.annos['depth'][idx])[-1:]

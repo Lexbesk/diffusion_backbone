@@ -9,9 +9,8 @@ import torch
 from tqdm import tqdm
 
 
-ROOT = '/scratch/Peract_packaged/'
-STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/'
-READ_EVERY = 100  # in episodes
+ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_packaged/'
+STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
 NCAM = 4
 IM_SIZE = 256
@@ -174,8 +173,8 @@ def all_tasks_main(split):
         )
         zarr_file.create_dataset(
             "proprioception",
-            shape=(n_keyposes, 1, 8),
-            chunks=(STORE_EVERY, 1, 8),
+            shape=(n_keyposes, 3, 8),
+            chunks=(STORE_EVERY, 3, 8),
             compressor=compressor,
             dtype="float32"
         )
@@ -187,43 +186,47 @@ def all_tasks_main(split):
             dtype="float32"
         )
 
-        # Read every READ_EVERY
+        # Loop through episodes
         start = 0
-        for s in range(0, len(episodes), READ_EVERY):
-            rgb, depth, prop, actions, tids, _vars = [], [], [], [], [], []
-            # collect data
-            for task, var, ep in tqdm(episodes[s:s + READ_EVERY]):
-                with open(ep, "rb") as f:
-                    content = pickle.loads(blosc.decompress(f.read()))
-                rgb.append((127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8))
-                batch_depth = np.stack([
-                    inverse_depth_batched(
-                        content[1][:, c, 1].transpose(0, 2, 3, 1),
-                        cameras[cam]['extrinsics'],
-                        cameras[cam]['intrinsics']
-                    )
-                    for c, cam in enumerate(camera_order)
-                ], 1)
-                depth.append(batch_depth.astype(np.float16))
-                prop.extend([
-                    to_numpy(tens).astype(np.float32) for tens in content[4]
-                ])
-                actions.extend([
-                    to_numpy(tens).astype(np.float32) for tens in content[2]
-                ])
-                tids.extend([task2id[task]] * len(content[0]))
-                _vars.extend([var] * len(content[0]))
+        for task, var, ep in tqdm(episodes):
+            # Read
+            with open(ep, "rb") as f:
+                content = pickle.loads(blosc.decompress(f.read()))
+            # Map [-1, 1] to [0, 255] uint8
+            rgb = (127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8)
+            # Extract depth from point cloud, faster loading
+            depth = np.stack([
+                inverse_depth_batched(
+                    content[1][:, c, 1].transpose(0, 2, 3, 1),
+                    cameras[cam]['extrinsics'],
+                    cameras[cam]['intrinsics']
+                )
+                for c, cam in enumerate(camera_order)
+            ], 1).astype(np.float16)
+            # Store current eef pose as well as two previous ones
+            prop = np.stack([
+                to_numpy(tens).astype(np.float32) for tens in content[4]
+            ])
+            prop_1 = np.concatenate([prop[:1], prop[:-1]])
+            prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
+            prop = np.concatenate([prop_2, prop_1, prop], 1)
+            # Next keypose (concatenate curr eef to form a "trajectory")
+            actions = np.stack([
+                to_numpy(tens).astype(np.float32) for tens in content[2]
+            ])
+            actions = np.concatenate([prop[:, -1:], actions], 1)
+            # Task ids and variation ids
+            tids = np.array([task2id[task]] * len(content[0])).astype(np.uint8)
+            _vars = np.array([var] * len(content[0])).astype(np.uint8)
 
             # write
             end = start + len(_vars)
-            zarr_file['rgb'][start:end] = np.concatenate(rgb)
-            zarr_file['depth'][start:end] = np.concatenate(depth)
-            zarr_file['proprioception'][start:end] = np.stack(prop)
-            zarr_file['action'][start:end] = np.stack(
-                (np.concatenate(prop), np.concatenate(actions)), 1
-            )
-            zarr_file['task_id'][start:end] = np.array(tids).astype(np.uint8)
-            zarr_file['variation'][start:end] = np.array(_vars).astype(np.uint8)
+            zarr_file['rgb'][start:end] = rgb
+            zarr_file['depth'][start:end] = depth
+            zarr_file['proprioception'][start:end] = prop
+            zarr_file['action'][start:end] = actions
+            zarr_file['task_id'][start:end] = tids
+            zarr_file['variation'][start:end] = _vars
             start = end
 
 

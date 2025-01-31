@@ -108,14 +108,17 @@ class TrainTester(BaseTrainTester):
         else:
             self.depth2cloud = None
         self.aug = K.AugmentationSequential(
-            # K.RandomHorizontalFlip(p=0.5),
+            K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
                 scale=(0.75, 1.25),
                 padding_mode="reflection",
-                p=0.98
+                p=1.0
             ),
-            # K.RandomPerspective(p=0.2)
+            K.RandomResizedCrop(
+                size=(256, 256),
+                scale=(0.7, 1.0)
+            )
         ).cuda()
 
     def get_datasets(self):

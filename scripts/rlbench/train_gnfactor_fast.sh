@@ -5,7 +5,8 @@ main_dir=GNFactorFast
 
 train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/GNFactor_zarr/train.zarr
 eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios//GNFactor_zarr/val.zarr
-instructions=instructions/peract/instructions.pkl
+train_instructions=instructions/peract/instructions.pkl
+val_instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
 lr_scheduler=constant
