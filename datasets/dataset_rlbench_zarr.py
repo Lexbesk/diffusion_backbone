@@ -5,6 +5,7 @@ import random
 import torch
 
 from .dataset_base_zarr import BaseDataset
+from .utils import to_tensor
 
 
 class RLBenchDataset(BaseDataset):
@@ -97,3 +98,24 @@ class GNFactorDataset(RLBenchDataset):
     ]
     cameras = ("front",)
     train_copies = 2000  # how many copies of the dataset to load
+
+
+class PeractSingleCamDataset(RLBenchDataset):
+    """RLBench dataset under Peract setup."""
+    tasks = [
+        "place_cups", "close_jar", "insert_onto_square_peg",
+        "light_bulb_in", "meat_off_grill", "open_drawer",
+        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
+        "push_buttons", "put_groceries_in_cupboard",
+        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
+        "slide_block_to_color_target", "stack_blocks", "stack_cups",
+        "sweep_to_dustpan_of_size", "turn_tap"
+    ]
+    cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
+    train_copies = 1  # how many copies of the dataset to load
+
+    def _get_rgb(self, idx):
+        return to_tensor(self.annos['rgb'][idx])[:, -1:]
+
+    def _get_pcd(self, idx):
+        return to_tensor(self.annos['pcd'][idx])[:, -1:]

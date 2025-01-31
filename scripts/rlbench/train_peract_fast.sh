@@ -1,37 +1,36 @@
 # rm -r /scratch/Peract_zarr/
 # cp -r /data/user_data/ngkanats/Peract_zarr /scratch/
 
-main_dir=Peract
+main_dir=Peract_singlecam
 
-train_data_dir=/scratch/Peract_packaged/train
-eval_data_dir=/scratch/Peract_packaged/val
-train_data_dir=/scratch/Peract_zarr/train.zarr
-eval_data_dir=/scratch/Peract_zarr/val.zarr
-instructions=instructions/peract/instructions.pkl
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/val.zarr
+train_instructions=instructions/peract/instructions.pkl
+val_instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
 lr_scheduler=constant
-dense_interpolation=1
-interpolation_length=2
-num_history=1
-denoise_timesteps=10
-denoise_model=rectified_flow
+num_history=3
+denoise_timesteps=100  # 10
+denoise_model=ddpm
 keypose_only=true
-quaternion_format=wxyz
+quaternion_format=xyzw
 rotation_parametrization=6D
+fps_subsampling_factor=5
+backbone=clip
 use_instruction=true
 workspace_normalizer_buffer=0.05
-B=128
+B=64
 B_val=64
-C=144
-train_iters=200000
+C=120
+num_attn_heads=8
+num_vis_ins_attn_layers=3
+train_iters=600000
 val_freq=4000
-workspace_normalizer_iter=128
 precompute_instruction_encodings=true
 num_workers=4
-dataset=Peract
+dataset=PeractSingleCam
 ngpus=4
-ngpus=1
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 # checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth

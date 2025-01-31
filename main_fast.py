@@ -20,7 +20,8 @@ from tqdm import tqdm
 from engine import BaseTrainTester
 from datasets.dataset_rlbench_zarr import (
     PeractDataset,
-    GNFactorDataset
+    GNFactorDataset,
+    PeractSingleCamDataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset
@@ -96,6 +97,7 @@ class TrainTester(BaseTrainTester):
         super().__init__(args)
         _cls = {
             "Peract": PeractDepth2Cloud,
+            "PeractSingleCam": GNFactorDepth2Cloud,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
@@ -120,6 +122,7 @@ class TrainTester(BaseTrainTester):
         """Initialize datasets."""
         dataset_cls = {
             "Peract": PeractDataset,
+            "PeractSingleCam": PeractSingleCamDataset,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
@@ -175,6 +178,7 @@ class TrainTester(BaseTrainTester):
         print("Computing workspace normalizer...")
         dataset_cls = {
             "Peract": PeractDataset,
+            "PeractSingleCam": PeractSingleCamDataset,
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
