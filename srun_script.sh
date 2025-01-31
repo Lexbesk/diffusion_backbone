@@ -1,24 +1,23 @@
 #!/bin/bash
-#conda activate 3d_diffuser_actor
+
 while true
 do
     echo
     echo "#######################################################"
     echo
 
-    srun \
-       -p debug \
-       --nodes 1 \
-       --ntasks-per-node 1 \
-       --gres gpu:2 \
-       --cpus-per-task 12 \
-       --mem 48G \
+    srun -A nvr_srl_simpler \
+       -p polar,polar2,polar3,polar4,grizzly \
+       -N 1 \
+       --ntasks=1 \
+       --gpus 8 \
+       --cpus-per-task 48 \
+       --mem=256G \
        --unbuffered \
-       --time 10:00:00 \
-       --nodelist babel-14-9 \
-       /bin/bash -c "cd /home/ngkanats/repos/lbs/analogical_manipulation && rsync -avP /data/user_data/ngkanats/GNFactor_zarr /scratch && bash debug.sh"
+       -t 04:00:00 \
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_keypose_gnfactor_olddata.sh"
 
     sleep 1m
 
 done
-# srun --partition=debug --nodes=1 --ntasks-per-node=1 --gres=gpu:1 --cpus-per-task=12 --mem=48G --time=12:00:00 --pty bash
+# polar,polar2,polar3,polar4,grizzly

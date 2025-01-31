@@ -43,7 +43,7 @@ class CalvinDataset:
         t_ = int(self.annos['instr_id'][idx])
         if self._precompute_instr_encs:
             if self._instructions:
-                instr = self._instructions[t_]
+                instr = self._instructions['embeddings'][t_].squeeze(1)
             else:
                 instr = torch.zeros((53, 512))
         else:
@@ -72,7 +72,7 @@ class CalvinDataset:
             rgb: (N, n_cam, 3, 256, 256) uint8
         }
         """
-        idx = idx % len(self.annos['variation'])
+        idx = idx % len(self.annos['rgb'])
         ret_dict = {
             "task": ['calvin'],
             "instr": self._get_instr(idx),  # [str] or tensor(53, 512)

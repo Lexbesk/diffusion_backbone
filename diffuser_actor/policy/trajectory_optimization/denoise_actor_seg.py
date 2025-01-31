@@ -13,6 +13,7 @@ class DenoiseActor(BaseActor):
                  backbone="clip",
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
+                 num_attn_heads=8,
                  use_instruction=False,
                  fps_subsampling_factor=5,
                  rotation_parametrization='6D',
@@ -25,6 +26,7 @@ class DenoiseActor(BaseActor):
             backbone=backbone,
             embedding_dim=embedding_dim,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
+            num_attn_heads=num_attn_heads,
             use_instruction=use_instruction,
             fps_subsampling_factor=fps_subsampling_factor,
             rotation_parametrization=rotation_parametrization,
@@ -77,7 +79,6 @@ class DenoiseActor(BaseActor):
         ).reshape(len(seg_mask), -1)[..., None]  # B (nc*h*w) 1
         emb_mask = seg_mask * self.fg_emb.weight[None]  # B (nc*h*w) F
         context_feats = context_feats + emb_mask
-        from ipdb import set_trace as st; st()
 
         # Encode gripper history (B, nhist, F)
         adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(

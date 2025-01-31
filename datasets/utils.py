@@ -26,12 +26,12 @@ def to_tensor(x):
         return torch.as_tensor(x)
 
 
-def read_zarr_with_cache(fname):
+def read_zarr_with_cache(fname, mem_gb=16):
     # Configure the underlying store
     store = DirectoryStore(fname)
 
     # Wrap the store with a cache
-    cached_store = LRUStoreCache(store, max_size=16 * 2**30)  # 16 GB cache
+    cached_store = LRUStoreCache(store, max_size=mem_gb * 2**30)  # GB cache
 
     # Open Zarr file with caching
     return zarr.open_group(cached_store, mode="r")

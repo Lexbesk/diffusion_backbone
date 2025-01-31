@@ -1,11 +1,12 @@
-rm -r /scratch/CALVIN_zarr
-cp -r /data/user_data/ngkanats/CALVIN_zarr /scratch/
+# rm -r /scratch/CALVIN_zarr
+# cp -r /data/user_data/ngkanats/CALVIN_zarr /scratch/
 
 main_dir=CalvinFast
 
-train_data_dir=/scratch/CALVIN_zarr/train.zarr
-eval_data_dir=/scratch/CALVIN_zarr/val.zarr
-instructions=instructions/calvin_task_ABC_D
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/CALVIN_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/CALVIN_zarr/val.zarr
+train_instructions=instructions/calvin_task_ABC_D/training.pkl
+val_instructions=instructions/calvin_task_ABC_D/validation.pkl
 
 lr=3e-4
 wd=5e-3
@@ -20,7 +21,8 @@ fps_subsampling_factor=3
 backbone=clip
 use_instruction=true
 workspace_normalizer_buffer=0.01  # 0.05
-B=384
+relative_action=true
+B=256
 B_val=64
 C=192
 num_attn_heads=8
@@ -33,8 +35,8 @@ dataset=ABC_D
 ngpus=4
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=none
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+# checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -42,7 +44,8 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
-    --instructions $instructions \
+    --train_instructions $train_instructions \
+    --val_instructions $val_instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
     --num_workers $num_workers \
@@ -58,8 +61,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --denoise_timesteps $denoise_timesteps \
     --denoise_model $denoise_model \
     --val_freq $val_freq \
-    --dense_interpolation $dense_interpolation \
-    --interpolation_length $interpolation_length \
     --batch_size $B \
     --batch_size_val $B_val \
     --keypose_only $keypose_only \
