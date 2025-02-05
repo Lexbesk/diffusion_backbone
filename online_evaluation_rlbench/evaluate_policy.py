@@ -10,15 +10,16 @@ import torch
 import numpy as np
 import argparse
 
-from diffuser_actor.policy import BimanualDenoiseActor
-from diffuser_actor.policy.trajectory_optimization.old_3dda import DenoiseActor
+from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
+# from diffuser_actor.policy.trajectory_optimization.old_3dda import DenoiseActor
 import utils.utils_with_rlbench as rlbench_utils
 # import utils.utils_with_bimanual_rlbench as bimanual_rlbench_utils
 from utils.common_utils import str2bool, str_none, round_floats
-from datasets.dataset_rlbench import (
+from datasets.dataset_rlbench_zarr import (
     GNFactorDataset,
     PeractDataset,
-    Peract2Dataset
+    # Peract2Dataset,
+    PeractSingleCamDataset
 )
 
 
@@ -27,6 +28,7 @@ def parse_arguments():
     # Trainign and testing
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--checkpoint', type=str_none, default=None)
+    parser.add_argument('--task', type=str, default="close_jar")
     parser.add_argument('--device', type=str, default="cuda")
     parser.add_argument('--image_size', type=str, default="256,256")
     parser.add_argument('--num_episodes', type=int, default=1)
@@ -44,6 +46,7 @@ def parse_arguments():
     parser.add_argument('--backbone', type=str, default="clip")
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
+    parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--instructions', type=str, default="instructions.pkl")
     parser.add_argument('--use_instruction', type=str2bool, default=False)
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
@@ -71,6 +74,7 @@ def load_models(args):
         backbone=args.backbone,
         embedding_dim=args.embedding_dim,
         num_vis_ins_attn_layers=args.num_vis_ins_attn_layers,
+        num_attn_heads=args.num_attn_heads,
         use_instruction=args.use_instruction,
         fps_subsampling_factor=args.fps_subsampling_factor,
         rotation_parametrization=args.rotation_parametrization,
@@ -109,46 +113,50 @@ if __name__ == "__main__":
     else:
         import utils.utils_with_rlbench as rlbench_utils
 
-    # Seeds
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
-
     # Dataset class (for getting cameras and tasks)
     dataset_cls = {
         "Peract": PeractDataset,
-        "Peract2": Peract2Dataset,
-        "GNFactor": GNFactorDataset
+        # "Peract2": Peract2Dataset,
+        "GNFactor": GNFactorDataset,
+        "PeractSingleCam": PeractSingleCamDataset
     }[args.dataset]
 
     # Load models
     model = load_models(args)
+    print(model.workspace_normalizer)
 
-    # Load RLBench environment
-    env = rlbench_utils.RLBenchEnv(
-        data_path=args.data_dir,
-        image_size=[int(x) for x in args.image_size.split(",")],
-        apply_rgb=True,
-        apply_pc=True,
-        headless=bool(args.headless),
-        apply_cameras=dataset_cls.cameras,
-        collision_checking=bool(args.collision_checking)
-    )
-
-    # Load instructions
-    with open(args.instructions, "rb") as fid:
-        instruction = pickle.load(fid)
-
-    # Actioner (runs the policy online)
-    actioner = rlbench_utils.Actioner(
-        policy=model,
-        instructions=instruction,
-        apply_cameras=dataset_cls.cameras
-    )
-
-    # Evaluate
+    # Evaluate - reload environment for each task (crashes otherwise)
     task_success_rates = {}
-    for task_str in dataset_cls.tasks:
+    for task_str in [args.task]:
+
+        # Seeds - re-seed for each task
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
+
+        # Load RLBench environment
+        env = rlbench_utils.RLBenchEnv(
+            data_path=args.data_dir,
+            image_size=[int(x) for x in args.image_size.split(",")],
+            apply_rgb=True,
+            apply_pc=True,
+            headless=bool(args.headless),
+            apply_cameras=dataset_cls.cameras,
+            collision_checking=bool(args.collision_checking)
+        )
+
+        # Load instructions
+        with open(args.instructions, "rb") as fid:
+            instruction = pickle.load(fid)
+
+        # Actioner (runs the policy online)
+        actioner = rlbench_utils.Actioner(
+            policy=model,
+            instructions=instruction,
+            apply_cameras=dataset_cls.cameras
+        )
+
+        # Evaluate
         var_success_rates = env.evaluate_task_on_multiple_variations(
             task_str,
             max_steps=args.max_steps,

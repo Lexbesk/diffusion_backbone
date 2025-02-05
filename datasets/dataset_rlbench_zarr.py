@@ -84,6 +84,7 @@ class PeractDataset(RLBenchDataset):
         "slide_block_to_color_target", "stack_blocks", "stack_cups",
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
+    variations = range(0, 199)
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
     train_copies = 1  # how many copies of the dataset to load
 
@@ -96,6 +97,7 @@ class GNFactorDataset(RLBenchDataset):
         "put_item_in_drawer", "reach_and_drag", "push_buttons",
         "stack_blocks"
     ]
+    variations = range(0, 199)
     cameras = ("front",)
     train_copies = 2000  # how many copies of the dataset to load
 
@@ -111,6 +113,7 @@ class PeractSingleCamDataset(RLBenchDataset):
         "slide_block_to_color_target", "stack_blocks", "stack_cups",
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
+    variations = range(0, 199)
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
     train_copies = 10  # how many copies of the dataset to load
 
