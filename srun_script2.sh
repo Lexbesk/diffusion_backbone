@@ -12,7 +12,7 @@ do
        --ntasks=1 \
        --gpus 4 \
        --cpus-per-task 24 \
-       --mem=64G \
+       --mem=96G \
        --unbuffered \
        --exclusive \
        -t 04:00:00 \

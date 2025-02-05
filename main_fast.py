@@ -24,7 +24,7 @@ from datasets.dataset_rlbench_zarr import (
     PeractSingleCamDataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
-from datasets.dataset_calvin_zarr import ABC_DDataset
+from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from diffuser_actor.policy.trajectory_optimization.denoise_sa_actor import DenoiseActor as DenoiseActorSA
@@ -101,8 +101,10 @@ class TrainTester(BaseTrainTester):
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
-            "ABC_D": None
+            "ABC_D": None,
+            "ABC_DSingleCam": None
         }[args.dataset]
+        im_size = 160 if args.dataset.startswith("ABC") else 256
         if _cls is not None:
             self.depth2cloud = _cls((256, 256))
         else:
@@ -116,7 +118,7 @@ class TrainTester(BaseTrainTester):
                 p=1.0
             ),
             K.RandomResizedCrop(
-                size=(256, 256),
+                size=(im_size, im_size),
                 scale=(0.7, 1.0)
             )
         ).cuda()
@@ -129,7 +131,8 @@ class TrainTester(BaseTrainTester):
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
-            "ABC_D": ABC_DDataset
+            "ABC_D": ABC_DDataset,
+            "ABC_DSingleCam": ABC_DSingleCamDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
@@ -185,7 +188,8 @@ class TrainTester(BaseTrainTester):
             # "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
-            "ABC_D": ABC_DDataset
+            "ABC_D": ABC_DDataset,
+            "ABC_DSingleCam": ABC_DSingleCamDataset
         }[args.dataset]
 
         # Initialize datasets with arguments

@@ -4,6 +4,7 @@ import pickle
 import torch
 
 from .dataset_base_zarr import BaseDataset
+from .utils import to_tensor
 
 
 class CALVINDataset(BaseDataset):
@@ -41,6 +42,9 @@ class CALVINDataset(BaseDataset):
     def _get_task(self, idx):
         return ['calvin']
 
+    def _get_pcd(self, idx):
+        return to_tensor(self.annos['pcd'][idx])
+
     def _get_instr(self, idx):
         t_ = int(self.annos['instr_id'][idx])
         if self._precompute_instr_encs:
@@ -72,3 +76,15 @@ class ABC_DDataset(CALVINDataset):
     """CALVIN dataset under ABC_D setup."""
     cameras = ("front", "wrist")
     train_copies = 1  # how many copies of the dataset to load
+
+
+class ABC_DSingleCamDataset(CALVINDataset):
+    """CALVIN dataset under ABC_D setup."""
+    cameras = ("front")
+    train_copies = 1  # how many copies of the dataset to load
+
+    def _get_pcd(self, idx):
+        return to_tensor(self.annos['pcd'][idx, :1])
+
+    def _get_rgb(self, idx):
+        return to_tensor(self.annos['rgb'][idx, :1])

@@ -11,13 +11,55 @@ import torch
 from tqdm import tqdm
 
 
-ROOT = 'observations'
-STORE_PATH = '/data/user_data/ngkanats/isaac_zarr'
-READ_EVERY = 1000  # in episodes
+ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/simple_gym/observations'
+STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/simple_gym/'
 STORE_EVERY = 1  # in keyposes
-RAND_STORE_EVERY = 1  # in keyposes
 IM_SIZE = 128
-ILEN = 25  # trajectory interpolation length
+ILEN = 10  # trajectory interpolation length
+
+
+def backproject_gym_depth(depth_map, proj_matrix):
+    fx = 2.0 / proj_matrix[0, 0]
+    fy = 2.0 / proj_matrix[1, 1]
+    x, y = np.meshgrid(
+        [x for x in range(depth_map.shape[1])],
+        [y for y in range(depth_map.shape[0])],
+    )
+    input_x = x.astype(np.float32)
+    input_y = y.astype(np.float32)
+    z = depth_map
+    
+    input_x -= depth_map.shape[1] // 2
+    input_y -= depth_map.shape[0] // 2
+    input_x /= depth_map.shape[1]
+    input_y /= depth_map.shape[0]
+
+    output_x = z * fx * input_x
+    output_y = z * fy * input_y
+
+    return np.stack((output_x, output_y, z), -1)
+
+
+def backproject_gym_depth_torch(depth_map, proj_matrix):
+    fx = 2.0 / proj_matrix[0, 0]
+    fy = 2.0 / proj_matrix[1, 1]
+    x, y = torch.meshgrid(
+        torch.arange(depth_map.shape[1]),
+        torch.arange(depth_map.shape[0])
+    )
+    input_x = x.T.float()
+    input_y = y.T.float()
+    z = depth_map
+    
+    input_x -= depth_map.shape[1] // 2
+    input_y -= depth_map.shape[0] // 2
+    input_x /= depth_map.shape[1]
+    input_y /= depth_map.shape[0]
+
+    output_x = z * fx * input_x
+    output_y = z * fy * input_y
+
+    return torch.stack((output_x, output_y, z), -1)
 
 
 def normalise_quat(x):
@@ -58,16 +100,82 @@ class TrajectoryInterpolator:
         return resampled.numpy()
 
 
+class Isaac_D2C:
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def backproject_gym_depth(depth_map, proj_matrix):
+        fx = 2.0 / proj_matrix[..., 0, 0]  # (B, nc)
+        fy = 2.0 / proj_matrix[..., 1, 1]  # (B, nc)
+        x, y = torch.meshgrid(
+            torch.arange(depth_map.shape[-1]),
+            torch.arange(depth_map.shape[-2])
+        )
+        input_x = x.T.to(depth_map.device).half()
+        input_y = y.T.to(depth_map.device).half()
+        z = depth_map
+        
+        input_x -= depth_map.shape[-1] // 2
+        input_y -= depth_map.shape[-2] // 2
+        input_x /= depth_map.shape[-1]
+        input_y /= depth_map.shape[-2]
+
+        output_x = z * fx[..., None, None] * input_x[None, None]
+        output_y = z * fy[..., None, None] * input_y[None, None]
+
+        return torch.stack((output_x, output_y, z), -1)
+
+    def __call__(self, gym_depth, proj_matrix, extrinsics, xyz_image=None):
+        """
+        gym_depth: (B, 2, H, W),
+        proj_matrix: (B, 2, 4, 4),
+        extrinsics: (B, 2, 4, 4),
+        xyz_image: (B, 2, H, W, 3)
+        """
+        # From gym_depth to camera frame
+        pcd = self.backproject_gym_depth(gym_depth, proj_matrix)  # B nc H W 3
+        if xyz_image is not None:
+            assert torch.allclose(pcd, xyz_image)
+        # From camera frame to world frame
+        _, _, h, w, _ = pcd.shape
+        pcd = pcd.reshape(len(pcd), 2, -1, 3)  # (B, nc, H*W, 3)
+        pcd = torch.cat((pcd, torch.ones_like(pcd)[..., :1]), -1)
+        rz = torch.tensor([  # rotation matrix 90 degrees around z-axis
+            [0, -1, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ]).to(pcd.device)[None, None].half()
+        ry = torch.tensor([  # rotation matrix 90 degrees around y-axis
+            [0, 0, 1, 0],
+            [0, 1, 0, 0],
+            [-1, 0, 0, 0],
+            [0, 0, 0, 1]
+        ]).to(pcd.device)[None, None].half()
+        result = torch.matmul(
+            extrinsics.half() @ ry @ rz,
+            pcd.permute(0, 1, 3, 2).half()
+        )
+        result = result.permute(0, 1, 3, 2)[..., :3]
+        result = result.reshape(len(result), 2, h, w, 3)
+        return result.permute(0, 1, 4, 2, 3)
+
+
 def all_tasks_main():
     """
     [
-        img (kp, nc, 128, 128, 3),
-        seg (kp, nc, 128, 128),
-        pcd (kp, nc, 128, 128, 3),
-        dict {obj_name: seg_id},
-        content[4]['robot']['panda_hand'] (kp, 4, 4)
-        list of trajectories [(n_i, 8)],
-        boolean (must be True)
+        rgb: (N, 2, H, W, 3),
+        gym_depth: (N, 2, H, W),
+        segmentation: (N, 2, H, W),
+        proj_matrix: (N, 2, 4, 4),
+        xyz_image: (N, 2, H, W, 3),
+        extrinsics: (N, 2, 4, 4),
+        label_dict: dict {obj_id: int},
+        rigid_poses: dict,
+        eef_pose: (N, 3+4+1),
+        success: bool
     ]
     """
     ncam = 2
@@ -79,23 +187,28 @@ def all_tasks_main():
 
     # Read once to get the number of keyposes
     n_keyposes = 0
-    tlen = 0
     for ep in tqdm(episodes):
         with open(ep, "rb") as f:
             content = pickle.loads(blosc.decompress(f.read()))
-        if content[-1] and len(content[0]) == 2:
+        if content[-1]:
             n_keyposes += len(content[0])
-            tlen += sum(len(it) for it in content[5])
 
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}.zarr", mode="w") as zarr_file:
+    with zarr.open_group(f"{STORE_PATH}train.zarr", mode="w") as zarr_file:
         zarr_file.create_dataset(
             "rgb",
             shape=(n_keyposes, ncam, 3, IM_SIZE, IM_SIZE),
             chunks=(STORE_EVERY, ncam, 3, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="uint8"
+        )
+        zarr_file.create_dataset(
+            "depth",
+            shape=(n_keyposes, ncam, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, ncam, IM_SIZE, IM_SIZE),
+            compressor=compressor,
+            dtype="float16"
         )
         zarr_file.create_dataset(
             "seg",
@@ -105,9 +218,16 @@ def all_tasks_main():
             dtype="bool"
         )
         zarr_file.create_dataset(
-            "pcd",
-            shape=(n_keyposes, ncam, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, ncam, 3, IM_SIZE, IM_SIZE),
+            "proj_matrix",
+            shape=(n_keyposes, ncam, 4, 4),
+            chunks=(STORE_EVERY, ncam, 4, 4),
+            compressor=compressor,
+            dtype="float16"
+        )
+        zarr_file.create_dataset(
+            "extrinsics",
+            shape=(n_keyposes, ncam, 4, 4),
+            chunks=(STORE_EVERY, ncam, 4, 4),
             compressor=compressor,
             dtype="float16"
         )
@@ -126,28 +246,27 @@ def all_tasks_main():
             dtype="float32"
         )
 
-        # Read every READ_EVERY
+        # Write
         start = 0
-        for s in range(0, len(episodes), READ_EVERY):
-            rgb, seg, pcd, prop, actions = [], [], [], [], []
-            # collect data
-            for ep in tqdm(episodes[s:s + READ_EVERY]):
-                with open(ep, "rb") as f:
-                    content = pickle.loads(blosc.decompress(f.read()))
-                if not content[-1] or len(content[0]) != 2:
-                    continue
-                rgb.append(content[0].astype(np.uint8).transpose(0, 1, 4, 2, 3))
-                seg.append(content[1] == content[3]['/world/obj0'])
-                pcd.append(content[2].astype(np.float16).transpose(0, 1, 4, 2, 3))
-                prop.extend([_t[0][None].astype(np.float32) for _t in content[5]])
-                actions.extend([traj_interp(_t).astype(np.float32) for _t in content[5]])
-            # write
-            end = start + len(actions)
-            zarr_file['rgb'][start:end] = np.concatenate(rgb)
-            zarr_file['seg'][start:end] = np.concatenate(seg)
-            zarr_file['pcd'][start:end] = np.concatenate(pcd)
-            zarr_file['proprioception'][start:end] = np.stack(prop)
-            zarr_file['action'][start:end] = np.stack(actions)
+        for ep in tqdm(episodes):
+            with open(ep, "rb") as f:
+                content = pickle.loads(blosc.decompress(f.read()))
+            if not content[-1]:
+                continue
+            end = start + len(content[0])
+            zarr_file['rgb'][start:end] = content[0].astype(np.uint8).transpose(0, 1, 4, 2, 3)
+            zarr_file['depth'][start:end] = content[1].astype(np.float16)
+            zarr_file['seg'][start:end] = content[2] == content[6]['/world/obj0']
+            zarr_file['proj_matrix'][start:end] = content[3].astype(np.float16)
+            zarr_file['extrinsics'][start:end] = content[5].astype(np.float16)
+            zarr_file['proprioception'][start:end] = np.stack([
+                _t[0, (0, 1, 2, 6, 3, 4, 5, 7)][None].astype(np.float32)
+                for _t in content[8]
+            ])
+            zarr_file['action'][start:end] = np.stack([
+                traj_interp(_t[:, (0, 1, 2, 6, 3, 4, 5, 7)]).astype(np.float32)
+                for _t in content[8]
+            ])
             start = end
 
 

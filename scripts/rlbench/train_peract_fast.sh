@@ -11,8 +11,8 @@ val_instructions=instructions/peract/instructions.pkl
 lr=1e-4
 lr_scheduler=constant
 num_history=3
-denoise_timesteps=100  # 10
-denoise_model=ddpm
+denoise_timesteps=10  # 10
+denoise_model=rectified_flow
 keypose_only=true
 quaternion_format=xyzw
 rotation_parametrization=6D
@@ -33,8 +33,8 @@ dataset=PeractSingleCam
 ngpus=4
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=none
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+# checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
