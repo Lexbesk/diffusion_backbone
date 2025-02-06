@@ -23,6 +23,7 @@ from rlbench.backend.exceptions import InvalidActionError
 from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
+from time import time
 
 
 ALL_RLBENCH_TASKS = [
@@ -400,11 +401,13 @@ class RLBenchEnv:
         actioner: Actioner,
         max_tries: int = 1,
         verbose: bool = False,
-        dense_interpolation=False,
         interpolation_length=100,
         num_history=1,
     ):
+        t = time()
         self.env.launch()
+        print('launch', time() - t)
+        t = time()
         task_type = task_file_to_task_class(task_str)
         task = self.env.get_task(task_type)
         task_variations = task.variation_count()
@@ -418,6 +421,7 @@ class RLBenchEnv:
 
         var_success_rates = {}
         var_num_valid_demos = {}
+        print('gets', time() - t)
 
         for variation in task_variations:
             task.set_variation(variation)
@@ -431,7 +435,6 @@ class RLBenchEnv:
                     actioner=actioner,
                     max_tries=max_tries,
                     verbose=verbose,
-                    dense_interpolation=dense_interpolation,
                     interpolation_length=interpolation_length,
                     num_history=num_history
                 )
@@ -460,7 +463,6 @@ class RLBenchEnv:
         actioner: Actioner,
         max_tries: int = 1,
         verbose: bool = False,
-        dense_interpolation=False,
         interpolation_length=50,
         num_history=0,
     ):
@@ -471,6 +473,7 @@ class RLBenchEnv:
         total_reward = 0
 
         for demo_id in range(num_demos):
+            t = time()
             if verbose:
                 print()
                 print(f"Starting demo {demo_id}")
@@ -480,6 +483,8 @@ class RLBenchEnv:
                 num_valid_demos += 1
             except:
                 continue
+            print('get_demo', time() - t)
+            t = time()
 
             rgbs = torch.Tensor([]).to(device)
             pcds = torch.Tensor([]).to(device)
@@ -493,6 +498,8 @@ class RLBenchEnv:
             move = Mover(task, max_tries=max_tries)
             reward = 0.0
             max_reward = 0.0
+            print('get_rel_demo', time() - t)
+            t = time()
 
             for step_id in range(max_steps):
 
@@ -572,6 +579,8 @@ class RLBenchEnv:
                 f"SR: {total_reward:.2f}/{demo_id+1}",
                 "# valid demos", num_valid_demos,
             )
+            t = time() - t
+            print('exec', t, t / step_id)
 
         # Compensate for failed demos
         if num_valid_demos == 0:

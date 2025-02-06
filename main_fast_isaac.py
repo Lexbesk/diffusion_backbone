@@ -22,7 +22,7 @@ from tqdm import trange
 from engine import BaseTrainTester
 from datasets.dataset_isaac import IsaacDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
-from diffuser_actor.policy.trajectory_optimization.denoise_actor_seg import DenoiseActor
+from diffuser_actor.policy.denoise_actor_seg import DenoiseActor
 from diffuser_actor.depth2cloud.isaac import IsaacDepth2Cloud
 from utils.common_utils import count_parameters, str2bool, str_none
 

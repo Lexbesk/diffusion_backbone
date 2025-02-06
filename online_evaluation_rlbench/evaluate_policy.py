@@ -11,9 +11,6 @@ import numpy as np
 import argparse
 
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
-# from diffuser_actor.policy.trajectory_optimization.old_3dda import DenoiseActor
-import utils.utils_with_rlbench as rlbench_utils
-# import utils.utils_with_bimanual_rlbench as bimanual_rlbench_utils
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench_zarr import (
     GNFactorDataset,
@@ -41,7 +38,6 @@ def parse_arguments():
     parser.add_argument('--max_steps', type=int, default=25)
     parser.add_argument('--collision_checking', type=str2bool, default=False)
     parser.add_argument('--bimanual', type=str2bool, default=False)
-    parser.add_argument('--dense_interpolation', type=str2bool, default=False)
     parser.add_argument('--interpolation_length', type=int, default=100)
     parser.add_argument('--backbone', type=str, default="clip")
     parser.add_argument('--embedding_dim', type=int, default=144)
@@ -164,7 +160,6 @@ if __name__ == "__main__":
             num_demos=args.num_episodes,
             actioner=actioner,
             max_tries=args.max_tries,
-            dense_interpolation=bool(args.dense_interpolation),
             interpolation_length=args.interpolation_length,
             verbose=bool(args.verbose),
             num_history=args.num_history

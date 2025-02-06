@@ -1,3 +1,2 @@
-from .keypose_optimization.act3d import Act3D
-from .trajectory_optimization.denoise_actor import DenoiseActor
-from .trajectory_optimization.bimanual_denoise_actor import BimanualDenoiseActor
+from .denoise_actor import DenoiseActor
+from .bimanual_denoise_actor import BimanualDenoiseActor

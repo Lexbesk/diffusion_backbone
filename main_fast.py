@@ -27,7 +27,7 @@ from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
-from diffuser_actor.policy.trajectory_optimization.denoise_sa_actor import DenoiseActor as DenoiseActorSA
+from diffuser_actor.policy.denoise_sa_actor import DenoiseActor as DenoiseActorSA
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     GNFactorDepth2Cloud

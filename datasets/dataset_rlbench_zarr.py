@@ -114,7 +114,7 @@ class PeractSingleCamDataset(RLBenchDataset):
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
     variations = range(0, 199)
-    cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
+    cameras = ("front",)
     train_copies = 10  # how many copies of the dataset to load
 
     def _get_rgb(self, idx):
