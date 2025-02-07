@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from engine import BaseTrainTester
-from datasets.dataset_rlbench_zarr import (
+from datasets.dataset_rlbench import (
     PeractDataset,
     GNFactorDataset,
     PeractSingleCamDataset

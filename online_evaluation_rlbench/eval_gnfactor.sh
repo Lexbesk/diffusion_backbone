@@ -3,7 +3,7 @@
 
 
 
-exp=flow_flow_3dda_gnfactor
+exp=test_3dda_gnfactor
 tasks=(
     close_jar insert_onto_square_peg light_bulb_in meat_off_grill open_drawer place_shape_in_shape_sorter place_wine_at_rack_location push_buttons put_groceries_in_cupboard put_item_in_drawer put_money_in_safe reach_and_drag slide_block_to_color_target stack_blocks stack_cups sweep_to_dustpan_of_size turn_tap place_cups
 )
@@ -14,7 +14,7 @@ instructions=instructions/peract/instructions.pkl
 num_episodes=100
 max_tries=2
 max_steps=20
-verbose=true
+verbose=false
 interpolation_length=2
 num_history=3
 denoise_timesteps=100
@@ -24,11 +24,11 @@ rotation_parametrization=6D
 use_instruction=true
 C=120
 num_attn_heads=8
-num_vis_ins_attn_layers=2
+num_vis_ins_attn_layers=3
 fps_subsampling_factor=5
 relative_action=false
 seed=0
-checkpoint=old_ddpm.pth
+checkpoint=ddpm.pth
 headless=true
 
 num_ckpts=${#tasks[@]}

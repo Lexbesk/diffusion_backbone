@@ -1,6 +1,6 @@
 import numpy as np
 
-from .dataset_base_zarr import BaseDataset
+from .dataset_base import BaseDataset
 
 
 class RLBenchCompDataset(BaseDataset):

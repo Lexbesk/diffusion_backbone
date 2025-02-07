@@ -5,6 +5,8 @@ main_dir=Peract_singlecam
 
 train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/train.zarr
 eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/val.zarr
+train_data_dir=/data/user_data/ngkanats/Peract_zarr/train.zarr
+eval_data_dir=/data/user_data/ngkanats/Peract_zarr/val.zarr
 train_instructions=instructions/peract/instructions.pkl
 val_instructions=instructions/peract/instructions.pkl
 
@@ -30,11 +32,11 @@ val_freq=4000
 precompute_instruction_encodings=true
 num_workers=4
 dataset=PeractSingleCam
-ngpus=4
+ngpus=1
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=none
+# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \

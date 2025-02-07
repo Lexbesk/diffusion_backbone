@@ -3,7 +3,7 @@ import pickle
 
 import torch
 
-from .dataset_base_zarr import BaseDataset
+from .dataset_base import BaseDataset
 from .utils import to_tensor
 
 

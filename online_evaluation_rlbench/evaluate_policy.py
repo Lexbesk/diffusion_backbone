@@ -12,7 +12,7 @@ import argparse
 
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
-from datasets.dataset_rlbench_zarr import (
+from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
     # Peract2Dataset,

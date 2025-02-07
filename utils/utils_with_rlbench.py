@@ -1,12 +1,9 @@
 import os
 import glob
 import random
-from typing import List, Dict, Any
-from pathlib import Path
-import json
+from typing import List
 
-import open3d
-import traceback
+import open3d  # DON'T DELETE THIS!
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -23,7 +20,8 @@ from rlbench.backend.exceptions import InvalidActionError
 from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
-from time import time
+
+from online_evaluation_rlbench.get_stored_demos import get_stored_demos
 
 
 ALL_RLBENCH_TASKS = [
@@ -60,11 +58,6 @@ def task_file_to_task_class(task_file):
     return task_class
 
 
-def load_episodes() -> Dict[str, Any]:
-    with open(Path(__file__).parent.parent / "data_processing/episodes.json") as fid:
-        return json.load(fid)
-
-
 class Mover:
 
     def __init__(self, task, disabled=False, max_tries=1):
@@ -96,17 +89,11 @@ class Mover:
             obs, reward, terminate = self._task.step(action_collision)
 
             pos = obs.gripper_pose[:3]
-            rot = obs.gripper_pose[3:7]
             dist_pos = np.sqrt(np.square(target[:3] - pos).sum())
-            dist_rot = np.sqrt(np.square(target[3:7] - rot).sum())
             criteria = (dist_pos < 5e-3,)
 
             if all(criteria) or reward == 1:
                 break
-
-            print(
-                f"Too far away (pos: {dist_pos:.3f}, rot: {dist_rot:.3f}, step: {self._step_id})... Retrying..."
-            )
 
         # we execute the gripper action after re-tries
         action = target
@@ -206,20 +193,21 @@ class Actioner:
             raise ValueError()
 
         self._instr = self._instr.to(rgbs.device)
-        self._task_id = self._task_id.to(rgbs.device)
 
         # Predict trajectory
         fake_traj = torch.full(
-            [1, interpolation_length - 1, gripper.shape[-1]], 0
+            [1, interpolation_length - 1, gripper.shape[-1]], 0,
+            dtype=bool
         ).to(rgbs.device)
         traj_mask = torch.full(
-            [1, interpolation_length - 1], False
+            [1, interpolation_length - 1], False,
+            dtype=bool
         ).to(rgbs.device)
         output["action"] = self._policy(
             fake_traj,
             traj_mask,
-            rgbs[:, -1],
-            pcds[:, -1],
+            rgbs,
+            pcds,
             self._instr,
             gripper[..., :7],
             run_inference=True
@@ -230,27 +218,6 @@ class Actioner:
     @property
     def device(self):
         return next(self._policy.parameters()).device
-
-
-def obs_to_attn(obs, camera):
-    extrinsics_44 = torch.from_numpy(
-        obs.misc[f"{camera}_camera_extrinsics"]
-    ).float()
-    extrinsics_44 = torch.linalg.inv(extrinsics_44)
-    intrinsics_33 = torch.from_numpy(
-        obs.misc[f"{camera}_camera_intrinsics"]
-    ).float()
-    intrinsics_34 = F.pad(intrinsics_33, (0, 1, 0, 0))
-    gripper_pos_3 = torch.from_numpy(obs.gripper_pose[:3]).float()
-    gripper_pos_41 = F.pad(gripper_pos_3, (0, 1), value=1).unsqueeze(1)
-    points_cam_41 = extrinsics_44 @ gripper_pos_41
-
-    proj_31 = intrinsics_34 @ points_cam_41
-    proj_3 = proj_31.float().squeeze(1)
-    u = int((proj_3[0] / proj_3[2]).round())
-    v = int((proj_3[1] / proj_3[2]).round())
-
-    return u, v
 
 
 class RLBenchEnv:
@@ -334,46 +301,7 @@ class RLBenchEnv:
         pcd = state[:, 1].unsqueeze(0)  # 1, N, C, H, W
         gripper = gripper.unsqueeze(0)  # 1, D
 
-        attns = torch.Tensor([])
-        for cam in self.apply_cameras:
-            u, v = obs_to_attn(obs, cam)
-            attn = torch.zeros(1, 1, 1, self.image_size[0], self.image_size[1])
-            if not (u < 0 or u > self.image_size[1] - 1 or v < 0 or v > self.image_size[0] - 1):
-                attn[0, 0, 0, v, u] = 1
-            attns = torch.cat([attns, attn], 1)
-        rgb = torch.cat([rgb, attns], 2)
-
         return rgb, pcd, gripper
-
-    def get_obs_action_from_demo(self, demo):
-        """
-        Fetch the desired state and action based on the provided demo.
-            :param demo: fetch each demo and save key-point observations
-            :param normalise_rgb: normalise rgb to (-1, 1)
-            :return: a list of obs and action
-        """
-        key_frame = keypoint_discovery(demo)
-        key_frame.insert(0, 0)
-        state_ls = []
-        action_ls = []
-        for f in key_frame:
-            state, action = self.get_obs_action(demo._observations[f])
-            state = transform(state, augmentation=False)
-            state_ls.append(state.unsqueeze(0))
-            action_ls.append(action.unsqueeze(0))
-        return state_ls, action_ls
-
-    def get_gripper_matrix_from_action(self, action):
-        action = action.cpu().numpy()
-        position = action[:3]
-        quaternion = action[3:7]
-        rotation = open3d.geometry.get_rotation_matrix_from_quaternion(
-            np.array((quaternion[3], quaternion[0], quaternion[1], quaternion[2]))
-        )
-        gripper_matrix = np.eye(4)
-        gripper_matrix[:3, :3] = rotation
-        gripper_matrix[:3, 3] = position
-        return gripper_matrix
 
     def get_demo(self, task_name, variation, episode_index):
         """
@@ -402,12 +330,9 @@ class RLBenchEnv:
         max_tries: int = 1,
         verbose: bool = False,
         interpolation_length=100,
-        num_history=1,
+        num_history=1
     ):
-        t = time()
         self.env.launch()
-        print('launch', time() - t)
-        t = time()
         task_type = task_file_to_task_class(task_str)
         task = self.env.get_task(task_type)
         task_variations = task.variation_count()
@@ -421,9 +346,8 @@ class RLBenchEnv:
 
         var_success_rates = {}
         var_num_valid_demos = {}
-        print('gets', time() - t)
 
-        for variation in task_variations:
+        for variation in tqdm(task_variations):
             task.set_variation(variation)
             success_rate, valid, num_valid_demos = (
                 self._evaluate_task_on_one_variation(
@@ -473,21 +397,25 @@ class RLBenchEnv:
         total_reward = 0
 
         for demo_id in range(num_demos):
-            t = time()
             if verbose:
                 print()
                 print(f"Starting demo {demo_id}")
 
             try:
-                demo = self.get_demo(task_str, variation, episode_index=demo_id)[0]
+                demo = get_stored_demos(
+                    amount=1,
+                    image_paths=False,
+                    dataset_root=self.data_path,
+                    variation_number=variation,
+                    task_name=task_str,
+                    obs_config=self.obs_config,
+                    random_selection=False,
+                    from_episode_number=0
+                )[0]
                 num_valid_demos += 1
             except:
                 continue
-            print('get_demo', time() - t)
-            t = time()
 
-            rgbs = torch.Tensor([]).to(device)
-            pcds = torch.Tensor([]).to(device)
             grippers = torch.Tensor([]).to(device)
 
             # descriptions, obs = task.reset()
@@ -498,24 +426,18 @@ class RLBenchEnv:
             move = Mover(task, max_tries=max_tries)
             reward = 0.0
             max_reward = 0.0
-            print('get_rel_demo', time() - t)
-            t = time()
 
             for step_id in range(max_steps):
 
                 # Fetch the current observation, and predict one action
                 rgb, pcd, gripper = self.get_rgb_pcd_gripper_from_obs(obs)
-                rgb = rgb.to(device)
-                pcd = pcd.to(device)
+                rgbs_input = rgb.to(device)
+                pcds_input = pcd.to(device)
                 gripper = gripper.to(device)
 
-                rgbs = torch.cat([rgbs, rgb.unsqueeze(1)], dim=1)
-                pcds = torch.cat([pcds, pcd.unsqueeze(1)], dim=1)
                 grippers = torch.cat([grippers, gripper.unsqueeze(1)], dim=1)
 
                 # Prepare proprioception history
-                rgbs_input = rgbs[:, -1:][:, :, :, :3]
-                pcds_input = pcds[:, -1:]
                 if num_history < 1:
                     gripper_input = grippers[:, -1]
                 else:
@@ -544,7 +466,7 @@ class RLBenchEnv:
                     actions[:, -1] = actions[:, -1].round()
 
                     # execute
-                    for action in tqdm(actions):
+                    for action in actions:
                         collision_checking = self._collision_checking(task_str, step_id)
                         obs, reward, terminate, _ = move(action, collision_checking=collision_checking)
 
@@ -579,8 +501,6 @@ class RLBenchEnv:
                 f"SR: {total_reward:.2f}/{demo_id+1}",
                 "# valid demos", num_valid_demos,
             )
-            t = time() - t
-            print('exec', t, t / step_id)
 
         # Compensate for failed demos
         if num_valid_demos == 0:
@@ -595,79 +515,6 @@ class RLBenchEnv:
         """Collision checking for planner."""
         collision_checking = False
         return collision_checking
-
-    def verify_demos(
-        self,
-        task_str: str,
-        variation: int,
-        num_demos: int,
-        max_tries: int = 1,
-        verbose: bool = False,
-    ):
-        if verbose:
-            print()
-            print(f"{task_str}, variation {variation}, {num_demos} demos")
-
-        self.env.launch()
-        task_type = task_file_to_task_class(task_str)
-        task = self.env.get_task(task_type)
-        task.set_variation(variation)  # type: ignore
-
-        success_rate = 0.0
-        invalid_demos = 0
-
-        for demo_id in range(num_demos):
-            if verbose:
-                print(f"Starting demo {demo_id}")
-
-            try:
-                demo = self.get_demo(task_str, variation, episode_index=demo_id)[0]
-            except:
-                print(f"Invalid demo {demo_id} for {task_str} variation {variation}")
-                print()
-                traceback.print_exc()
-                invalid_demos += 1
-
-            task.reset_to_demo(demo)
-
-            gt_keyframe_actions = []
-            for f in keypoint_discovery(demo):
-                obs = demo[f]
-                action = np.concatenate([obs.gripper_pose, [obs.gripper_open]])
-                gt_keyframe_actions.append(action)
-
-            move = Mover(task, max_tries=max_tries)
-
-            for step_id, action in enumerate(gt_keyframe_actions):
-                if verbose:
-                    print(f"Step {step_id}")
-
-                try:
-                    obs, reward, terminate, step_images = move(action)
-                    if reward == 1:
-                        success_rate += 1 / num_demos
-                        break
-                    if terminate and verbose:
-                        print("The episode has terminated!")
-
-                except (IKError, ConfigurationPathError, InvalidActionError) as e:
-                    print(task_type, demo, success_rate, e)
-                    reward = 0
-                    break
-
-            if verbose:
-                print(f"Finished demo {demo_id}, SR: {success_rate}")
-
-        # Compensate for failed demos
-        if (num_demos - invalid_demos) == 0:
-            success_rate = 0.0
-            valid = False
-        else:
-            success_rate = success_rate * num_demos / (num_demos - invalid_demos)
-            valid = True
-
-        self.env.shutdown()
-        return success_rate, valid, invalid_demos
 
     def create_obs_config(
         self, image_size, apply_rgb, apply_depth, apply_pc, apply_cameras, **kwargs
