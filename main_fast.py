@@ -520,6 +520,7 @@ def generate_visualizations(pred, gt, mask, box_size=0.3):
 
 
 if __name__ == '__main__':
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     # Arguments
     args = parse_arguments()
     print("Arguments:")
