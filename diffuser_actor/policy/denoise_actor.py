@@ -39,7 +39,8 @@ class DenoiseActor(nn.Module):
                  denoise_timesteps=100,
                  denoise_model="ddpm",
                  nhist=3,
-                 relative=False):
+                 relative=False,
+                 ayush=False):
         super().__init__()
         self._rotation_parametrization = rotation_parametrization
         self._quaternion_format = quaternion_format
@@ -51,7 +52,8 @@ class DenoiseActor(nn.Module):
             nhist=nhist,
             num_attn_heads=num_attn_heads,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
-            fps_subsampling_factor=fps_subsampling_factor
+            fps_subsampling_factor=fps_subsampling_factor,
+            ayush=ayush
         )
         self.prediction_head = TransformerHead(
             embedding_dim=embedding_dim,
@@ -157,6 +159,41 @@ class DenoiseActor(nn.Module):
             fps_feats, fps_pos  # sampled visual features
         )
 
+    def encode_florence(self, visible_rgb, visible_pcd, instruction,
+                        curr_gripper):
+        # Compute visual features/positional embeddings at different scales
+        rgb_feats_pyramid, pcd_pyramid, instr_feats, _ = self.encoder.encode_florence(
+            visible_rgb, visible_pcd, instruction
+        )
+        # Keep only low-res scale
+        context_feats = einops.rearrange(
+            rgb_feats_pyramid[0],
+            "b ncam c h w -> b (ncam h w) c"
+        )
+        context = pcd_pyramid[0]
+
+        # Encode gripper history (B, nhist, F)
+        adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(
+            curr_gripper, context_feats, context
+        )
+
+        # FPS on visual features (N, B, F) and (B, N, F, 2)
+        if not self.encoder.ayush:
+            fps_feats, fps_pos = self.encoder.run_fps(
+                context_feats.transpose(0, 1),
+                self.encoder.relative_pe_layer(context)
+            )
+        else:
+            fps_feats = context_feats.transpose(0, 1)
+            fps_pos = self.encoder.relative_pe_layer(context)
+
+        return (
+            context_feats, context,  # contextualized visual features
+            instr_feats,  # language features
+            adaln_gripper_feats,  # gripper history features
+            fps_feats, fps_pos  # sampled visual features
+        )
+
     def policy_forward_pass(self, trajectory, timestep, fixed_inputs):
         # Parse inputs
         (
@@ -243,9 +280,14 @@ class DenoiseActor(nn.Module):
         curr_gripper = self.convert_rot(curr_gripper)
 
         # Prepare inputs
-        fixed_inputs = self.encode_inputs(
-            rgb_obs, pcd_obs, instruction, curr_gripper
-        )
+        if self.encoder.use_florence:
+            fixed_inputs = self.encode_florence(
+                rgb_obs, pcd_obs, instruction, curr_gripper
+            )
+        else:
+            fixed_inputs = self.encode_inputs(
+                rgb_obs, pcd_obs, instruction, curr_gripper
+            )
 
         # Condition on start-end pose
         B, nhist, D = curr_gripper.shape
@@ -392,9 +434,14 @@ class DenoiseActor(nn.Module):
         curr_gripper = self.convert_rot(curr_gripper)
 
         # Prepare inputs
-        fixed_inputs = self.encode_inputs(
-            rgb_obs, pcd_obs, instruction, curr_gripper
-        )
+        if self.encoder.use_florence:
+            fixed_inputs = self.encode_florence(
+                rgb_obs, pcd_obs, instruction, curr_gripper
+            )
+        else:
+            fixed_inputs = self.encode_inputs(
+                rgb_obs, pcd_obs, instruction, curr_gripper
+            )
 
         # Sample noise
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)

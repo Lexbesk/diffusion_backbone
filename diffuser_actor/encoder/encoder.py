@@ -1,15 +1,16 @@
-#import dgl.geometry as dgl_geo
 import einops
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch_cluster import fps
+from torchvision.ops import Conv2dNormActivation
 
 from ..utils.position_encodings import RotaryPositionEncoding3D
 from ..utils.layers import FFWRelativeCrossAttentionModule, ParallelAttention
 from .vision.resnet import load_resnet50, load_resnet18
 from .vision.clip import load_clip
 from .vision.tiny_vit import load_tiny
+from .vision.florence2 import load_florence2
 from .vision.fpn import EfficientFeaturePyramidNetwork
 
 
@@ -22,13 +23,14 @@ class Encoder(nn.Module):
                  num_attn_heads=9,
                  num_vis_ins_attn_layers=2,
                  fps_subsampling_factor=5,
-                 finetune_backbone=False):
+                 finetune_backbone=False,
+                 ayush=False):
         super().__init__()
-        assert backbone in ["resnet50", "resnet18", "clip", "tiny"]
-
         self.fps_subsampling_factor = fps_subsampling_factor
+        self.ayush = ayush
 
         # Frozen backbone
+        self.use_florence = backbone == "florence2"
         if backbone == "resnet50":
             self.backbone, self.normalize = load_resnet50()
         elif backbone == "resnet18":
@@ -37,6 +39,8 @@ class Encoder(nn.Module):
             self.backbone, self.normalize = load_clip()
         elif backbone == "tiny":
             self.backbone, self.normalize = load_tiny()
+        elif backbone == "florence2":
+            self.backbone, self.normalize = load_florence2()
         for p in self.backbone.parameters():
             p.requires_grad = finetune_backbone
 
@@ -47,7 +51,12 @@ class Encoder(nn.Module):
         # Semantic visual features at different scales
         output_level = min([int(lvl[3:]) for lvl in self.feature_map_pyramid])
         output_level = f"res{output_level}"
-        if backbone != 'tiny':
+        if self.use_florence:
+            self.inner_block = Conv2dNormActivation(
+                768, embedding_dim, kernel_size=1, padding=0,
+                norm_layer=None, activation_layer=None
+            ).half()
+        elif backbone != 'tiny':
             self.feature_pyramid = EfficientFeaturePyramidNetwork(
                 [64, 256, 512, 1024, 2048],
                 embedding_dim, output_level=output_level
@@ -71,7 +80,10 @@ class Encoder(nn.Module):
         self.goal_gripper_embed = nn.Embedding(1, embedding_dim)
 
         # Instruction encoder
-        self.instruction_encoder = nn.Linear(512, embedding_dim)
+        self.instruction_encoder = nn.Linear(
+            768 if self.use_florence else 512, embedding_dim,
+            dtype=torch.float16 if self.use_florence else None
+        )
 
         # Attention from vision to language
         layer = ParallelAttention(
@@ -211,6 +223,67 @@ class Encoder(nn.Module):
             pcd_pyramid.append(pcd_i)
 
         return rgb_feats_pyramid, pcd_pyramid
+
+    def encode_florence(self, rgb, pcd, text):
+        """
+        Compute visual features/pos embeddings at different scales.
+
+        Args:
+            - rgb: (B, ncam, 3, H, W), pixel intensities
+            - pcd: (B, ncam, 3, H, W), positions
+            - text: [str]
+
+        Returns:
+            - rgb_feats_pyramid: [(B, ncam, F, H_i, W_i)]
+            - pcd_pyramid: [(B, ncam * H_i * W_i, 3)]
+            - text_features: (B, )
+        """
+        num_cameras = rgb.shape[1]
+        
+        # Float16 for florence2
+        rgb = rgb.half()
+        pcd = pcd.half()
+
+        # Pass all views jointly through backbone
+        rgb = self.normalize(rgb)
+        _features = self.backbone(rgb, text)
+        _features = _features['res5']  # B N=ncam*65+text_len F
+        
+        # Isolate visual and text features
+        _rgb_features = _features[:, :num_cameras * 65]
+        rgb_features = torch.stack([
+            _rgb_features[:, c * 65 + 1:65 * c + 65]
+            for c in range(num_cameras)
+        ], 1)  # (B, n_cam, 64, F)
+        rgb_features = einops.rearrange(
+            rgb_features,
+            "B ncam (h w) F -> (B ncam) F h w",
+            h=8, w=8
+        )
+        text_features = _features[:, num_cameras * 65:]
+        
+        # Get the unprojected visual features
+        rgb_features = self.inner_block(rgb_features)
+        if not self.ayush:
+            rgb_features = F.interpolate(
+                rgb_features, size=(32, 32), mode="nearest"
+            )
+        rgb_feats_pyramid = [einops.rearrange(
+            rgb_features,
+            "(bt ncam) c h w -> bt ncam c h w", ncam=num_cameras
+        )]
+        feat_h, feat_w = rgb_features.shape[-2:]
+        pcd = einops.rearrange(pcd, "bt ncam c h w -> (bt ncam) c h w")
+        pcd = F.interpolate(pcd, (feat_h, feat_w), mode='bilinear')
+        pcd_pyramid = [einops.rearrange(
+            pcd,
+            "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
+        )]
+
+        # Get the projected text features
+        text_features, text_pos = self.encode_instruction(text_features)
+
+        return rgb_feats_pyramid, pcd_pyramid, text_features, text_pos
 
     def encode_instruction(self, instruction):
         """
