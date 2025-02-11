@@ -199,6 +199,34 @@ class TrainTester(BaseTrainTester):
             rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
             pcds = obs[:, 3:6].reshape(b, nc, 3, h, w).float()
             segs = obs[:, 6].reshape(b, nc, h, w).bool()
+            ##########
+            _pcds = self._depth2cloud(
+                sample['pcds'].cuda(non_blocking=True),
+                sample['proj_matrix'].cuda(non_blocking=True),
+                sample['extrinsics'].cuda(non_blocking=True)
+            )[:, :, :1].repeat(1, 1, 3, 1, 1)
+            min_ = _pcds.view(b, nc, -1).min(-1).values
+            max_ = _pcds.view(b, nc, -1).max(-1).values
+            orig_obs = torch.cat((
+                sample['rgbs'].cuda(non_blocking=True).half() / 255,
+                (_pcds - min_[:, :, None, None, None]) / (max_ - min_)[:, :, None, None, None],
+                sample['segs'].cuda(non_blocking=True)[:, :, None].half().repeat(1, 1, 3, 1, 1)
+            ), 4)
+            _pcds = pcds.half()[:, :, :1].repeat(1, 1, 3, 1, 1)
+            min_ = _pcds.view(b, nc, -1).min(-1).values
+            max_ = _pcds.view(b, nc, -1).max(-1).values
+            aug_obs = torch.cat((
+                rgbs.half(),
+                (_pcds - min_[:, :, None, None, None]) / (max_ - min_)[:, :, None, None, None],
+                segs[:, :, None].half().repeat(1, 1, 3, 1, 1)
+            ), 4)
+            cat_obs = torch.cat((orig_obs, aug_obs), 3)
+            for b in range(len(cat_obs)):
+                for c in range(len(cat_obs[b])):
+                    plt.imshow(cat_obs[b, c].permute(1, 2, 0).float().cpu().numpy())
+                    plt.savefig(f'ex_{b}_{c}.jpg')
+                    plt.close()
+            jnkj
         else:
             rgbs = sample['rgbs'].cuda(non_blocking=True).float() / 255
             pcds = pcds.float()

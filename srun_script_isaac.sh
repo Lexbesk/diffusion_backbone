@@ -7,7 +7,7 @@ do
     echo
 
     srun -A nvr_srl_simpler \
-       -p polar,polar2,polar3,polar4,grizzly \
+       -p polar,polar3,polar4,grizzly \
        -N 1 \
        --ntasks=1 \
        --gpus 4 \
