@@ -21,7 +21,8 @@ from engine import BaseTrainTester
 from datasets.dataset_rlbench import (
     PeractDataset,
     GNFactorDataset,
-    PeractSingleCamDataset
+    PeractSingleCamDataset,
+    Peract2Dataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
@@ -99,7 +100,7 @@ class TrainTester(BaseTrainTester):
         _cls = {
             "Peract": PeractDepth2Cloud,
             "PeractSingleCam": GNFactorDepth2Cloud,
-            # "Peract2": Peract2Dataset,
+            "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
             "ABC_D": None,
@@ -129,7 +130,7 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             "PeractSingleCam": PeractSingleCamDataset,
-            # "Peract2": Peract2Dataset,
+            "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
             "ABC_D": ABC_DDataset,
@@ -187,7 +188,7 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             "PeractSingleCam": PeractSingleCamDataset,
-            # "Peract2": Peract2Dataset,
+            "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
             "ABC_D": ABC_DDataset,
@@ -375,7 +376,7 @@ def traj_collate_fn(batch):
         keys.append("instr")
     ret_dict = {k_: torch.stack([item[k_] for item in batch]) for k_ in keys}
     ret_dict["action_mask"] = torch.zeros(
-        ret_dict["action"].shape[:-1], dtype=bool
+        ret_dict["action"].shape[:2], dtype=bool
     )
 
     # Values for these come as lists

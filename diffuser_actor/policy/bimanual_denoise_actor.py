@@ -160,7 +160,6 @@ class BimanualDenoiseActor(DenoiseActor):
         Arguments:
             gt_trajectory: (B, trajectory_length, 2, 3+4+X)
             trajectory_mask: (B, trajectory_length)
-            timestep: (B, 1)
             rgb_obs: (B, num_cameras, 3, H, W) in [0, 1]
             pcd_obs: (B, num_cameras, 3, H, W) in world coordinates
             instruction: (B, max_instruction_length, 512)
@@ -206,11 +205,6 @@ class BimanualDenoiseActor(DenoiseActor):
             rgb_obs, pcd_obs, instruction, curr_gripper
         )
 
-        # Condition on start-end pose
-        cond_data = torch.zeros_like(gt_trajectory)
-        cond_mask = torch.zeros_like(cond_data)
-        cond_mask = cond_mask.bool()
-
         # Sample noise
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
@@ -229,8 +223,6 @@ class BimanualDenoiseActor(DenoiseActor):
             timesteps
         )
         noisy_trajectory = torch.cat((pos, rot), -1)
-        noisy_trajectory[cond_mask] = cond_data[cond_mask]  # condition
-        assert not cond_mask.any()
 
         # Predict the noise residual
         pred = self.policy_forward_pass(

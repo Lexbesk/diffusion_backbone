@@ -122,3 +122,21 @@ class PeractSingleCamDataset(RLBenchDataset):
 
     def _get_pcd(self, idx):
         return to_tensor(self.annos['depth'][idx])[-1:]
+
+
+class Peract2Dataset(RLBenchDataset):
+    """RLBench dataset under Peract2 setup."""
+    tasks = [
+        "bimanual_pick_laptop", "bimanual_pick_plate",
+        "bimanual_straighten_rope", "bimanual_sweep_to_dustpan",
+        "coordinated_lift_ball", "coordinated_lift_tray",
+        "coordinated_push_box", "coordinated_put_bottle_in_fridge",
+        "coordinated_put_item_in_drawer", "coordinated_take_tray_out_of_oven",
+        "dual_push_buttons", "handover_item_easy", "handover_item"
+    ]
+    variations = range(0, 199)
+    cameras = (
+        "over_shoulder_left", "over_shoulder_right",
+        "wrist_left", "wrist_right", "front"
+    )
+    train_copies = 10  # how many copies of the dataset to load
