@@ -7,15 +7,16 @@ do
     echo
 
     srun -A nvr_srl_simpler \
-       -p polar,polar2,polar3,polar4,grizzly \
+       -p polar,polar3,polar4,grizzly \
        -N 1 \
        --ntasks=1 \
-       --gpus 8 \
-       --cpus-per-task 48 \
-       --mem=256G \
+       --gpus 4 \
+       --cpus-per-task 24 \
+       --mem=96G \
        --unbuffered \
+       --exclusive \
        -t 04:00:00 \
-       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_keypose_gnfactor_olddata.sh"
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_peract_fast_florence_ayush.sh"
 
     sleep 1m
 

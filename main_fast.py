@@ -84,6 +84,7 @@ def parse_arguments():
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
     parser.add_argument('--sa_var', type=str2bool, default=False)
+    parser.add_argument('--ayush', type=str2bool, default=False)
     parser.add_argument('--not_seed', type=str2bool, default=False)
     parser.add_argument('--memory_limit', type=float, default=8)
 
@@ -174,7 +175,8 @@ class TrainTester(BaseTrainTester):
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
-            relative=self.args.relative_action
+            relative=self.args.relative_action,
+            ayush=self.args.ayush
         )
         print("Model parameters:", count_parameters(_model))
 
