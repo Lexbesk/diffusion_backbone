@@ -7,11 +7,11 @@ import einops
 class Florence2Transform:
 
     def __init__(self):
-        self.mean = torch.tensor([0.485, 0.456, 0.406]).cuda().half().view(1, 1, 3, 1, 1)
-        self.std = torch.tensor([0.229, 0.224, 0.225]).cuda().half().view(1, 1, 3, 1, 1)
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).cuda().view(1, 1, 3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).cuda().view(1, 1, 3, 1, 1)
 
     def __call__(self, tensor):
-        return (tensor - self.mean) / self.std
+        return (tensor - self.mean.to(tensor.dtype)) / self.std.to(tensor.dtype)
 
 
 class FlorenceEncoder(nn.Module):
@@ -21,7 +21,7 @@ class FlorenceEncoder(nn.Module):
         vlm_path = "microsoft/Florence-2-base"
         self.vlm = AutoModelForCausalLM.from_pretrained(
             vlm_path,
-            torch_dtype=torch.float16,
+            # torch_dtype=torch.float16,
             trust_remote_code=True
         )
         prcsr = AutoProcessor.from_pretrained(vlm_path, trust_remote_code=True)
@@ -87,7 +87,7 @@ class FlorenceEncoder(nn.Module):
         Returns B, N, F.
         """
         text_embeds = self._get_text_embeddings(text, img.device)
-        image_features = self._vit_encode(img.half())
+        image_features = self._vit_encode(img)
         vlm_features = self._vlm_encode(image_features, text_embeds)
         return vlm_features
 

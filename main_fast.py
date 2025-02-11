@@ -258,7 +258,7 @@ class TrainTester(BaseTrainTester):
             pcds = pcds.float()
         # Instructions
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if not self.args.precompute_instruction_encodings:
+            if not self.args.precompute_instruction_encodings and self.args.backbone != 'florence2':
                 instr = text_encoder(sample['instr'], "cuda")
             else:
                 instr = sample["instr"]

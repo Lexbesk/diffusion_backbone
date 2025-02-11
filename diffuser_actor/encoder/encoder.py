@@ -55,7 +55,7 @@ class Encoder(nn.Module):
             self.inner_block = Conv2dNormActivation(
                 768, embedding_dim, kernel_size=1, padding=0,
                 norm_layer=None, activation_layer=None
-            ).half()
+            )
         elif backbone != 'tiny':
             self.feature_pyramid = EfficientFeaturePyramidNetwork(
                 [64, 256, 512, 1024, 2048],
@@ -81,8 +81,7 @@ class Encoder(nn.Module):
 
         # Instruction encoder
         self.instruction_encoder = nn.Linear(
-            768 if self.use_florence else 512, embedding_dim,
-            dtype=torch.float16 if self.use_florence else None
+            768 if self.use_florence else 512, embedding_dim
         )
 
         # Attention from vision to language
@@ -239,10 +238,6 @@ class Encoder(nn.Module):
             - text_features: (B, )
         """
         num_cameras = rgb.shape[1]
-        
-        # Float16 for florence2
-        rgb = rgb.half()
-        pcd = pcd.half()
 
         # Pass all views jointly through backbone
         rgb = self.normalize(rgb)
@@ -261,7 +256,7 @@ class Encoder(nn.Module):
             h=8, w=8
         )
         text_features = _features[:, num_cameras * 65:]
-        
+
         # Get the unprojected visual features
         rgb_features = self.inner_block(rgb_features)
         if not self.ayush:
