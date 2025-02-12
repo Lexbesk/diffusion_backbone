@@ -34,8 +34,8 @@ ngpus=4
 refactored=1
 
 run_log_dir=refactoredC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=none
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+# checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \

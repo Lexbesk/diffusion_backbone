@@ -14,18 +14,21 @@ class BimanualDenoiseActor(DenoiseActor):
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
                  use_instruction=False,
+                 num_attn_heads=9,
                  fps_subsampling_factor=5,
                  rotation_parametrization='6D',
                  quaternion_format='xyzw',
                  denoise_timesteps=100,
                  denoise_model="ddpm",
                  nhist=3,
-                 relative=False):
+                 relative=False,
+                 ayush=False):
         super().__init__(
             backbone=backbone,
             embedding_dim=embedding_dim,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             use_instruction=use_instruction,
+            num_attn_heads=num_attn_heads,
             fps_subsampling_factor=fps_subsampling_factor,
             rotation_parametrization=rotation_parametrization,
             quaternion_format=quaternion_format,
@@ -33,6 +36,7 @@ class BimanualDenoiseActor(DenoiseActor):
             denoise_model=denoise_model,
             nhist=nhist * 2,
             relative=relative,
+            ayush=ayush
         )
         self.traj_encoder = nn.Linear(9, embedding_dim)
         self.prediction_head = BimanualTransformerHead(
@@ -40,7 +44,7 @@ class BimanualDenoiseActor(DenoiseActor):
             use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist * 2,
-            num_attn_heads=9,
+            num_attn_heads=num_attn_heads
         )
 
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,

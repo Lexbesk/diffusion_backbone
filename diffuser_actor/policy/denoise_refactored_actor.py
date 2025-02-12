@@ -625,11 +625,11 @@ class TransformerHead(nn.Module):
             torch.arange(0, traj_feats.size(1), device=traj_feats.device)
         )[None].repeat(len(traj_feats), 1, 1)
         if self.use_instruction:
-            traj_feats, _ = self.traj_lang_attention(
+            traj_feats = self.traj_lang_attention(
                 seq1=traj_feats,
                 seq2=instr_feats,
                 seq1_sem_pos=traj_time_pos, seq2_sem_pos=None
-            )
+            )[-1]
         traj_feats = traj_feats + traj_time_pos
 
         # Predict position, rotation, opening
@@ -679,7 +679,7 @@ class TransformerHead(nn.Module):
         # Cross attention from gripper to full context
         gripper_features = self.cross_attn(
             seq1=gripper_features.transpose(0, 1),
-            seq2=context_features,
+            seq2=context_features.transpose(0, 1),
             seq1_pos=rel_gripper_pos,
             seq2_pos=rel_context_pos,
             ada_sgnl=time_embs

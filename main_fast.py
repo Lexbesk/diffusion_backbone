@@ -102,7 +102,7 @@ class TrainTester(BaseTrainTester):
         _cls = {
             "Peract": PeractDepth2Cloud,
             "PeractSingleCam": GNFactorDepth2Cloud,
-            "Peract2": Peract2Dataset,
+            "Peract2": GNFactorDepth2Cloud,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
             "ABC_D": None,
