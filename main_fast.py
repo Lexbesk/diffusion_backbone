@@ -29,6 +29,7 @@ from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from diffuser_actor.policy.denoise_sa_actor import DenoiseActor as DenoiseActorSA
+from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor as RefactoredActor
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     GNFactorDepth2Cloud
@@ -38,7 +39,7 @@ from utils.common_utils import count_parameters, str2bool, str_none
 
 def parse_arguments():
     parser = argparse.ArgumentParser("Parse arguments for main.py")
-    # Trainign and testing
+    # Training and testing
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--checkpoint', type=str_none, default=None)
     parser.add_argument('--accumulate_grad_batches', type=int, default=1)
@@ -65,6 +66,7 @@ def parse_arguments():
     parser.add_argument('--text_max_length', type=int, default=53)
     # Model
     parser.add_argument('--bimanual', type=str2bool, default=False)
+    parser.add_argument('--refactored', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
     parser.add_argument('--use_flow_matching', type=str2bool, default=False)
     parser.add_argument('--backbone', type=str, default="clip")
@@ -162,6 +164,8 @@ class TrainTester(BaseTrainTester):
             model_class = DenoiseActorSA
         elif self.args.bimanual:
             model_class = BimanualDenoiseActor
+        elif self.args.refactored:
+            model_class = RefactoredActor
         else:
             model_class = DenoiseActor
         _model = model_class(
