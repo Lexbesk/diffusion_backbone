@@ -11,10 +11,12 @@ class IsaacDataset:
         root,  # the directory path of the dataset
         copies=1,  # how many copies of the dataset to load
         relative_action=False,  # whether to return relative actions
-        mem_limit=8
+        mem_limit=8,
+        actions_only=False
     ):
         self.copies = copies
         self._relative_action = relative_action
+        self._actions_only = actions_only
 
         # Load all annotations lazily
         self.annos = read_zarr_with_cache(root, mem_limit)
@@ -36,6 +38,8 @@ class IsaacDataset:
         # Compute relative action
         if self._relative_action:
             action = to_relative_action(action, action[:1])
+        if self._actions_only:
+            return {"action": self._get_action(idx)}
 
         ret_dict = {
             "rgbs": rgbs,  # tensor(n_cam, 3, H, W)

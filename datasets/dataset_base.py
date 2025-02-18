@@ -13,12 +13,14 @@ class BaseDataset(Dataset):
         precompute_instruction_encodings,  # if true, load tensors, else str
         copies=None,  # copy the dataset for less loader restarts
         relative_action=False,  # whether to return relative actions
-        mem_limit=8  # cache limit per dataset class in GigaBytes
+        mem_limit=8,  # cache limit per dataset class in GigaBytes
+        actions_only=False  # return actions without observations
     ):
         super().__init__()
         self._precompute_instr_encs = precompute_instruction_encodings
         self.copies = self.train_copies if copies is None else copies
         self._relative_action = relative_action
+        self._actions_only = actions_only
 
         # Load instructions
         self._instructions = self._load_instructions(instructions)
@@ -61,6 +63,8 @@ class BaseDataset(Dataset):
         In addition self.annos may contain fields for task/instruction ids
         """
         idx = idx % len(self.annos['rgb'])
+        if self._actions_only:
+            return {"action": self._get_action(idx)}
         return {
             "task": self._get_task(idx),
             "instr": self._get_instr(idx),  # [str] or tensor(53, 512)

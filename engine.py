@@ -134,7 +134,7 @@ class BaseTrainTester:
 
         # Get model
         model = self.get_model()
-        if not self.args.checkpoint:
+        if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
             normalizer = self.get_workspace_normalizer(train_loader)
             model.workspace_normalizer.copy_(normalizer)
             dist.barrier()
@@ -158,7 +158,6 @@ class BaseTrainTester:
         # Check for a checkpoint
         start_iter, best_loss = 0, None
         if self.args.checkpoint:
-            assert os.path.isfile(self.args.checkpoint)
             start_iter, best_loss = self.load_checkpoint(model, optimizer)
         print(model.module.workspace_normalizer)
 
@@ -235,9 +234,10 @@ class BaseTrainTester:
 
     def load_checkpoint(self, model, optimizer):
         """Load from checkpoint."""
-        print("=> loading checkpoint '{}'".format(self.args.checkpoint))
+        print("=> trying checkpoint '{}'".format(self.args.checkpoint))
         if not os.path.exists(self.args.checkpoint):
             print('Warning: checkpoint was not found, starting from scratch')
+            print('This will not affect the computation ow workspace bounds')
             return 0, None
 
         model_dict = torch.load(self.args.checkpoint, map_location="cpu",

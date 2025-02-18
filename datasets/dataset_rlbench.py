@@ -19,7 +19,8 @@ class RLBenchDataset(BaseDataset):
         precompute_instruction_encodings,
         copies=None,
         relative_action=False,
-        mem_limit=8
+        mem_limit=8,
+        actions_only=False
     ):
         super().__init__(
             root=root,
@@ -27,7 +28,8 @@ class RLBenchDataset(BaseDataset):
             precompute_instruction_encodings=precompute_instruction_encodings,
             copies=copies,
             relative_action=relative_action,
-            mem_limit=mem_limit
+            mem_limit=mem_limit,
+            actions_only=actions_only
         )
 
     def _load_instructions(self, instruction_file=None):

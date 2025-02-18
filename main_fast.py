@@ -206,7 +206,8 @@ class TrainTester(BaseTrainTester):
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
             copies=1,
             relative_action=self.args.relative_action,
-            mem_limit=0.1
+            mem_limit=0.1,
+            actions_only=True
         )
 
         data_loader = DataLoader(
