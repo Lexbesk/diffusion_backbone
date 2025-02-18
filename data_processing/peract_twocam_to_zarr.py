@@ -163,7 +163,7 @@ def all_tasks_main(split):
             with open(ep, "rb") as f:
                 content = pickle.loads(blosc.decompress(f.read()))
             # Map [-1, 1] to [0, 255] uint8
-            rgb = (127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8)
+            rgb = (127.5 * (content[1][:, -2:, 0] + 1)).astype(np.uint8)
             # Extract depth from point cloud, faster loading
             depth = np.stack([
                 inverse_depth_batched(
