@@ -213,7 +213,7 @@ class TrainTester(BaseTrainTester):
         data_loader = DataLoader(
             train_dataset,
             batch_size=self.args.batch_size,
-            collate_fn=traj_collate_fn,
+            collate_fn=actions_collate_fn,
             shuffle=False,
             num_workers=self.args.num_workers
         )
@@ -391,6 +391,10 @@ def traj_collate_fn(batch):
     for key in list_keys:
         ret_dict[key] = [item[key][0] for item in batch]
     return ret_dict
+
+
+def actions_collate_fn(batch):
+    return {"action": torch.stack([item["action"] for item in batch])}
 
 
 class TrajectoryCriterion:
