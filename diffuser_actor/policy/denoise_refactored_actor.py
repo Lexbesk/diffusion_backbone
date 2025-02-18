@@ -531,8 +531,8 @@ class TransformerHead(nn.Module):
         self.cross_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.0,
+            dim_fw=4 * embedding_dim,
+            dropout=0.2,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -545,8 +545,8 @@ class TransformerHead(nn.Module):
         self.self_attn = AttentionModule(
             num_layers=4,
             d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.0,
+            dim_fw=4 * embedding_dim,
+            dropout=0.2,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -561,8 +561,8 @@ class TransformerHead(nn.Module):
         self.rotation_self_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.0,
+            dim_fw=4 * embedding_dim,
+            dropout=0.2,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -581,8 +581,8 @@ class TransformerHead(nn.Module):
         self.position_self_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.0,
+            dim_fw=4 * embedding_dim,
+            dropout=0.2,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,

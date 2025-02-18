@@ -236,6 +236,9 @@ class BaseTrainTester:
     def load_checkpoint(self, model, optimizer):
         """Load from checkpoint."""
         print("=> loading checkpoint '{}'".format(self.args.checkpoint))
+        if not os.path.exists(self.args.checkpoint):
+            print('Warning: checkpoint was not found, starting from scratch')
+            return 0, None
 
         model_dict = torch.load(self.args.checkpoint, map_location="cpu",
                                 weights_only=True)
@@ -270,6 +273,13 @@ class BaseTrainTester:
             "iter": step_id + 1,
             "best_loss": best_loss
         }, self.args.log_dir / "last.pth")
+        if (step_id + 1) % 40000 == 0:
+            torch.save({
+                "weight": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "iter": step_id + 1,
+                "best_loss": best_loss
+            }, self.args.log_dir / f"interm{step_id + 1}.pth")
         return best_loss
 
     def synchronize_between_processes(self, a_dict):
