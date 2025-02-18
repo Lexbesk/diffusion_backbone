@@ -1,7 +1,7 @@
 # rm -r /scratch/Peract_zarr/
 # cp -r /data/user_data/ngkanats/Peract_zarr /scratch/
 
-main_dir=Peract_singlecam
+main_dir=Peract_twocam
 
 train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/train.zarr
 eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/val.zarr
@@ -29,7 +29,7 @@ train_iters=600000
 val_freq=4000
 precompute_instruction_encodings=true
 num_workers=4
-dataset=PeractSingleCam
+dataset=PeractTwoCam
 ngpus=4
 refactored=1
 

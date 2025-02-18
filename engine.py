@@ -237,7 +237,7 @@ class BaseTrainTester:
         print("=> trying checkpoint '{}'".format(self.args.checkpoint))
         if not os.path.exists(self.args.checkpoint):
             print('Warning: checkpoint was not found, starting from scratch')
-            print('This will not affect the computation ow workspace bounds')
+            print('This will not affect the computation of workspace bounds')
             return 0, None
 
         model_dict = torch.load(self.args.checkpoint, map_location="cpu",

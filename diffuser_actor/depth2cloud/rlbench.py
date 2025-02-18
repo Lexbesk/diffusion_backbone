@@ -135,6 +135,26 @@ class PeractDepth2Cloud:
         ], 1)  # (B, ncam, 3, H, W)
 
 
+class PeractTwoCam2Cloud:
+
+    def __init__(self, shape):
+        self.d2cs = [
+            Depth2Cloud(
+                shape,
+                cameras[cam]['extrinsics'],
+                cameras[cam]['intrinsics']
+            )
+            for cam in ['wrist', 'front']
+        ]
+
+    def __call__(self, depth):
+        # depth is (B, ncam, H, W)
+        assert depth.shape[1] == len(self.d2cs)
+        return torch.stack([
+            self.d2cs[i](depth[:, i]) for i in range(depth.shape[1])
+        ], 1)  # (B, ncam, 3, H, W)
+
+
 class GNFactorDepth2Cloud:
 
     def __init__(self, shape):

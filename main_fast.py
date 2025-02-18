@@ -22,7 +22,8 @@ from datasets.dataset_rlbench import (
     PeractDataset,
     GNFactorDataset,
     PeractSingleCamDataset,
-    Peract2Dataset
+    Peract2Dataset,
+    PeractTwoCamDataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
@@ -32,6 +33,7 @@ from diffuser_actor.policy.denoise_sa_actor import DenoiseActor as DenoiseActorS
 from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor as RefactoredActor
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
+    PeractTwoCam2Cloud,
     GNFactorDepth2Cloud
 )
 from utils.common_utils import count_parameters, str2bool, str_none
@@ -102,6 +104,7 @@ class TrainTester(BaseTrainTester):
         _cls = {
             "Peract": PeractDepth2Cloud,
             "PeractSingleCam": GNFactorDepth2Cloud,
+            "PeractTwoCam": PeractTwoCam2Cloud,
             "Peract2": GNFactorDepth2Cloud,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
@@ -132,6 +135,7 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             "PeractSingleCam": PeractSingleCamDataset,
+            "PeractTwoCam": PeractTwoCamDataset,
             "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
@@ -192,6 +196,7 @@ class TrainTester(BaseTrainTester):
         dataset_cls = {
             "Peract": PeractDataset,
             "PeractSingleCam": PeractSingleCamDataset,
+            "PeractTwoCam": PeractTwoCamDataset,
             "Peract2": Peract2Dataset,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
