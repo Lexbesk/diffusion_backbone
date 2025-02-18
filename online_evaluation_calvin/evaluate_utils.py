@@ -1,9 +1,7 @@
-from typing import Dict, Any
 import os
 from pathlib import Path
 import contextlib
 from collections import Counter
-import glob
 
 import numpy as np
 from numpy import pi
@@ -14,7 +12,6 @@ import pybullet
 import hydra
 
 import calvin_env
-from calvin_env.envs.play_table_env import PlayTableSimEnv
 from utils.utils_with_calvin import (
     deproject,
     get_gripper_camera_view_matrix,
@@ -25,8 +22,7 @@ from utils.utils_with_calvin import (
 ############################################################
 # Functions to prepare inputs/outputs of 3D diffuser Actor #
 ############################################################
-def prepare_visual_states(obs: Dict[str, Dict[str, Any]],
-                          env: PlayTableSimEnv):
+def prepare_visual_states(obs, env):
 
     """Prepare point cloud given RGB-D observations.  In-place add point clouds
     to the observation dictionary.
@@ -85,8 +81,7 @@ def prepare_visual_states(obs: Dict[str, Dict[str, Any]],
     return obs
 
 
-def prepare_proprio_states(obs: Dict[str, Dict[str, Any]],
-                           env: PlayTableSimEnv):
+def prepare_proprio_states(obs, env):
     """Prepare robot proprioceptive states.  In-place add proprioceptive states
     to the observation dictionary.
 

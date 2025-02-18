@@ -10,12 +10,13 @@ import torch
 import numpy as np
 import argparse
 
-from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
+from diffuser_actor.policy import BimanualDenoiseActor  # , DenoiseActor
+from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
-    # Peract2Dataset,
+    Peract2Dataset,
     PeractSingleCamDataset
 )
 
@@ -112,7 +113,7 @@ if __name__ == "__main__":
     # Dataset class (for getting cameras and tasks)
     dataset_cls = {
         "Peract": PeractDataset,
-        # "Peract2": Peract2Dataset,
+        "Peract2": Peract2Dataset,
         "GNFactor": GNFactorDataset,
         "PeractSingleCam": PeractSingleCamDataset
     }[args.dataset]

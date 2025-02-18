@@ -16,7 +16,6 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 
-from utils.common_utils import get_gripper_loc_bounds
 from online_evaluation_calvin.evaluate_model import create_model
 from online_evaluation_calvin.evaluate_utils import (
     prepare_visual_states,
@@ -51,8 +50,6 @@ class Arguments(tap.Tap):
     seed: int = 0
     tasks: Tuple[str, ...] # indicates the environment
     checkpoint: Path
-    gripper_loc_bounds: Optional[str] = None
-    gripper_loc_bounds_buffer: float = 0.04
     calvin_gripper_loc_bounds: Optional[str] = None
     relative_action: int = 0
 
@@ -60,8 +57,6 @@ class Arguments(tap.Tap):
     base_log_dir: Path = Path(__file__).parent / "eval_logs" / "calvin"
 
     # Model
-    action_dim: int = 7 # dummy, as DiffuserActor assumes action_dim is 7
-    image_size: str = "256,256" # decides the FPN architecture
     backbone: str = "clip"  # one of "resnet", "clip"
     embedding_dim: int = 120
     num_vis_ins_attn_layers: int = 2
@@ -69,6 +64,7 @@ class Arguments(tap.Tap):
     rotation_parametrization: str = 'quat'
     quaternion_format: str = 'wxyz'
     diffusion_timesteps: int = 100
+    denoise_model: str = 'ddpm'
     lang_enhanced: int = 0
     fps_subsampling_factor: int = 3
     num_history: int = 0
@@ -222,7 +218,7 @@ def rollout(env, model, task_oracle, subtask, lang_annotation):
         obs = prepare_visual_states(obs, env)
         obs = prepare_proprio_states(obs, env)
         lang_embeddings = model.encode_instruction(lang_annotation, model.args.device)
-        with torch.cuda.amp.autocast():
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             trajectory = model.step(obs, lang_embeddings)
         for act_ind in range(min(trajectory.shape[1], EXECUTE_LEN)):
             # calvin_env executes absolute action in the format of:
@@ -262,19 +258,9 @@ def get_calvin_gripper_loc_bounds(args):
 
 def main(args):
 
-    # # These location bounds are extracted from language-annotated episodes
-    # if args.gripper_loc_bounds is None:
-    #     args.gripper_loc_bounds = np.array([[-2, -2, -2], [2, 2, 2]]) * 1.0
-    # else:
-    #     args.gripper_loc_bounds = get_gripper_loc_bounds(
-    #         args.gripper_loc_bounds,
-    #         task=args.tasks[0] if len(args.tasks) == 1 else None,
-    #         buffer=args.gripper_loc_bounds_buffer,
-    #     )
-
-    # # These location bounds are extracted from every episode in play trajectory
-    # if args.calvin_gripper_loc_bounds is not None:
-    #     args.calvin_gripper_loc_bounds = get_calvin_gripper_loc_bounds(args)
+    # These location bounds are extracted from every episode in play trajectory
+    if args.calvin_gripper_loc_bounds is not None:
+        args.calvin_gripper_loc_bounds = get_calvin_gripper_loc_bounds(args)
 
     # set random seeds
     random.seed(args.seed)

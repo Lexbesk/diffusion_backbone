@@ -1,9 +1,4 @@
-# You may need to run the following beforehard:
-# export PYTHONPATH=$PYTHONPATH:$(pwd)
-
-
-
-exp=test_3dda_gnfactor
+exp=refactored_3dda_peract_sc
 tasks=(
     close_jar insert_onto_square_peg light_bulb_in meat_off_grill open_drawer place_shape_in_shape_sorter place_wine_at_rack_location push_buttons put_groceries_in_cupboard put_item_in_drawer put_money_in_safe reach_and_drag slide_block_to_color_target stack_blocks stack_cups sweep_to_dustpan_of_size turn_tap place_cups
 )
@@ -17,8 +12,8 @@ max_steps=20
 verbose=false
 interpolation_length=2
 num_history=3
-denoise_timesteps=100
-denoise_model=ddpm
+denoise_timesteps=10
+denoise_model=rectified_flow
 quaternion_format=xyzw  # IMPORTANT: change this to be the same as the training script IF you're not using our checkpoint
 rotation_parametrization=6D
 use_instruction=true
@@ -28,7 +23,7 @@ num_vis_ins_attn_layers=3
 fps_subsampling_factor=5
 relative_action=false
 seed=0
-checkpoint=ddpm.pth
+checkpoint=refactored_flow.pth
 headless=true
 
 num_ckpts=${#tasks[@]}

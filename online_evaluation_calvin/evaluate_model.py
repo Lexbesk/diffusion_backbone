@@ -108,6 +108,7 @@ class DiffusionModel:
         print(f'Loading weights from {self.args.checkpoint}')
         self.policy.load_state_dict(model_weights)
 
+    @torch.no_grad()
     def encode_instruction(self, instruction, device="cuda"):
         """Encode string instruction to latent embeddings.
 
@@ -123,11 +124,11 @@ class DiffusionModel:
 
         tokens = torch.tensor(tokens).to(device)
         tokens = tokens.view(1, -1)
-        with torch.no_grad():
-            pred = self.text_model(tokens).last_hidden_state
+        pred = self.text_model(tokens).last_hidden_state
 
         return pred
 
+    @torch.no_grad()
     def step(self, obs, instruction):
         """
         Args:
@@ -185,12 +186,12 @@ class DiffusionModel:
             # Convert relative action to absolute action
             trajectory = relative_to_absolute(trajectory, gripper)
 
-        # # Bound final action by CALVIN statistics
-        # if self.args.calvin_gripper_loc_bounds is not None:
-        #     trajectory[:, :, :3] = np.clip(
-        #         trajectory[:, :, :3],
-        #         a_min=self.args.calvin_gripper_loc_bounds[0].reshape(1, 1, 3),
-        #         a_max=self.args.calvin_gripper_loc_bounds[1].reshape(1, 1, 3)
-        #     )
+        # Bound final action by CALVIN statistics
+        if self.args.calvin_gripper_loc_bounds is not None:
+            trajectory[:, :, :3] = np.clip(
+                trajectory[:, :, :3],
+                a_min=self.args.calvin_gripper_loc_bounds[0].reshape(1, 1, 3),
+                a_max=self.args.calvin_gripper_loc_bounds[1].reshape(1, 1, 3)
+            )
 
         return trajectory

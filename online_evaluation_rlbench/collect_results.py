@@ -2,7 +2,7 @@ import json
 import os
 
 
-FOLDER = 'eval_logs/flow_flow_3dda_gnfactor/seed0/'
+FOLDER = 'eval_logs/refactored_3dda_peract_sc/seed0/'
 
 sum_ = 0
 tasks = os.listdir(FOLDER)

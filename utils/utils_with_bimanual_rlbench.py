@@ -3,7 +3,8 @@ import glob
 import random
 from typing import List
 
-import open3d  # DON'T DELETE THIS!
+import open3d
+import traceback
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -13,9 +14,9 @@ import einops
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
 from rlbench.task_environment import TaskEnvironment
-from rlbench.action_modes.action_mode import MoveArmThenGripper
-from rlbench.action_modes.gripper_action_modes import Discrete
-from rlbench.action_modes.arm_action_modes import EndEffectorPoseViaPlanning
+from rlbench.action_modes.action_mode import BimanualMoveArmThenGripper
+from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
+from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning
 from rlbench.backend.exceptions import InvalidActionError
 from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
@@ -23,26 +24,14 @@ from pyrep.const import RenderMode
 
 from online_evaluation_rlbench.get_stored_demos import get_stored_demos
 
-
+# ??? pick up a plate, put item in drawer is missing from this.
+# ??? bimanual_sweep_to_dustpan and coordinated_lift_tray are interchanged in the download links, tell Markus
 ALL_RLBENCH_TASKS = [
-    'basketball_in_hoop', 'beat_the_buzz', 'change_channel', 'change_clock', 'close_box',
-    'close_door', 'close_drawer', 'close_fridge', 'close_grill', 'close_jar', 'close_laptop_lid',
-    'close_microwave', 'hang_frame_on_hanger', 'insert_onto_square_peg', 'insert_usb_in_computer',
-    'lamp_off', 'lamp_on', 'lift_numbered_block', 'light_bulb_in', 'meat_off_grill', 'meat_on_grill',
-    'move_hanger', 'open_box', 'open_door', 'open_drawer', 'open_fridge', 'open_grill',
-    'open_microwave', 'open_oven', 'open_window', 'open_wine_bottle', 'phone_on_base',
-    'pick_and_lift', 'pick_and_lift_small', 'pick_up_cup', 'place_cups', 'place_hanger_on_rack',
-    'place_shape_in_shape_sorter', 'place_wine_at_rack_location', 'play_jenga',
-    'plug_charger_in_power_supply', 'press_switch', 'push_button', 'push_buttons', 'put_books_on_bookshelf',
-    'put_groceries_in_cupboard', 'put_item_in_drawer', 'put_knife_on_chopping_board', 'put_money_in_safe',
-    'put_rubbish_in_bin', 'put_umbrella_in_umbrella_stand', 'reach_and_drag', 'reach_target',
-    'scoop_with_spatula', 'screw_nail', 'setup_checkers', 'slide_block_to_color_target',
-    'slide_block_to_target', 'slide_cabinet_open_and_place_cups', 'stack_blocks', 'stack_cups',
-    'stack_wine', 'straighten_rope', 'sweep_to_dustpan', 'sweep_to_dustpan_of_size', 'take_frame_off_hanger',
-    'take_lid_off_saucepan', 'take_money_out_safe', 'take_plate_off_colored_dish_rack', 'take_shoes_out_of_box',
-    'take_toilet_roll_off_stand', 'take_umbrella_out_of_umbrella_stand', 'take_usb_out_of_computer',
-    'toilet_seat_down', 'toilet_seat_up', 'tower3', 'turn_oven_on', 'turn_tap', 'tv_on', 'unplug_charger',
-    'water_plants', 'wipe_desk'
+    'coordinated_push_box', 'coordinated_lift_ball', 'dual_push_buttons', 'bimanual_pick_plate', 
+    'coordinated_put_bottle_in_fridge', 'handover_item', 'bimanual_pick_laptop', 'bimanual_straighten_rope', 
+    'coordinated_lift_tray', 'bimanual_sweep_to_dustpan', 'handover_item_easy',
+    'coordinated_take_tray_out_of_oven',
+    'coordinated_put_item_in_drawer',
 ]
 TASK_TO_ID = {task: i for i, task in enumerate(ALL_RLBENCH_TASKS)}
 
@@ -52,7 +41,7 @@ def task_file_to_task_class(task_file):
 
     name = task_file.replace(".py", "")
     class_name = "".join([w[0].upper() + w[1:] for w in name.split("_")])
-    mod = importlib.import_module("rlbench.tasks.%s" % name)
+    mod = importlib.import_module("rlbench.bimanual_tasks.%s" % name)
     mod = importlib.reload(mod)
     task_class = getattr(mod, class_name)
     return task_class
@@ -68,12 +57,12 @@ class Mover:
         self._disabled = disabled
 
     def __call__(self, action, collision_checking=False):
-        if self._disabled:
-            return self._task.step(action)
+        # if self._disabled:
+        #     return self._task.step(action)
 
         target = action.copy()
         if self._last_action is not None:
-            action[7] = self._last_action[7].copy()
+            action[:, 7] = self._last_action[:, 7].copy()
 
         images = []
         try_id = 0
@@ -82,30 +71,44 @@ class Mover:
         reward = 0
 
         for try_id in range(self._max_tries):
-            action_collision = np.ones(action.shape[0]+1)
-            action_collision[:-1] = action
+            action_collision = np.ones((action.shape[0], action.shape[1]+1))
+            action_collision[:, :-1] = action
             if collision_checking:
-                action_collision[-1] = 0
+                action_collision[:, -1] = 0
+            # We need to fix this, Peract2 takes (right, left) action, but we 
+            # process it in terms of (left ,right) action
+            action_collision = action_collision[::-1]
+            action_collision = action_collision.ravel()
             obs, reward, terminate = self._task.step(action_collision)
 
-            pos = obs.gripper_pose[:3]
-            dist_pos = np.sqrt(np.square(target[:3] - pos).sum())
-            criteria = (dist_pos < 5e-3,)
+            l_pos = obs.left.gripper_pose[:3]
+            r_pos = obs.right.gripper_pose[:3]
+            l_dist_pos = np.sqrt(np.square(target[0, :3] - l_pos).sum())
+            r_dist_pos = np.sqrt(np.square(target[1, :3] - r_pos).sum())
+            criteria = (l_dist_pos < 5e-3, r_dist_pos < 5e-3)
 
             if all(criteria) or reward == 1:
                 break
+
+            print(
+                f"Too far away (l_pos: {l_dist_pos:.3f}, r_pos: {r_dist_pos:.3f}, step: {self._step_id})... Retrying..."
+            )
 
         # we execute the gripper action after re-tries
         action = target
         if (
             not reward == 1.0
             and self._last_action is not None
-            and action[7] != self._last_action[7]
+            and (action[0, 7] != self._last_action[0, 7] or action[1, 7] != self._last_action[1, 7])
         ):
-            action_collision = np.ones(action.shape[0]+1)
-            action_collision[:-1] = action
+            action_collision = np.ones((action.shape[0], action.shape[1]+1))
+            action_collision[:, :-1] = action
             if collision_checking:
-                action_collision[-1] = 0
+                action_collision[:, -1] = 0
+            # We need to fix this, Peract2 takes (right, left) action, but we 
+            # process it in terms of (left ,right) action
+            action_collision = action_collision[::-1]
+            action_collision = action_collision.ravel()
             obs, reward, terminate = self._task.step(action_collision)
 
         if try_id == self._max_tries:
@@ -123,7 +126,7 @@ class Actioner:
         self,
         policy=None,
         instructions=None,
-        apply_cameras=("left_shoulder", "right_shoulder", "wrist")
+        apply_cameras=("over_shoulder_left", "over_shoulder_right", "wrist_left", "wrist_right" "front")
     ):
         self._policy = policy
         self._instructions = instructions
@@ -162,15 +165,16 @@ class Actioner:
             raise ValueError()
 
         self._instr = self._instr.to(rgbs.device)
+        self._task_id = self._task_id.to(rgbs.device)
+
+        gripper = gripper.unflatten(-1, (2, -1))
 
         # Predict trajectory
         fake_traj = torch.full(
-            [1, interpolation_length - 1, gripper.shape[-1]], 0,
-            dtype=bool
+            [1, interpolation_length - 1, gripper.shape[-1]], 0
         ).to(rgbs.device)
         traj_mask = torch.full(
-            [1, interpolation_length - 1], False,
-            dtype=bool
+            [1, interpolation_length - 1], False
         ).to(rgbs.device)
         output["action"] = self._policy(
             fake_traj,
@@ -199,7 +203,7 @@ class RLBenchEnv:
         apply_depth=False,
         apply_pc=False,
         headless=False,
-        apply_cameras=("left_shoulder", "right_shoulder", "wrist", "front"),
+        apply_cameras=("over_shoulder_left", "over_shoulder_right", "wrist_left", "wrist_right", "front"),
         collision_checking=False
     ):
 
@@ -215,13 +219,20 @@ class RLBenchEnv:
             image_size, apply_rgb, apply_depth, apply_pc, apply_cameras
         )
 
-        self.action_mode = MoveArmThenGripper(
-            arm_action_mode=EndEffectorPoseViaPlanning(collision_checking=collision_checking),
-            gripper_action_mode=Discrete()
+        # ??? Change this to BiManual
+        # 1. Select a control mode for the arm (arm_action_mode) - right now it is running a planner to reach a pose
+        # 2. Select a control mode for the gripper (gripper_action_mode) - it is discrete open or close here
+        # These are given to an overall action mode that only moves the gripper after moving the arm.
+        self.action_mode = BimanualMoveArmThenGripper(
+            arm_action_mode=BimanualEndEffectorPoseViaPlanning(collision_checking=collision_checking),
+            gripper_action_mode=BimanualDiscrete()
         )
+        # The right and left actions are appended together like from :7 and 7:
+
+        # Define a headless environment (this creates the rl bench scene) with the given action mode.
         self.env = Environment(
             self.action_mode, str(data_path), self.obs_config,
-            headless=headless
+            headless=headless, robot_setup="dual_panda"
         )
         self.image_size = image_size
 
@@ -236,19 +247,25 @@ class RLBenchEnv:
         state_dict = {"rgb": [], "depth": [], "pc": []}
         for cam in self.apply_cameras:
             if self.apply_rgb:
-                rgb = getattr(obs, "{}_rgb".format(cam))
+                rgb = obs.perception_data["{}_rgb".format(cam)]
                 state_dict["rgb"] += [rgb]
 
             if self.apply_depth:
-                depth = getattr(obs, "{}_depth".format(cam))
+                depth = obs.perception_data["{}_depth".format(cam)]
                 state_dict["depth"] += [depth]
 
             if self.apply_pc:
-                pc = getattr(obs, "{}_point_cloud".format(cam))
+                pc = obs.perception_data["{}_point_cloud".format(cam)]
                 state_dict["pc"] += [pc]
 
         # fetch action
-        action = np.concatenate([obs.gripper_pose, [obs.gripper_open]])
+        action = np.concatenate([obs.left.gripper_pose,
+                                 [obs.left.gripper_open],
+                                 obs.right.gripper_pose,
+                                 [obs.right.gripper_open]])
+
+        # action is an array of length 16 = (7+1)*2; 7 is pose and 1 is open flag, 2 is for 2 arms
+
         return state_dict, torch.from_numpy(action).float()
 
     def get_rgb_pcd_gripper_from_obs(self, obs):
@@ -316,7 +333,7 @@ class RLBenchEnv:
         var_success_rates = {}
         var_num_valid_demos = {}
 
-        for variation in tqdm(task_variations):
+        for variation in task_variations:
             task.set_variation(variation)
             success_rate, valid, num_valid_demos = (
                 self._evaluate_task_on_one_variation(
@@ -497,8 +514,12 @@ class RLBenchEnv:
             :param apply_cameras: Desired cameras.
             :return: observation config
         """
+        
+        # Define a config for an unused camera with all rgb, depth and point cloud applications as False.
         unused_cams = CameraConfig()
         unused_cams.set_all(False)
+        
+        # Define a config for a used camera with the given image size and flags
         used_cams = CameraConfig(
             rgb=apply_rgb,
             point_cloud=apply_pc,
@@ -509,17 +530,15 @@ class RLBenchEnv:
             **kwargs,
         )
 
+        # apply_cameras is a tuple with the names(str) of all the cameras
         camera_names = apply_cameras
-        kwargs = {}
-        for n in camera_names:
-            kwargs[n] = used_cams
+        # For each camera name(str), assign the used camera config class to it (defined above)
+        cameras = {}
+        for name in camera_names:
+            cameras[name] = used_cams
 
         obs_config = ObservationConfig(
-            front_camera=kwargs.get("front", unused_cams),
-            left_shoulder_camera=kwargs.get("left_shoulder", unused_cams),
-            right_shoulder_camera=kwargs.get("right_shoulder", unused_cams),
-            wrist_camera=kwargs.get("wrist", unused_cams),
-            overhead_camera=kwargs.get("overhead", unused_cams),
+            camera_configs = cameras,
             joint_forces=False,
             joint_positions=False,
             joint_velocities=True,
@@ -534,50 +553,109 @@ class RLBenchEnv:
         return obs_config
 
 
-# Identify way-point in each RLBench Demo
-def _is_stopped(demo, i, obs, stopped_buffer, delta):
-    next_is_not_final = i == (len(demo) - 2)
+# Identify way-point in each RLBench Demo by checking where the manipulator stops
+def _left_is_stopped(demo, i, obs, stopped_buffer, delta):
+
+    next_is_not_final = i == (len(demo) - 2) # Check if next step is not the final one
     # gripper_state_no_change = i < (len(demo) - 2) and (
     #     obs.gripper_open == demo[i + 1].gripper_open
     #     and obs.gripper_open == demo[i - 1].gripper_open
     #     and demo[i - 2].gripper_open == demo[i - 1].gripper_open
     # )
-    gripper_state_no_change = i < (len(demo) - 2) and (
-        obs.gripper_open == demo[i + 1].gripper_open
-        and obs.gripper_open == demo[max(0, i - 1)].gripper_open
-        and demo[max(0, i - 2)].gripper_open == demo[max(0, i - 1)].gripper_open
+
+    # Check if the gripper state hasn't changed from (i-2) to (i+1)
+    gripper_state_no_change = i < (len(demo) - 2) and (     # Not the second last or last step
+        obs.left.gripper_open == demo[i + 1].left.gripper_open        # if the current and next gripper states are both same
+        and obs.left.gripper_open == demo[max(0, i - 1)].left.gripper_open    # if the current and previous gripper states are same
+        and demo[max(0, i - 2)].left.gripper_open == demo[max(0, i - 1)].left.gripper_open    # if the (i-1)th and (i-2)th gripper states are same
     )
-    small_delta = np.allclose(obs.joint_velocities, 0, atol=delta)
+    
+    # Check if the current velocities are zero to some delta tolerance.
+    small_delta = np.allclose(obs.left.joint_velocities, 0, atol=delta)
+    
+    # It is a stopping state if 1) the next is not final, 2) no change in gripper state, 3) vels are almost zero
     stopped = (
-        stopped_buffer <= 0
+        stopped_buffer <= 0     # this is set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
         and small_delta
         and (not next_is_not_final)
         and gripper_state_no_change
     )
+
     return stopped
 
+def _right_is_stopped(demo, i, obs, stopped_buffer, delta):
+
+    next_is_not_final = i == (len(demo) - 2) # Check if next step is not the final one
+    # gripper_state_no_change = i < (len(demo) - 2) and (
+    #     obs.gripper_open == demo[i + 1].gripper_open
+    #     and obs.gripper_open == demo[i - 1].gripper_open
+    #     and demo[i - 2].gripper_open == demo[i - 1].gripper_open
+    # )
+
+    # Check if the gripper state hasn't changed from (i-2) to (i+1)
+    gripper_state_no_change = i < (len(demo) - 2) and (     # Not the second last or last step
+        obs.right.gripper_open == demo[i + 1].right.gripper_open        # if the current and next gripper states are both same
+        and obs.right.gripper_open == demo[max(0, i - 1)].right.gripper_open    # if the current and previous gripper states are same
+        and demo[max(0, i - 2)].right.gripper_open == demo[max(0, i - 1)].right.gripper_open    # if the (i-1)th and (i-2)th gripper states are same
+    )
+    
+    # Check if the current velocities are zero to some delta tolerance.
+    small_delta = np.allclose(obs.right.joint_velocities, 0, atol=delta)
+    
+    # It is a stopping state if 1) the next is not final, 2) no change in gripper state, 3) vels are almost zero
+    stopped = (
+        stopped_buffer <= 0     # this is set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
+        and small_delta
+        and (not next_is_not_final)
+        and gripper_state_no_change
+    )
+
+    return stopped
 
 def keypoint_discovery(demo: Demo, stopping_delta=0.1) -> List[int]:
-    episode_keypoints = []
-    prev_gripper_open = demo[0].gripper_open
-    stopped_buffer = 0
+    
+    episode_keypoints_left = []
+    episode_keypoints_right = []
+    
+    prev_left_gripper_open = demo[0].left.gripper_open
+    prev_right_gripper_open = demo[0].right.gripper_open
+    left_stopped_buffer = 0
+    right_stopped_buffer = 0
 
     for i, obs in enumerate(demo):
-        stopped = _is_stopped(demo, i, obs, stopped_buffer, stopping_delta)
-        stopped_buffer = 4 if stopped else stopped_buffer - 1
-        # If change in gripper, or end of episode.
-        last = i == (len(demo) - 1)
-        if i != 0 and (obs.gripper_open != prev_gripper_open or last or stopped):
-            episode_keypoints.append(i)
-        prev_gripper_open = obs.gripper_open
+        
+        # Check if current state obs is a stopped state:
+        left_stopped = _left_is_stopped(demo, i, obs, left_stopped_buffer, stopping_delta)  # returns bool
+        right_stopped = _right_is_stopped(demo, i, obs, right_stopped_buffer, stopping_delta)  # returns bool
 
+        # Set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
+        left_stopped_buffer = 4 if left_stopped else left_stopped_buffer - 1
+        right_stopped_buffer = 4 if right_stopped else right_stopped_buffer - 1
+        
+        last = i == (len(demo) - 1)     # Check if end of episode
+        
+        # If change in gripper, stopped state, or end of episode, append the keypoint to the episode
+        if i != 0 and (obs.left.gripper_open != prev_left_gripper_open or last or left_stopped):   
+            episode_keypoints_left.append(i)
+        if i != 0 and (obs.right.gripper_open != prev_right_gripper_open or last or right_stopped):   
+            episode_keypoints_right.append(i)
+        
+        prev_left_gripper_open = obs.left.gripper_open
+        prev_right_gripper_open = obs.right.gripper_open
+
+    # If the last and second last keypoints are the same, pop it out.
     if (
-        len(episode_keypoints) > 1
-        and (episode_keypoints[-1] - 1) == episode_keypoints[-2]
+        len(episode_keypoints_left) > 1
+        and (episode_keypoints_left[-1] - 1) == episode_keypoints_left[-2]
     ):
-        episode_keypoints.pop(-2)
+        episode_keypoints_left.pop(-2)
+    if (
+        len(episode_keypoints_right) > 1
+        and (episode_keypoints_right[-1] - 1) == episode_keypoints_right[-2]
+    ):
+        episode_keypoints_right.pop(-2)
 
-    return episode_keypoints
+    return episode_keypoints_left, episode_keypoints_right
 
 
 def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
