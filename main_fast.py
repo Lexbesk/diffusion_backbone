@@ -373,7 +373,7 @@ class TrainTester(BaseTrainTester):
             for key, value in values.items():
                 print(f"{key}: {value:.03f}")
 
-        return values.get('val-losses/traj_pos_acc_001', None)
+        return values.get('val-losses/mean/traj_pos_acc_001', None)
 
 
 def traj_collate_fn(batch):
