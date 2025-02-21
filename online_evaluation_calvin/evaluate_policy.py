@@ -1,19 +1,20 @@
-"""Modified from
+"""
+Modified from
 https://github.com/mees/calvin/blob/main/calvin_models/calvin_agent/evaluation/evaluate_policy.py
 """
+
 import os
 import gc
-from typing import Tuple, Optional, List
 import random
 import logging
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont
 import tap
 import hydra
 from omegaconf import OmegaConf
 import torch
 import numpy as np
-import yaml
 from tqdm import tqdm
 
 from online_evaluation_calvin.evaluate_model import create_model
@@ -37,59 +38,40 @@ EXECUTE_LEN = 20
 
 
 class Arguments(tap.Tap):
-    # Online enviornment
-    calvin_dataset_path: Path = "/home/tsungwek/repos/calvin/dataset/task_ABC_D"
-    calvin_model_path: Path = "/home/tsungwek/repos/calvin/calvin_models"
-    calvin_demo_tasks: Optional[List[str]] = None
-    device: str = "cuda"
-    text_encoder: str = "clip"
-    text_max_length: int = 16
-    save_video: int = 0
+    # Online environment
+    merged_config_file: Path = "online_evaluation_calvin/configs/merged_config_val_abc_d.yaml"
+    task_config_file: Path = "online_evaluation_calvin/configs/new_playtable_tasks.yaml"
+    ann_config_file: Path = "online_evaluation_calvin/configs/new_playtable_validation.yaml"
 
-    # Offline data loader
+    # Eval options
     seed: int = 0
-    tasks: Tuple[str, ...] # indicates the environment
     checkpoint: Path
-    calvin_gripper_loc_bounds: Optional[str] = None
-    relative_action: int = 0
-
-    # Logging to base_log_dir/exp_log_dir/run_log_dir
     base_log_dir: Path = Path(__file__).parent / "eval_logs" / "calvin"
+    device: str = "cuda"
+    save_video: int = 0
 
     # Model
     backbone: str = "clip"  # one of "resnet", "clip"
     embedding_dim: int = 120
+    num_attn_heads: int = 8
     num_vis_ins_attn_layers: int = 2
-    use_instruction: int = 0
-    rotation_parametrization: str = 'quat'
+    rotation_parametrization: str = '6D'
     quaternion_format: str = 'wxyz'
-    diffusion_timesteps: int = 100
+    denoise_timesteps: int = 100
     denoise_model: str = 'ddpm'
-    lang_enhanced: int = 0
     fps_subsampling_factor: int = 3
-    num_history: int = 0
     interpolation_length: int = 2 # the number of steps to reach keypose
+    relative_action: int = 0
 
 
-def make_env(dataset_path, show_gui=True, split="validation", scene=None):
-    val_folder = Path(dataset_path) / f"{split}"
-    if scene is not None:
-        env = get_env(val_folder, show_gui=show_gui, scene=scene)
-    else:
-        env = get_env(val_folder, show_gui=show_gui)
-
-    return env
-
-
-def evaluate_policy(model, env, conf_dir, eval_log_dir=None, save_video=False,
-                    sequence_indices=[]):
+def evaluate_policy(model, env, task_config_file, ann_config_file,
+                    eval_log_dir=None, save_video=False, sequence_indices=[]):
     """
     Run this function to evaluate a model on the CALVIN challenge.
 
     Args:
         model: an instance of CalvinBaseModel
         env: an instance of CALVIN_ENV
-        conf_dir: Path to the directory containing the config files of CALVIN
         eval_log_dir: Path where to log evaluation results
         save_video: a boolean indicates whether to save the video
         sequence_indices: a list of integers indicates the indices of the
@@ -98,9 +80,9 @@ def evaluate_policy(model, env, conf_dir, eval_log_dir=None, save_video=False,
     Returns:
         results: a list of integers indicates the number of tasks completed
     """
-    task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
+    task_cfg = OmegaConf.load(task_config_file)
     task_oracle = hydra.utils.instantiate(task_cfg)
-    val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
+    val_annotations = OmegaConf.load(ann_config_file)
 
     eval_log_dir = get_log_dir(eval_log_dir)
 
@@ -127,24 +109,14 @@ def evaluate_policy(model, env, conf_dir, eval_log_dir=None, save_video=False,
 
         if save_video:
             import moviepy.video.io.ImageSequenceClip
-            from moviepy.editor import vfx
             clip = []
-            import cv2
             for task_ind, (subtask, video) in enumerate(zip(eval_sequence, videos)):
                 for img_ind, img in enumerate(video):
-                    cv2.putText(img,
-                                f'{task_ind}: {subtask}',
-                                (10, 180),
-                                cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.5,
-                                (0, 0, 0),
-                                1,
-                                2)
+                    img = add_text_to_image(img, f'{task_ind}: {subtask}')
                     video[img_ind] = img
                 clip.extend(video)
             clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(clip, fps=30)
             clip.write_videofile(f"calvin_seq{seq_ind}.mp4")
-
 
     return results
 
@@ -216,7 +188,7 @@ def rollout(env, model, task_oracle, subtask, lang_annotation):
     pbar = tqdm(range(EP_LEN))
     for step in pbar:
         obs = prepare_visual_states(obs, env)
-        obs = prepare_proprio_states(obs, env)
+        obs = prepare_proprio_states(obs)
         lang_embeddings = model.encode_instruction(lang_annotation, model.args.device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             trajectory = model.step(obs, lang_embeddings)
@@ -246,42 +218,65 @@ def rollout(env, model, task_oracle, subtask, lang_annotation):
     return False, video
 
 
-def get_calvin_gripper_loc_bounds(args):
-    with open(args.calvin_gripper_loc_bounds, "r") as stream:
-       bounds = yaml.safe_load(stream)
-       min_bound = bounds['act_min_bound'][:3]
-       max_bound = bounds['act_max_bound'][:3]
-       gripper_loc_bounds = np.stack([min_bound, max_bound])
+def add_text_to_image(img, text, position=(10, 180),
+                      color=(0, 0, 0)):
+    """
+    Adds text to a given NumPy image array using PIL.
 
-    return gripper_loc_bounds
+    Parameters:
+    - img (numpy.ndarray): Input image (H, W, C) in uint8 format.
+    - text (str): Text to overlay on the image.
+    - position (tuple): (x, y) coordinates for the text.
+    - font_size (int): Font size of the text.
+    - color (tuple): RGB color of the text.
+
+    Returns:
+    - numpy.ndarray: Image with text overlay.
+    """
+    # Convert NumPy array to PIL Image
+    pil_img = Image.fromarray(img)
+
+    # Create a drawing object
+    draw = ImageDraw.Draw(pil_img)
+
+    # Load a default font (can replace with custom font using ImageFont.truetype)
+    font = ImageFont.load_default()
+
+    # Draw text on the image
+    draw.text(position, text, font=font, fill=color)
+
+    # Convert back to NumPy array
+    return np.array(pil_img)
 
 
 def main(args):
 
-    # These location bounds are extracted from every episode in play trajectory
-    if args.calvin_gripper_loc_bounds is not None:
-        args.calvin_gripper_loc_bounds = get_calvin_gripper_loc_bounds(args)
-
-    # set random seeds
+    # Set random seeds
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
-    # evaluate a custom model
+    # Load a custom model wrapper
     model = create_model(args)
 
+    # Split sequence indices for multi-processing
     sequence_indices = [
         i for i in range(args.local_rank, NUM_SEQUENCES, int(os.environ["WORLD_SIZE"]))
     ]
 
-    env = make_env(args.calvin_dataset_path, show_gui=False)
+    # Make environment
+    env = get_env(args.merged_config_file, show_gui=False)
+
+    # Run evaluation on all episodes
     evaluate_policy(model, env,
-                    conf_dir=Path(args.calvin_model_path) / "conf",
+                    task_config_file=args.task_config_file,
+                    ann_config_file=args.ann_config_file,
                     eval_log_dir=args.base_log_dir,
                     sequence_indices=sequence_indices,
                     save_video=args.save_video)
 
+    # Gather statistics from the whole dataset
     results, sequence_inds = collect_results(args.base_log_dir)
     str_results = (
         " ".join([f"{i + 1}/5 : {v * 100:.1f}% |"
@@ -292,6 +287,7 @@ def main(args):
 
     del env
     gc.collect()
+
 
 if __name__ == "__main__":
     args = Arguments().parse_args()

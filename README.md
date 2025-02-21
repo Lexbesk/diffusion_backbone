@@ -71,6 +71,8 @@ Remember to use the latest `calvin_env` module, which fixes bugs of `turn_off_le
 > cd ..
 > ./install.sh; cd ..
 ```
+Maybe need to upgrade networkx and change np.float to float in urdfpy.
+May need to install pyhash2
 
 ### Install RLBench locally
 ```

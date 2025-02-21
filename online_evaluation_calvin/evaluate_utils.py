@@ -10,8 +10,8 @@ import torch.nn.functional as F
 import utils.pytorch3d_transforms as pytorch3d_transforms
 import pybullet
 import hydra
+from omegaconf import OmegaConf
 
-import calvin_env
 from utils.utils_with_calvin import (
     deproject,
     get_gripper_camera_view_matrix,
@@ -81,8 +81,8 @@ def prepare_visual_states(obs, env):
     return obs
 
 
-def prepare_proprio_states(obs, env):
-    """Prepare robot proprioceptive states.  In-place add proprioceptive states
+def prepare_proprio_states(obs):
+    """Prepare robot proprioceptive states. In-place add proprioceptive states
     to the observation dictionary.
 
     Args:
@@ -90,7 +90,6 @@ def prepare_proprio_states(obs, env):
             - rgb_obs: a dictionary of RGB images
             - depth_obs: a dictionary of depth images
             - robot_obs: a dictionary of proprioceptive states
-        env: a PlayTableSimEnv instance which contains camera information
     """
     # Map gripper openess to [0, 1]
     proprio = np.concatenate([
@@ -102,14 +101,13 @@ def prepare_proprio_states(obs, env):
     if 'proprio' not in obs:
         obs['proprio'] = np.stack([proprio] * 3, axis=0)
     else:
-        obs['proprio'] = np.concatenate([obs['proprio'][1:], proprio[None]], axis=0)
+        obs['proprio'] = np.concatenate([obs['proprio'][1:], proprio[None]])
 
     return obs
 
 
 def convert_quaternion_to_euler(quat):
-    """Convert Euler angles to Quarternion
-    """
+    """Convert Euler angles to Quarternion."""
     quat = torch.as_tensor(quat)
     mat = pytorch3d_transforms.quaternion_to_matrix(quat)
     rot = pytorch3d_transforms.matrix_to_euler_angles(mat, "XYZ")
@@ -171,25 +169,17 @@ def count_success(results):
     return step_success
 
 
-def get_env(dataset_path, obs_space=None, show_gui=True, **kwargs):
-    from pathlib import Path
+def get_env(config_file, show_gui=True):
+    render_conf = OmegaConf.load(config_file)
 
-    from omegaconf import OmegaConf
-
-    render_conf = OmegaConf.load(Path(dataset_path) / ".hydra" / "merged_config.yaml")
-
-    if obs_space is not None:
-        exclude_keys = set(render_conf.cameras.keys()) - {
-            re.split("_", key)[1] for key in obs_space["rgb_obs"] + obs_space["depth_obs"]
-        }
-        for k in exclude_keys:
-            del render_conf.cameras[k]
-    if "scene" in kwargs:
-        scene_cfg = OmegaConf.load(Path(calvin_env.__file__).parents[1] / "conf/scene" / f"{kwargs['scene']}.yaml")
-        OmegaConf.update(render_conf, "scene", scene_cfg)
     if not hydra.core.global_hydra.GlobalHydra.instance().is_initialized():
         hydra.initialize(".")
-    env = hydra.utils.instantiate(render_conf.env, show_gui=show_gui, use_vr=False, use_scene_info=True)
+    env = hydra.utils.instantiate(
+        render_conf.env,
+        show_gui=show_gui,
+        use_vr=False,
+        use_scene_info=True
+    )
     return env
 
 
@@ -214,8 +204,12 @@ def get_env_state_for_initial_condition(initial_condition):
         ]
     )
     block_rot_z_range = (pi / 2 - pi / 8, pi / 2 + pi / 8)
-    block_slider_left = np.array([-2.40851662e-01, 9.24044687e-02, 4.60990009e-01])
-    block_slider_right = np.array([7.03416330e-02, 9.24044687e-02, 4.60990009e-01])
+    block_slider_left = np.array([
+        -2.40851662e-01, 9.24044687e-02, 4.60990009e-01
+    ])
+    block_slider_right = np.array([
+        7.03416330e-02, 9.24044687e-02, 4.60990009e-01
+    ])
     block_table = [
         np.array([5.00000896e-02, -1.20000177e-01, 4.59990009e-01]),
         np.array([2.29995412e-01, -1.19995140e-01, 4.59990010e-01]),
@@ -303,7 +297,7 @@ def collect_results(log_dir):
 
     results, seq_inds = [], []
     for line in lines:
-        seq, res= line.split(" ")
+        seq, res = line.split(" ")
         results.append(int(res))
         seq_inds.append(int(seq))
 

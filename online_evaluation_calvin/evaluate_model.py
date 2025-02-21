@@ -41,51 +41,24 @@ class DiffusionModel:
             backbone=self.args.backbone,
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
-            use_instruction=self.args.use_instruction,
+            use_instruction=True,
             num_attn_heads=self.args.num_attn_heads,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
-            nhist=self.args.num_history,
+            nhist=3,
             relative=self.args.relative_action
         )
 
         return _model
 
     def get_text_encoder(self):
-        def load_model(encoder) -> transformers.PreTrainedModel:
-            if encoder == "bert":
-                model = transformers.BertModel.from_pretrained("bert-base-uncased")
-            elif encoder == "clip":
-                model = transformers.CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
-            else:
-                raise ValueError(f"Unexpected encoder {encoder}")
-            if not isinstance(model, transformers.PreTrainedModel):
-                raise ValueError(f"Unexpected encoder {encoder}")
-            return model
-
-
-        def load_tokenizer(encoder) -> transformers.PreTrainedTokenizer:
-            if encoder == "bert":
-                tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
-            elif encoder == "clip":
-                tokenizer = transformers.CLIPTokenizer.from_pretrained(
-                    "openai/clip-vit-base-patch32"
-                )
-            else:
-                raise ValueError(f"Unexpected encoder {encoder}")
-            if not isinstance(tokenizer, transformers.PreTrainedTokenizer):
-                raise ValueError(f"Unexpected encoder {encoder}")
-            return tokenizer
-
-
-        tokenizer = load_tokenizer(self.args.text_encoder)
-        tokenizer.model_max_length = self.args.text_max_length
-
-        model = load_model(self.args.text_encoder)
-    
+        _id = "openai/clip-vit-base-patch32"
+        model = transformers.CLIPTextModel.from_pretrained(_id)
+        tokenizer = transformers.CLIPTokenizer.from_pretrained(_id)
+        tokenizer.model_max_length = 16
         return tokenizer, model
 
     def reset(self):
@@ -148,7 +121,7 @@ class DiffusionModel:
             [1, self.args.interpolation_length - 1], False
         ).to(device)
         fake_trajectory = torch.full(
-            [1, self.args.interpolation_length - 1, self.args.action_dim], 0
+            [1, self.args.interpolation_length - 1, 8], 0
         ).to(device)
         rgbs = np.stack([
             obs["rgb_obs"]["rgb_static"], obs["rgb_obs"]["rgb_gripper"]
@@ -157,21 +130,21 @@ class DiffusionModel:
             obs["pcd_obs"]["pcd_static"], obs["pcd_obs"]["pcd_gripper"]
         ], axis=0).transpose(0, 3, 1, 2) # [ncam, 3, H, W]
 
-        rgbs = torch.as_tensor(rgbs).to(device).unsqueeze(0)
-        pcds = torch.as_tensor(pcds).to(device).unsqueeze(0)
+        rgbs = torch.as_tensor(rgbs).to(device).unsqueeze(0).float()
+        pcds = torch.as_tensor(pcds).to(device).unsqueeze(0).float()
 
-        # Crop the images.  See Line 165-166 in datasets/dataset_calvin.py
+        # Crop the images, same as in the training set
         rgbs = rgbs[..., 20:180, 20:180]
         pcds = pcds[..., 20:180, 20:180]
 
         # history of actions
-        gripper = torch.as_tensor(obs["proprio"]).to(device).unsqueeze(0)
+        gripper = torch.as_tensor(obs["proprio"]).to(device).float()[None]
 
         trajectory = self.policy(
             fake_trajectory.float(),
             trajectory_mask,
-            rgbs.float(),
-            pcds.float(),
+            rgbs,
+            pcds,
             instruction.float(),
             curr_gripper=gripper[..., :7].float(),
             run_inference=True
@@ -180,18 +153,10 @@ class DiffusionModel:
         # Convert quaternion to Euler angles
         trajectory = convert_action(trajectory)
 
-        if self.args.relative_action:
+        if bool(self.args.relative_action):
             # Convert quaternion to Euler angles
             gripper = convert_action(gripper[:, [-1], :])
             # Convert relative action to absolute action
             trajectory = relative_to_absolute(trajectory, gripper)
-
-        # Bound final action by CALVIN statistics
-        if self.args.calvin_gripper_loc_bounds is not None:
-            trajectory[:, :, :3] = np.clip(
-                trajectory[:, :, :3],
-                a_min=self.args.calvin_gripper_loc_bounds[0].reshape(1, 1, 3),
-                a_max=self.args.calvin_gripper_loc_bounds[1].reshape(1, 1, 3)
-            )
 
         return trajectory
