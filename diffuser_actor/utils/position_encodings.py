@@ -172,3 +172,26 @@ class LearnedAbsolutePositionEncoding3Dv2(nn.Module):
             absolute_pe: (B, N, embedding_dim) tensor of the absolute position encoding
         """
         return self.absolute_pe_layer(xyz.permute(0, 2, 1)).permute(0, 2, 1)
+
+
+class PositionEmbeddingLearnedMLP(nn.Module):
+    """Absolute pos embedding, learned."""
+
+    def __init__(self, dim=3, num_pos_feats=288):
+        super().__init__()
+        self.position_embedding_head = nn.Sequential(
+            nn.Linear(dim, num_pos_feats),
+            nn.LayerNorm(num_pos_feats),
+            nn.ReLU(),
+            nn.Linear(num_pos_feats, num_pos_feats))
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, xyz):
+        """Forward pass, xyz is (B, N, 3or6), output (B, F, N)."""
+        position_embedding = self.position_embedding_head(xyz)
+        return position_embedding

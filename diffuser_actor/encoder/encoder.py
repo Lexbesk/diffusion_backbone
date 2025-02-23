@@ -11,6 +11,7 @@ from .vision.resnet import load_resnet50, load_resnet18
 from .vision.clip import load_clip
 from .vision.tiny_vit import load_tiny
 from .vision.florence2 import load_florence2
+from .vision.siglip2 import load_siglip2_256, load_siglip2_512
 from .vision.fpn import EfficientFeaturePyramidNetwork
 
 
@@ -31,6 +32,8 @@ class Encoder(nn.Module):
 
         # Frozen backbone
         self.use_florence = backbone == "florence2"
+        self.use_sg512 = backbone == "siglip2_512"
+        self.use_sg256 = backbone == "siglip2_256"
         if backbone == "resnet50":
             self.backbone, self.normalize = load_resnet50()
         elif backbone == "resnet18":
@@ -41,6 +44,10 @@ class Encoder(nn.Module):
             self.backbone, self.normalize = load_tiny()
         elif backbone == "florence2":
             self.backbone, self.normalize = load_florence2()
+        elif backbone == "siglip2_256":
+            self.backbone, self.normalize = load_siglip2_256()
+        elif backbone == "siglip2_512":
+            self.backbone, self.normalize = load_siglip2_512()
         for p in self.backbone.parameters():
             p.requires_grad = finetune_backbone
 
@@ -279,6 +286,67 @@ class Encoder(nn.Module):
         text_features, text_pos = self.encode_instruction(text_features)
 
         return rgb_feats_pyramid, pcd_pyramid, text_features, text_pos
+
+    def encode_siglip(self, rgb, pcd, instruction):
+        """
+        Compute visual features/pos embeddings at different scales.
+
+        Args:
+            - rgb: (B, ncam, 3, H, W), pixel intensities
+            - pcd: (B, ncam, 3, H, W), positions
+
+        Returns:
+            - rgb_feats_pyramid: [(B, ncam, F, H_i, W_i)]
+            - pcd_pyramid: [(B, ncam * H_i * W_i, 3)]
+        """
+        num_cameras = rgb.shape[1]
+
+        # Pass each view independently through backbone
+        rgb = einops.rearrange(rgb, "bt ncam c h w -> (bt ncam) c h w")
+        rgb = self.normalize(rgb)
+        if self.use_sg512:
+            rgb = F.interpolate(
+                rgb,
+                (512, 512),
+                mode='bilinear'
+            )
+        rgb_features = self.backbone.encode_image(rgb)
+
+        # Treat different cameras separately
+        pcd = einops.rearrange(pcd, "bt ncam c h w -> (bt ncam) c h w")
+
+        rgb_feats_pyramid = []
+        pcd_pyramid = []
+        for i in range(len(self.feature_map_pyramid)):
+            # Isolate level's visual features
+            rgb_features_i = rgb_features
+
+            # Interpolate xy-depth to get the locations for this level
+            feat_h, feat_w = rgb_features_i.shape[-2:]
+            pcd_i = F.interpolate(
+                pcd,
+                (feat_h, feat_w),
+                mode='bilinear'
+            )
+
+            # Merge different cameras for clouds, separate for rgb features
+            pcd_i = einops.rearrange(
+                pcd_i,
+                "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
+            )
+            rgb_features_i = einops.rearrange(
+                rgb_features_i,
+                "(bt ncam) c h w -> bt ncam c h w", ncam=num_cameras
+            )
+
+            rgb_feats_pyramid.append(rgb_features_i)
+            pcd_pyramid.append(pcd_i)
+
+        # Text
+        text = self.backbone.tokenizer(instruction, context_length=self.backbone.model.context_length)
+        instruction = self.backbone.encode_text(text)
+
+        return rgb_feats_pyramid, pcd_pyramid, instruction
 
     def encode_instruction(self, instruction):
         """

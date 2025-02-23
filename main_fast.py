@@ -87,6 +87,7 @@ def parse_arguments():
     parser.add_argument('--keypose_only', type=str2bool, default=True)
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)
+    parser.add_argument('--relative_attention', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
     parser.add_argument('--sa_var', type=str2bool, default=False)
     parser.add_argument('--ayush', type=str2bool, default=False)
@@ -185,7 +186,8 @@ class TrainTester(BaseTrainTester):
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
             relative=self.args.relative_action,
-            ayush=self.args.ayush
+            ayush=self.args.ayush,
+            # relative_attention=self.args.relative_attention
         )
         print("Model parameters:", count_parameters(_model))
 
@@ -269,7 +271,7 @@ class TrainTester(BaseTrainTester):
             pcds = pcds.float()
         # Instructions
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if not self.args.precompute_instruction_encodings and self.args.backbone != 'florence2':
+            if not self.args.precompute_instruction_encodings and self.args.backbone not in ['florence2', 'siglip2_256', 'siglip2_512']:
                 instr = text_encoder(sample['instr'], "cuda")
             else:
                 instr = sample["instr"]
@@ -554,9 +556,9 @@ if __name__ == '__main__':
 
     # Seeds
     if not args.not_seed:
-        torch.manual_seed(args.seed)
-        np.random.seed(args.seed)
-        random.seed(args.seed)
+        torch.manual_seed(args.local_rank)
+        np.random.seed(args.local_rank)
+        random.seed(args.local_rank)
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)
