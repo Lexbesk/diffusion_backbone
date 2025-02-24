@@ -30,7 +30,7 @@ from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
 from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from diffuser_actor.policy.denoise_sa_actor import DenoiseActor as DenoiseActorSA
-from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor as RefactoredActor
+from diffuser_actor.policy.denoise_comeback_actor import DenoiseActor as RefactoredActor
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     PeractTwoCam2Cloud,
@@ -42,9 +42,7 @@ from utils.common_utils import count_parameters, str2bool, str_none
 def parse_arguments():
     parser = argparse.ArgumentParser("Parse arguments for main.py")
     # Training and testing
-    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--checkpoint', type=str_none, default=None)
-    parser.add_argument('--accumulate_grad_batches', type=int, default=1)
     parser.add_argument('--val_freq', type=int, default=500)
     parser.add_argument('--eval_only', type=str2bool, default=False)
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -69,8 +67,9 @@ def parse_arguments():
     # Model
     parser.add_argument('--bimanual', type=str2bool, default=False)
     parser.add_argument('--refactored', type=str2bool, default=False)
+    parser.add_argument('--sa_var', type=str2bool, default=False)
+    parser.add_argument('--ayush', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
-    parser.add_argument('--use_flow_matching', type=str2bool, default=False)
     parser.add_argument('--backbone', type=str, default="clip")
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
@@ -89,9 +88,6 @@ def parse_arguments():
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--relative_attention', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
-    parser.add_argument('--sa_var', type=str2bool, default=False)
-    parser.add_argument('--ayush', type=str2bool, default=False)
-    parser.add_argument('--not_seed', type=str2bool, default=False)
     parser.add_argument('--memory_limit', type=float, default=8)
 
     return parser.parse_args()
@@ -186,8 +182,7 @@ class TrainTester(BaseTrainTester):
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
             relative=self.args.relative_action,
-            ayush=self.args.ayush,
-            # relative_attention=self.args.relative_attention
+            ayush=self.args.ayush
         )
         print("Model parameters:", count_parameters(_model))
 
@@ -287,8 +282,7 @@ class TrainTester(BaseTrainTester):
     def train_one_step(self, model, text_encoder, criterion,
                        optimizer, scaler, lr_scheduler, step_id, sample):
         """Run a single training step."""
-        if step_id % self.args.accumulate_grad_batches == 0:
-            optimizer.zero_grad()
+        optimizer.zero_grad()
 
         # Forward pass
         action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
@@ -302,9 +296,8 @@ class TrainTester(BaseTrainTester):
         scaler.scale(loss).backward()
 
         # Update
-        if step_id % self.args.accumulate_grad_batches == self.args.accumulate_grad_batches - 1:
-            scaler.step(optimizer)
-            scaler.update()
+        scaler.step(optimizer)
+        scaler.update()
 
         # Step the lr scheduler
         lr_scheduler.step()
@@ -313,15 +306,11 @@ class TrainTester(BaseTrainTester):
     def evaluate_nsteps(self, model, text_encoder, criterion, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
-        if self.args.val_iters != -1:
-            val_iters = self.args.val_iters
-        if split == 'val':
-            val_iters = -1
         values = {}
         device = next(model.parameters()).device
         model.eval()
 
-        for i, sample in enumerate(loader):
+        for i, sample in tqdm(enumerate(loader)):
             if i == val_iters:
                 break
 
@@ -334,9 +323,9 @@ class TrainTester(BaseTrainTester):
                     run_inference=True
                 )
 
-                losses, losses_B = criterion.compute_metrics(
-                    pred_action, action, action_mask
-                )
+            losses, losses_B = criterion.compute_metrics(
+                pred_action, action, action_mask
+            )
 
             # Gather global statistics
             for n, l in losses.items():
@@ -375,7 +364,7 @@ class TrainTester(BaseTrainTester):
             for key, value in values.items():
                 print(f"{key}: {value:.03f}")
 
-        return values.get('val-losses/mean/traj_pos_acc_001', None)
+        return -values[f'{split}-losses/mean/traj_pos_acc_001']
 
 
 def traj_collate_fn(batch):
@@ -555,10 +544,9 @@ if __name__ == '__main__':
     args.local_rank = int(os.environ["LOCAL_RANK"])
 
     # Seeds
-    if not args.not_seed:
-        torch.manual_seed(args.local_rank)
-        np.random.seed(args.local_rank)
-        random.seed(args.local_rank)
+    torch.manual_seed(args.local_rank)
+    np.random.seed(args.local_rank)
+    random.seed(args.local_rank)
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)

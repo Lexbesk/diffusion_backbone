@@ -135,7 +135,9 @@ def all_tasks_main(split):
             _path = Path(f'{ROOT}{split}/{task}+{var}/')
             if not _path.is_dir():
                 continue
-            episodes.extend([(task, var, ep) for ep in _path.glob("*.dat")])
+            episodes.extend([
+                (task, var, ep) for ep in sorted(_path.glob("*.dat"))
+            ])
 
     # Read once to get the number of keyposes
     n_keyposes = 0
@@ -193,7 +195,7 @@ def all_tasks_main(split):
             with open(ep, "rb") as f:
                 content = pickle.loads(blosc.decompress(f.read()))
             # Map [-1, 1] to [0, 255] uint8
-            rgb = (127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8)
+            rgb = (127.5 * (content[1][:, -NCAM:, 0] + 1)).astype(np.uint8)
             # Extract depth from point cloud, faster loading
             depth = np.stack([
                 inverse_depth_batched(
@@ -202,6 +204,7 @@ def all_tasks_main(split):
                     cameras[cam]['intrinsics']
                 )
                 for c, cam in enumerate(camera_order)
+                if c > 3 - NCAM
             ], 1).astype(np.float16)
             # Store current eef pose as well as two previous ones
             prop = np.stack([
