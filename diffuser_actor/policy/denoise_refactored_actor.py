@@ -96,7 +96,7 @@ class DenoiseActor(nn.Module):
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,
                       curr_gripper):
         # Compute visual features/positional embeddings at different scales
-        if self.encoder.use_sg256 or self.encoder.use_sg256:
+        if self.encoder.use_sg256 or self.encoder.use_sg512:
             rgb_feats_pyramid, pcd_pyramid, instruction = self.encoder.encode_siglip(
                 visible_rgb, visible_pcd, instruction
             )

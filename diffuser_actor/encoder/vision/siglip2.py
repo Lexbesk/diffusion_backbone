@@ -30,7 +30,6 @@ class SigLip2(nn.Module):
         self.model, self.preprocess = create_model_from_pretrained(model_id)
         self.tokenizer = get_tokenizer(model_id)
         self.model.eval()
-        print(self.model.visual)
 
     def encode_image(self, image, normalize=False):
         tokens = self.model.visual.trunk.forward_features(image)
