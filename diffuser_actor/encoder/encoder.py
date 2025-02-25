@@ -1,3 +1,5 @@
+import math
+
 import einops
 import torch
 from torch import nn
@@ -34,6 +36,7 @@ class Encoder(nn.Module):
         self.use_florence = backbone == "florence2"
         self.use_sg512 = backbone == "siglip2_512"
         self.use_sg256 = backbone == "siglip2_256"
+        use_siglip = self.use_sg256 or self.use_sg512
         if backbone == "resnet50":
             self.backbone, self.normalize = load_resnet50()
         elif backbone == "resnet18":
@@ -58,7 +61,7 @@ class Encoder(nn.Module):
         # Semantic visual features at different scales
         output_level = min([int(lvl[3:]) for lvl in self.feature_map_pyramid])
         output_level = f"res{output_level}"
-        if self.use_florence:
+        if self.use_florence or use_siglip:
             self.inner_block = Conv2dNormActivation(
                 768, embedding_dim, kernel_size=1, padding=0,
                 norm_layer=None, activation_layer=None
@@ -88,7 +91,7 @@ class Encoder(nn.Module):
 
         # Instruction encoder
         self.instruction_encoder = nn.Linear(
-            768 if self.use_florence else 512, embedding_dim
+            768 if self.use_florence or use_siglip else 512, embedding_dim
         )
 
         # Attention from vision to language
@@ -310,7 +313,13 @@ class Encoder(nn.Module):
                 (512, 512),
                 mode='bilinear'
             )
-        rgb_features = self.backbone.encode_image(rgb)
+        rgb_features = self.backbone.encode_image(rgb)  # (bt ncam) (hw) c
+        _h = int(math.sqrt(rgb_features.shape[1]))
+        rgb_features = einops.rearrange(
+            rgb_features,
+            "B (h w) c -> B c h w", h=_h, w=_h
+        )
+        rgb_features = self.inner_block(rgb_features)
 
         # Treat different cameras separately
         pcd = einops.rearrange(pcd, "bt ncam c h w -> (bt ncam) c h w")
@@ -343,7 +352,7 @@ class Encoder(nn.Module):
             pcd_pyramid.append(pcd_i)
 
         # Text
-        text = self.backbone.tokenizer(instruction, context_length=self.backbone.model.context_length)
+        text = self.backbone.tokenizer(instruction, context_length=self.backbone.model.context_length).to(rgb_features.device)
         instruction = self.backbone.encode_text(text)
 
         return rgb_feats_pyramid, pcd_pyramid, instruction
