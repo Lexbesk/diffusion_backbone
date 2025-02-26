@@ -81,8 +81,7 @@ def parse_arguments():
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
     parser.add_argument('--quaternion_format', type=str, default='wxyz')
     parser.add_argument('--denoise_timesteps', type=int, default=10)
-    parser.add_argument('--denoise_model', type=str, default="rectified_flow",
-                        choices=["ddpm", "rectified_flow"])
+    parser.add_argument('--denoise_model', type=str, default="rectified_flow")
     parser.add_argument('--keypose_only', type=str2bool, default=True)
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)

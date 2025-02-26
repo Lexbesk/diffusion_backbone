@@ -2,10 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import einops
-import numpy as np
 
-from diffuser_actor.noise_scheduler.rectified_flow import RFScheduler
-from diffuser_actor.noise_scheduler.ddpm import DDPMScheduler
+from diffuser_actor.noise_scheduler import fetch_schedulers
 from diffuser_actor.encoder.encoder import Encoder
 from diffuser_actor.utils.new_layers import AttentionModule
 from diffuser_actor.utils.position_encodings import (
@@ -58,40 +56,12 @@ class DenoiseActor(nn.Module):
             nhist=nhist,
             num_attn_heads=num_attn_heads
         )
-        if denoise_model == "ddpm":
-            self.position_noise_scheduler = DDPMScheduler(
-                num_train_timesteps=denoise_timesteps,
-                beta_schedule="scaled_linear",
-                prediction_type="epsilon"
-            )
-            self.rotation_noise_scheduler = DDPMScheduler(
-                num_train_timesteps=denoise_timesteps,
-                beta_schedule="squaredcos_cap_v2",
-                prediction_type="epsilon"
-            )
-        elif denoise_model == "rectified_flow":
-            self.position_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
-                noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
-            )
-            self.rotation_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
-                noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
-            )
-        else:
-            raise ValueError(f"Unknown denoise model: {denoise_model}")
+        self.position_noise_scheduler, self.rotation_noise_scheduler = fetch_schedulers(denoise_model, denoise_timesteps)
         self.n_steps = denoise_timesteps
         self.workspace_normalizer = nn.Parameter(
             torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
             requires_grad=False
         )
-
-        # self._mae = True
-        self._mae = False
 
     def encode_inputs(self, visible_rgb, visible_pcd, instruction,
                       curr_gripper):
@@ -110,25 +80,6 @@ class DenoiseActor(nn.Module):
             "b ncam c h w -> b (ncam h w) c"
         )
         context = pcd_pyramid[0]
-
-        if self._mae and self.training:
-            drop_ratio = np.random.uniform(0.3, 0.6)
-            # drop_ratio = np.random.uniform(0.2, 0.4)
-            keep_num = int(context_feats.shape[1] * (1 - drop_ratio))
-            device = context_feats.device
-            keep_inds = [
-                torch.randperm(context_feats.shape[1], device=device)[:keep_num]
-                for _ in range(context_feats.shape[0])
-            ]
-            keep_inds = torch.stack(keep_inds, dim=0)
-            context_feats = torch.gather(
-                context_feats, 1,
-                keep_inds.unsqueeze(-1).repeat(1, 1, context_feats.shape[-1])
-            )
-            context = torch.gather(
-                context, 1,
-                keep_inds.unsqueeze(-1).repeat(1, 1, context.shape[-1])
-            )
 
         # Encode instruction (B, 53, F)
         instr_feats = None
@@ -218,8 +169,12 @@ class DenoiseActor(nn.Module):
         )
 
     def conditional_sample(self, condition_data, condition_mask, fixed_inputs):
-        self.position_noise_scheduler.set_timesteps(self.n_steps)
-        self.rotation_noise_scheduler.set_timesteps(self.n_steps)
+        self.position_noise_scheduler.set_timesteps(
+            self.n_steps, device=condition_data.device
+        )
+        self.rotation_noise_scheduler.set_timesteps(
+            self.n_steps, device=condition_data.device
+        )
 
         # Random trajectory, conditioned on start-end
         noise = torch.randn(
@@ -245,17 +200,20 @@ class DenoiseActor(nn.Module):
         # Iterative denoising
         timesteps = self.position_noise_scheduler.timesteps
         for t in timesteps:
+            c_skip, c_out, c_in = self.position_noise_scheduler.get_scalings(t)
             out = self.policy_forward_pass(
-                trajectory,
+                trajectory * c_in,
                 t * torch.ones(len(trajectory)).to(trajectory.device).long(),
                 fixed_inputs
             )
             out = out[-1]  # keep only last layer's output
             pos = self.position_noise_scheduler.step(
-                out[..., :3], t, trajectory[..., :3]
+                out[..., :3] * c_out + trajectory[..., :3] * c_skip,
+                t, trajectory[..., :3]
             ).prev_sample
             rot = self.rotation_noise_scheduler.step(
-                out[..., 3:9], t, trajectory[..., 3:9]
+                out[..., 3:9] * c_out + trajectory[..., 3:9] * c_skip,
+                t, trajectory[..., 3:9]
             ).prev_sample
             trajectory = torch.cat((pos, rot), -1)
 
@@ -464,8 +422,10 @@ class DenoiseActor(nn.Module):
         noisy_trajectory = torch.cat((pos, rot), -1)
 
         # Predict the noise residual
+        _, _, c_in = self.position_noise_scheduler.get_scalings(timesteps)
         pred = self.policy_forward_pass(
-            noisy_trajectory, timesteps, fixed_inputs
+            noisy_trajectory * c_in[:, None, None],
+            timesteps, fixed_inputs
         )
 
         # Compute loss
@@ -474,7 +434,7 @@ class DenoiseActor(nn.Module):
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
             denoise_target = self.position_noise_scheduler.prepare_target(
-                noise, gt_trajectory
+                noise, gt_trajectory, noisy_trajectory, timesteps
             )
             loss = (
                 30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')
