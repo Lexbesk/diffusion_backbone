@@ -11,13 +11,14 @@ import numpy as np
 import argparse
 
 from diffuser_actor.policy import BimanualDenoiseActor  # , DenoiseActor
-from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor
+from diffuser_actor.policy.denoise_comeback_actor import DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
     Peract2Dataset,
-    PeractSingleCamDataset
+    PeractSingleCamDataset,
+    PeractTwoCamDataset
 )
 
 
@@ -54,6 +55,7 @@ def parse_arguments():
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
+    parser.add_argument('--relative_attention', type=str2bool, default=False)
 
     return parser.parse_args()
 
@@ -79,7 +81,8 @@ def load_models(args):
         denoise_timesteps=args.denoise_timesteps,
         denoise_model=args.denoise_model,
         nhist=args.num_history,
-        relative=args.relative_action
+        relative=args.relative_action,
+        relative_attention=args.relative_attention
     )
 
     # Load model weights
@@ -115,7 +118,8 @@ if __name__ == "__main__":
         "Peract": PeractDataset,
         "Peract2": Peract2Dataset,
         "GNFactor": GNFactorDataset,
-        "PeractSingleCam": PeractSingleCamDataset
+        "PeractSingleCam": PeractSingleCamDataset,
+        "PeractTwoCam": PeractTwoCamDataset
     }[args.dataset]
 
     # Load models

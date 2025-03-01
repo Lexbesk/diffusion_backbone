@@ -239,7 +239,7 @@ class BimanualDenoiseActor(DenoiseActor):
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
             denoise_target = self.position_noise_scheduler.prepare_target(
-                noise, gt_trajectory
+                noise, gt_trajectory, noisy_trajectory, timesteps
             )
             loss = (
                 30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')

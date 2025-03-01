@@ -75,14 +75,14 @@ class DenoiseActor(nn.Module):
             )
         elif denoise_model == "rectified_flow":
             self.position_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
+                # num_train_timesteps=denoise_timesteps,
+                # timestep_spacing="linspace",
                 noise_sampler="logit_normal",
                 noise_sampler_config={'mean': 0, 'std': 1.5},
             )
             self.rotation_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
+                # num_train_timesteps=denoise_timesteps,
+                # timestep_spacing="linspace",
                 noise_sampler="logit_normal",
                 noise_sampler_config={'mean': 0, 'std': 1.5},
             )
@@ -473,7 +473,7 @@ class DenoiseActor(nn.Module):
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
             denoise_target = self.position_noise_scheduler.prepare_target(
-                noise, gt_trajectory
+                noise, gt_trajectory, noisy_trajectory, timesteps
             )
             loss = (
                 30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')

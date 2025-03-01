@@ -119,6 +119,12 @@ class PeractTwoCamDataset(RLBenchDataset):
     cameras = ("wrist", "front")
     train_copies = 10  # how many copies of the dataset to load
 
+    def _get_rgb(self, idx):
+        return to_tensor(self.annos['rgb'][idx])[-2:]
+
+    def _get_pcd(self, idx):
+        return to_tensor(self.annos['depth'][idx])[-2:]
+
 
 class PeractSingleCamDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
@@ -154,14 +160,14 @@ class Peract2Dataset(RLBenchDataset):
     ]
     variations = range(0, 199)
     # cameras = (
-    #     "over_shoulder_left", "over_shoulder_right",
-    #     "wrist_left", "wrist_right", "front"
+    #     "front", "over_shoulder_left", "over_shoulder_right",
+    #     "wrist_left", "wrist_right"
     # )
     cameras = ("front",)
     train_copies = 10  # how many copies of the dataset to load
 
     def _get_rgb(self, idx):
-        return to_tensor(self.annos['rgb'][idx])[-1:]
+        return to_tensor(self.annos['rgb'][idx])[:1]
 
     def _get_pcd(self, idx):
-        return to_tensor(self.annos['depth'][idx])[-1:]
+        return to_tensor(self.annos['depth'][idx])[:1]

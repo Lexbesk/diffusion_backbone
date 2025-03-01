@@ -1,6 +1,3 @@
-# rm -r /scratch/Peract_zarr/
-# cp -r /data/user_data/ngkanats/Peract_zarr /scratch/
-
 main_dir=Peract_singlecam
 
 train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/train.zarr
@@ -11,12 +8,12 @@ val_instructions=instructions/peract/instructions.json
 lr=1e-4
 lr_scheduler=constant
 num_history=3
-denoise_timesteps=10  # 10
-denoise_model=rectified_flow
+denoise_timesteps=20  # 10
+denoise_model=moritz
 keypose_only=true
 quaternion_format=xyzw
 rotation_parametrization=6D
-fps_subsampling_factor=1
+fps_subsampling_factor=5
 backbone=siglip2_256
 use_instruction=true
 workspace_normalizer_buffer=0.05
@@ -32,11 +29,10 @@ num_workers=4
 dataset=PeractSingleCam
 ngpus=4
 refactored=1
-relative_attention=1
+finetune_backbone=true
 
-run_log_dir=siglip256_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=siglip2_finetuned_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -72,4 +68,4 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --exp_log_dir $main_dir \
     --run_log_dir ${run_log_dir} \
     --refactored $refactored \
-    --relative_attention $relative_attention
+    --finetune_backbone $finetune_backbone

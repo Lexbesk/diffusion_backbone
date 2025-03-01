@@ -1,15 +1,16 @@
-main_dir=Peract2
+main_dir=Peract_singlecam
 
-train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/train.zarr
-eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/test.zarr
-train_instructions=instructions/peract2/instructions.pkl
-val_instructions=instructions/peract2/instructions.pkl
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/val.zarr
+
+train_instructions=instructions/peract/instructions.pkl
+val_instructions=instructions/peract/instructions.pkl
 
 lr=1e-4
 lr_scheduler=constant
 num_history=3
 denoise_timesteps=10  # 10
-denoise_model=rectified_flow
+denoise_model=flow_uniform
 keypose_only=true
 quaternion_format=xyzw
 rotation_parametrization=6D
@@ -26,13 +27,12 @@ train_iters=600000
 val_freq=4000
 precompute_instruction_encodings=true
 num_workers=4
-dataset=Peract2
-ngpus=1
-bimanual=True
+dataset=PeractSingleCam
+ngpus=4
+refactored=1
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=ablateC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
@@ -67,4 +67,4 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --checkpoint $checkpoint \
     --exp_log_dir $main_dir \
     --run_log_dir ${run_log_dir} \
-    --bimanual $bimanual
+    --refactored $refactored

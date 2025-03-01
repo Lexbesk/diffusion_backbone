@@ -209,6 +209,8 @@ class AttentionModule(nn.Module):
         """
         output = []
         for i in range(self.num_layers):
+            if self.is_self:
+                seq2 = seq1
             seq1 = self.attn_layers[i](
                 seq1, seq2,
                 seq2_key_padding_mask,
@@ -216,8 +218,6 @@ class AttentionModule(nn.Module):
                 seq1_sem_pos, seq2_sem_pos,
                 ada_sgnl
             )
-            if self.is_self:
-                seq2 = seq1
             seq1 = self.ffw_layers[i](seq1, ada_sgnl)
             output.append(seq1)
         return output
