@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import einops
 
 from diffuser_actor.noise_scheduler import fetch_schedulers
-from diffuser_actor.encoder.encoder import Encoder
+from diffuser_actor.encoder.new_encoder import Encoder
 from diffuser_actor.utils.new_layers import AttentionModule
 from diffuser_actor.utils.position_encodings import (
     RotaryPositionEncoding3D,
@@ -34,6 +34,7 @@ class DenoiseActor(nn.Module):
                  denoise_model="ddpm",
                  nhist=3,
                  relative=False,
+                 finetune_backbone=False,
                  ayush=False):
         super().__init__()
         self._rotation_parametrization = rotation_parametrization
@@ -47,6 +48,7 @@ class DenoiseActor(nn.Module):
             num_attn_heads=num_attn_heads,
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor,
+            finetune_backbone=finetune_backbone,
             ayush=ayush
         )
         self.prediction_head = TransformerHead(
@@ -98,11 +100,12 @@ class DenoiseActor(nn.Module):
             curr_gripper, context_feats, context
         )
 
-        # FPS on visual features (N, B, F) and (B, N, F, 2)
+        # FPS on visual features (B, N, F) and (B, N, F, 2)
         fps_feats, fps_pos = self.encoder.run_fps(
             context_feats.transpose(0, 1),
             self.encoder.relative_pe_layer(context)
         )
+        fps_feats = fps_feats.transpose(0, 1)
 
         return (
             context_feats, context,  # contextualized visual features
@@ -496,8 +499,8 @@ class TransformerHead(nn.Module):
         self.cross_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=4 * embedding_dim,
-            dropout=0.2,
+            dim_fw=embedding_dim,
+            dropout=0.0,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -510,8 +513,8 @@ class TransformerHead(nn.Module):
         self.self_attn = AttentionModule(
             num_layers=4,
             d_model=embedding_dim,
-            dim_fw=4 * embedding_dim,
-            dropout=0.2,
+            dim_fw=embedding_dim,
+            dropout=0.0,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -526,8 +529,8 @@ class TransformerHead(nn.Module):
         self.rotation_self_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=4 * embedding_dim,
-            dropout=0.2,
+            dim_fw=embedding_dim,
+            dropout=0.0,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -546,8 +549,8 @@ class TransformerHead(nn.Module):
         self.position_self_attn = AttentionModule(
             num_layers=2,
             d_model=embedding_dim,
-            dim_fw=4 * embedding_dim,
-            dropout=0.2,
+            dim_fw=embedding_dim,
+            dropout=0.0,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -579,7 +582,7 @@ class TransformerHead(nn.Module):
             context: (B, N, F, 2)
             instr_feats: (B, max_instruction_length, F)
             adaln_gripper_feats: (B, nhist, F)
-            fps_feats: (N, B, F), N < context_feats.size(1)
+            fps_feats: (B, N, F), N < context_feats.size(1)
             fps_pos: (B, N, F, 2)
         """
         # Trajectory features
@@ -598,11 +601,6 @@ class TransformerHead(nn.Module):
         traj_feats = traj_feats + traj_time_pos
 
         # Predict position, rotation, opening
-        traj_feats = einops.rearrange(traj_feats, 'b l c -> l b c')
-        context_feats = einops.rearrange(context_feats, 'b l c -> l b c')
-        adaln_gripper_feats = einops.rearrange(
-            adaln_gripper_feats, 'b l c -> l b c'
-        )
         pos_pred, rot_pred, openess_pred = self.prediction_head(
             trajectory[..., :3], traj_feats,
             context[..., :3], context_feats,
@@ -625,10 +623,10 @@ class TransformerHead(nn.Module):
             gripper_pcd: A tensor of shape (B, N, 3)
             gripper_features: A tensor of shape (N, B, F)
             context_pcd: A tensor of shape (B, N, 3)
-            context_features: A tensor of shape (N, B, F)
+            context_features: A tensor of shape (B, N, F)
             timesteps: A tensor of shape (B,) indicating the denoise step
-            curr_gripper_features: A tensor of shape (M, B, F)
-            sampled_context_features: A tensor of shape (K, B, F)
+            curr_gripper_features: A tensor of shape (B, M, F)
+            sampled_context_features: A tensor of shape (B, K, F)
             sampled_rel_context_pos: A tensor of shape (B, K, F, 2)
             instr_feats: (B, max_instruction_length, F)
         """
@@ -643,34 +641,34 @@ class TransformerHead(nn.Module):
 
         # Cross attention from gripper to full context
         gripper_features = self.cross_attn(
-            seq1=gripper_features.transpose(0, 1),
-            seq2=context_features.transpose(0, 1),
+            seq1=gripper_features,
+            seq2=context_features,
             seq1_pos=rel_gripper_pos,
             seq2_pos=rel_context_pos,
             ada_sgnl=time_embs
-        )[-1].transpose(0, 1)
+        )[-1]
 
         # Self attention among gripper and sampled context
-        features = torch.cat([gripper_features, sampled_context_features], 0)
+        features = torch.cat([gripper_features, sampled_context_features], 1)
         rel_pos = torch.cat([rel_gripper_pos, sampled_rel_context_pos], 1)
         features = self.self_attn(
-            seq1=features.transpose(0, 1),
-            seq2=features.transpose(0, 1),
+            seq1=features,
+            seq2=features,
             seq1_pos=rel_pos,
             seq2_pos=rel_pos,
             ada_sgnl=time_embs
-        )[-1].transpose(0, 1)
+        )[-1]
 
-        num_gripper = gripper_features.shape[0]
+        num_gripper = gripper_features.shape[1]
 
         # Rotation head
         rotation = self.predict_rot(
-            features, rel_pos, time_embs, num_gripper, instr_feats
+            features, rel_pos, time_embs, num_gripper
         )
 
         # Position head
         position, position_features = self.predict_pos(
-            features, rel_pos, time_embs, num_gripper, instr_feats
+            features, rel_pos, time_embs, num_gripper
         )
 
         # Openess head from position head
@@ -689,42 +687,32 @@ class TransformerHead(nn.Module):
             - time_feats: (B, F)
         """
         time_feats = self.time_emb(timestep)
-
-        curr_gripper_features = einops.rearrange(
-            curr_gripper_features, "npts b c -> b npts c"
-        )
         curr_gripper_features = curr_gripper_features.flatten(1)
         curr_gripper_feats = self.curr_gripper_emb(curr_gripper_features)
         return time_feats + curr_gripper_feats
 
-    def predict_pos(self, features, rel_pos, time_embs, num_gripper,
-                    instr_feats):
+    def predict_pos(self, features, rel_pos, time_embs, num_gripper):
         position_features = self.position_self_attn(
-            seq1=features.transpose(0, 1),
-            seq2=features.transpose(0, 1),
+            seq1=features,
+            seq2=features,
             seq1_pos=rel_pos,
             seq2_pos=rel_pos,
             ada_sgnl=time_embs
-        )[-1].transpose(0, 1)
-        position_features = einops.rearrange(
-            position_features[:num_gripper], "npts b c -> b npts c"
-        )
+        )[-1]
+        position_features = position_features[:, :num_gripper]
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
 
-    def predict_rot(self, features, rel_pos, time_embs, num_gripper,
-                    instr_feats):
+    def predict_rot(self, features, rel_pos, time_embs, num_gripper):
         rotation_features = self.rotation_self_attn(
-            seq1=features.transpose(0, 1),
-            seq2=features.transpose(0, 1),
+            seq1=features,
+            seq2=features,
             seq1_pos=rel_pos,
             seq2_pos=rel_pos,
             ada_sgnl=time_embs
-        )[-1].transpose(0, 1)
-        rotation_features = einops.rearrange(
-            rotation_features[:num_gripper], "npts b c -> b npts c"
-        )
+        )[-1]
+        rotation_features = rotation_features[:, :num_gripper]
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation

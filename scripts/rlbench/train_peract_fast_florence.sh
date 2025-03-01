@@ -5,8 +5,8 @@ main_dir=Peract_singlecam
 
 train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/train.zarr
 eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/PeractTwoCam_zarr/val.zarr
-train_instructions=instructions/peract/instructions.pkl
-val_instructions=instructions/peract/instructions.pkl
+train_instructions=instructions/peract/instructions.json
+val_instructions=instructions/peract/instructions.json
 
 lr=1e-4
 lr_scheduler=constant
@@ -25,9 +25,9 @@ B_val=64
 C=120
 num_attn_heads=8
 num_vis_ins_attn_layers=3
-train_iters=800000
+train_iters=600000
 val_freq=4000
-precompute_instruction_encodings=true
+precompute_instruction_encodings=false
 num_workers=4
 dataset=PeractSingleCam
 ngpus=4

@@ -125,12 +125,12 @@ def all_tasks_main(split):
         "dual_push_buttons", "handover_item_easy", "handover_item"
     ]
     # camera_order = [
-    #     "over_shoulder_left", "over_shoulder_right",
-    #     "wrist_left", "wrist_right", "front"
+    #     "front", "over_shoulder_left", "over_shoulder_right",
+    #     "wrist_left", "wrist_right"
     # ]
     camera_order = [
-        "left", "right",
-        "wrist", "wrist", "front"
+        "front", "left", "right",
+        "wrist", "wrist"
     ]
     task2id = {task: t for t, task in enumerate(tasks)}
     variations = range(0, 199)
@@ -142,7 +142,9 @@ def all_tasks_main(split):
             _path = Path(f'{ROOT}{split}/{task}+{var}/')
             if not _path.is_dir():
                 continue
-            episodes.extend([(task, var, ep) for ep in _path.glob("*.dat")])
+            episodes.extend([
+                (task, var, ep) for ep in sorted(_path.glob("*.dat"))
+            ])
 
     # Read once to get the number of keyposes
     n_keyposes = 0

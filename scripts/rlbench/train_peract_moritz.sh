@@ -9,7 +9,7 @@ val_instructions=instructions/peract/instructions.pkl
 lr=1e-4
 lr_scheduler=constant
 num_history=3
-denoise_timesteps=10  # 10
+denoise_timesteps=20  # 10
 denoise_model=moritz
 keypose_only=true
 quaternion_format=xyzw
@@ -31,7 +31,7 @@ dataset=PeractSingleCam
 ngpus=4
 refactored=1
 
-run_log_dir=ablateC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=ablate_betterC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 eval_only=false
 

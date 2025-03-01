@@ -1,10 +1,7 @@
-# rm -r /scratch/Peract_zarr/
-# cp -r /data/user_data/ngkanats/Peract_zarr /scratch/
-
 main_dir=Peract2
 
-train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/train.zarr
-eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/test.zarr
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/test.zarr
 train_instructions=instructions/peract2/instructions.pkl
 val_instructions=instructions/peract2/instructions.pkl
 
@@ -30,7 +27,7 @@ val_freq=4000
 precompute_instruction_encodings=true
 num_workers=4
 dataset=Peract2
-ngpus=4
+ngpus=1
 bimanual=True
 
 run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps

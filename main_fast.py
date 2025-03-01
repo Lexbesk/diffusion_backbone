@@ -11,7 +11,8 @@ from kornia import augmentation as K
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import optim
+from torch import nn
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -34,7 +35,8 @@ from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor as Refac
 from diffuser_actor.depth2cloud.rlbench import (
     PeractDepth2Cloud,
     PeractTwoCam2Cloud,
-    GNFactorDepth2Cloud
+    GNFactorDepth2Cloud,
+    Peract2Depth2Cloud
 )
 from utils.common_utils import count_parameters, str2bool, str_none
 
@@ -71,6 +73,7 @@ def parse_arguments():
     parser.add_argument('--ayush', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
     parser.add_argument('--backbone', type=str, default="clip")
+    parser.add_argument('--finetune_backbone', type=str2bool, default=False)
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
@@ -181,6 +184,7 @@ class TrainTester(BaseTrainTester):
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
             relative=self.args.relative_action,
+            finetune_backbone=self.args.finetune_backbone,
             ayush=self.args.ayush
         )
         print("Model parameters:", count_parameters(_model))
@@ -232,6 +236,27 @@ class TrainTester(BaseTrainTester):
     def get_criterion():
         return TrajectoryCriterion()
 
+    def get_optimizer(self, model):
+        """Initialize optimizer."""
+        optimizer_grouped_parameters = [
+            {"params": [], "weight_decay": 0.0, "lr": self.args.lr},
+            {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr}
+        ]
+        if self.args.finetune_backbone:
+            optimizer_grouped_parameters.append(
+                {"params": [], "weight_decay": self.args.wd, "lr": 0.1 * self.args.lr}
+            )
+        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
+        for name, param in model.named_parameters():
+            if self.args.finetune_backbone and 'backbone' in name:
+                optimizer_grouped_parameters[2]["params"].append(param)
+            elif any(nd in name for nd in no_decay):
+                optimizer_grouped_parameters[0]["params"].append(param)
+            else:
+                optimizer_grouped_parameters[1]["params"].append(param)
+        optimizer = optim.AdamW(optimizer_grouped_parameters)
+        return optimizer
+
     def get_text_encoder(self):
         """Initialize the model."""
         return ClipTextEncoder(self.args.text_max_length)
@@ -269,6 +294,15 @@ class TrainTester(BaseTrainTester):
                 instr = text_encoder(sample['instr'], "cuda")
             else:
                 instr = sample["instr"]
+        # print(sample["proprioception"].shape)
+        # print(sample["proprioception"][0])
+        # print(sample["proprioception"][1])
+        # for i, img in enumerate(rgbs.cpu()):
+        #     assert img.shape == (1, 3, 256, 256)
+        #     plt.imshow(img[0].permute(1, 2, 0))
+        #     plt.savefig(f'ex_{i}.jpg')
+        #     plt.close()
+        # from ipdb import set_trace as st; st()
         return (
             sample["action"].cuda(non_blocking=True),
             sample["action_mask"].cuda(non_blocking=True),
@@ -314,7 +348,7 @@ class TrainTester(BaseTrainTester):
                 break
 
             action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
-                sample, text_encoder, augment=True
+                sample, text_encoder, augment=False
             )
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 pred_action = model(
