@@ -75,16 +75,12 @@ class DenoiseActor(nn.Module):
             )
         elif denoise_model == "rectified_flow":
             self.position_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
                 noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
+                noise_sampler_config={'mean': 0, 'std': 1.5}
             )
             self.rotation_noise_scheduler = RFScheduler(
-                num_train_timesteps=denoise_timesteps,
-                timestep_spacing="linspace",
                 noise_sampler="logit_normal",
-                noise_sampler_config={'mean': 0, 'std': 1.5},
+                noise_sampler_config={'mean': 0, 'std': 1.5}
             )
         else:
             raise ValueError(f"Unknown denoise model: {denoise_model}")

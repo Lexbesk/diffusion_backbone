@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm import trange
 
 from engine import BaseTrainTester
-from datasets.dataset_rlbench import (
+from datasets.old_dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
     Peract2Dataset
@@ -133,6 +133,7 @@ class TrainTester(BaseTrainTester):
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
             use_instruction=self.args.use_instruction,
+            num_attn_heads=self.args.num_attn_heads,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,
@@ -263,6 +264,12 @@ class TrainTester(BaseTrainTester):
                     instr = text_encoder(sample['instr'], device)
                 else:
                     instr = sample["instr"].to(device)
+                for i, img in enumerate(sample["rgbs"].cpu()):
+                    assert img.shape == (1, 3, 256, 256)
+                    plt.imshow(img[0].permute(1, 2, 0))
+                    plt.savefig(f'ex_{i}.jpg')
+                    plt.close()
+                from ipdb import set_trace as st; st()
                 action = model(
                     sample["action"].to(device),
                     sample["action_mask"].to(device),

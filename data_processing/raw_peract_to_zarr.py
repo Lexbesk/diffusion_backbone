@@ -9,11 +9,11 @@ import torch
 from tqdm import tqdm
 
 
-ROOT = '/data/user_data/ngkanats/peract2/'
-STORE_PATH = '/data/user_data/ngkanats/Peract2_zarr/'
-RAW_ROOT = '/data/group_data/katefgroup/VLA/peract2_raw/'
+ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_packaged/'
+RAW_PATH = '/data/group_data/katefgroup/VLA/peract_train/close_jar/variation0/episodes/episode0/low_dim_obs.pkl'
+STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
-NCAM = 5
+NCAM = 4
 IM_SIZE = 256
 
 
@@ -117,32 +117,29 @@ def to_numpy(x):
 
 def all_tasks_main(split):
     tasks = [
-        "bimanual_pick_laptop", "bimanual_pick_plate",
-        "bimanual_straighten_rope", "bimanual_sweep_to_dustpan",
-        "coordinated_lift_ball", "coordinated_lift_tray",
-        "coordinated_push_box", "coordinated_put_bottle_in_fridge",
-        "coordinated_put_item_in_drawer", "coordinated_take_tray_out_of_oven",
-        "dual_push_buttons", "handover_item_easy", "handover_item"
+        "place_cups", "close_jar", "insert_onto_square_peg",
+        "light_bulb_in", "meat_off_grill", "open_drawer",
+        "place_shape_in_shape_sorter", "place_wine_at_rack_location",
+        "push_buttons", "put_groceries_in_cupboard",
+        "put_item_in_drawer", "put_money_in_safe", "reach_and_drag",
+        "slide_block_to_color_target", "stack_blocks", "stack_cups",
+        "sweep_to_dustpan_of_size", "turn_tap"
     ]
-    # camera_order = [
-    #     "over_shoulder_left", "over_shoulder_right",
-    #     "wrist_left", "wrist_right", "front"
-    # ]
-    camera_order = [
-        "left", "right",
-        "wrist", "wrist", "front"
-    ]
+    camera_order = ['left', 'right', 'wrist', 'front']
     task2id = {task: t for t, task in enumerate(tasks)}
     variations = range(0, 199)
 
     # Collect all episodes
+    # /data/group_data/katefgroup/VLA/peract_train/close_jar/all_variations/episodes/episode0/
     episodes = []
     for task in tasks:
         for var in variations:
             _path = Path(f'{ROOT}{split}/{task}+{var}/')
             if not _path.is_dir():
                 continue
-            episodes.extend([(task, var, ep) for ep in _path.glob("*.dat")])
+            episodes.extend([
+                (task, var, ep) for ep in sorted(_path.glob("*.dat"))
+            ])
 
     # Read once to get the number of keyposes
     n_keyposes = 0
@@ -180,15 +177,15 @@ def all_tasks_main(split):
         )
         zarr_file.create_dataset(
             "proprioception",
-            shape=(n_keyposes, 3, 2, 8),
-            chunks=(STORE_EVERY, 3, 2, 8),
+            shape=(n_keyposes, 3, 8),
+            chunks=(STORE_EVERY, 3, 8),
             compressor=compressor,
             dtype="float32"
         )
         zarr_file.create_dataset(
             "action",
-            shape=(n_keyposes, 2, 2, 8),
-            chunks=(STORE_EVERY, 2, 2, 8),
+            shape=(n_keyposes, 2, 8),
+            chunks=(STORE_EVERY, 2, 8),
             compressor=compressor,
             dtype="float32"
         )
@@ -196,18 +193,11 @@ def all_tasks_main(split):
         # Loop through episodes
         start = 0
         for task, var, ep in tqdm(episodes):
-            # Read low-dim file from RLBench
-            ep_num = str(ep).split('/')[-1][2:-4]
-            ld_file = f"{RAW_ROOT}/{split}/{task}/variation{var}/episodes/episode{ep_num}/low_dim_obs.pkl"
-            with open(ld_file, 'rb') as f:
-                obs = pickle.load(f)
-            # obs[i].misc['wrist_camera_extrinsics'],
-            # obs[i].misc['wrist_camera_intrinsics']
-            # Read episode .dat
+            # Read
             with open(ep, "rb") as f:
                 content = pickle.loads(blosc.decompress(f.read()))
             # Map [-1, 1] to [0, 255] uint8
-            rgb = (127.5 * (content[1][:, :, 0] + 1)).astype(np.uint8)
+            rgb = (127.5 * (content[1][:, -NCAM:, 0] + 1)).astype(np.uint8)
             # Extract depth from point cloud, faster loading
             depth = np.stack([
                 inverse_depth_batched(
@@ -216,6 +206,7 @@ def all_tasks_main(split):
                     cameras[cam]['intrinsics']
                 )
                 for c, cam in enumerate(camera_order)
+                if c > 3 - NCAM
             ], 1).astype(np.float16)
             # Store current eef pose as well as two previous ones
             prop = np.stack([
@@ -224,18 +215,14 @@ def all_tasks_main(split):
             prop_1 = np.concatenate([prop[:1], prop[:-1]])
             prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
             prop = np.concatenate([prop_2, prop_1, prop], 1)
-            prop = prop.reshape(len(prop), 3, 2, 8)
             # Next keypose (concatenate curr eef to form a "trajectory")
             actions = np.stack([
                 to_numpy(tens).astype(np.float32) for tens in content[2]
             ])
-            actions = actions.reshape(len(actions), 1, 2, 8)
             actions = np.concatenate([prop[:, -1:], actions], 1)
             # Task ids and variation ids
             tids = np.array([task2id[task]] * len(content[0])).astype(np.uint8)
             _vars = np.array([var] * len(content[0])).astype(np.uint8)
-            # Mine info from trajectories to infer keypose id and store cmeras
-            from ipdb import set_trace as st; st()
 
             # write
             end = start + len(_vars)
@@ -249,5 +236,5 @@ def all_tasks_main(split):
 
 
 if __name__ == "__main__":
-    for split in ['train', 'test']:
+    for split in ['train', 'val']:
         all_tasks_main(split)

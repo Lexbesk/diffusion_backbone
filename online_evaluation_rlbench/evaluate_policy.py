@@ -11,7 +11,7 @@ import numpy as np
 import argparse
 
 from diffuser_actor.policy import BimanualDenoiseActor  # , DenoiseActor
-from diffuser_actor.policy.denoise_comeback_actor import DenoiseActor
+from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,
@@ -50,8 +50,7 @@ def parse_arguments():
     parser.add_argument('--rotation_parametrization', type=str, default='quat')
     parser.add_argument('--quaternion_format', type=str, default='wxyz')
     parser.add_argument('--denoise_timesteps', type=int, default=10)
-    parser.add_argument('--denoise_model', type=str, default="rectified_flow",
-                        choices=["ddpm", "rectified_flow"])
+    parser.add_argument('--denoise_model', type=str, default="rectified_flow")
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
@@ -82,7 +81,7 @@ def load_models(args):
         denoise_model=args.denoise_model,
         nhist=args.num_history,
         relative=args.relative_action,
-        relative_attention=args.relative_attention
+        # relative_attention=args.relative_attention
     )
 
     # Load model weights
