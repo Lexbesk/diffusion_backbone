@@ -1,9 +1,9 @@
 main_dir=Peract2
 
-train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/train.zarr
-eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2debug_zarr/test.zarr
-train_instructions=instructions/peract2/instructions.pkl
-val_instructions=instructions/peract2/instructions.pkl
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/val.zarr
+train_instructions=instructions/peract2/instructions.json
+val_instructions=instructions/peract2/instructions.json
 
 lr=1e-4
 lr_scheduler=constant
@@ -24,19 +24,19 @@ num_attn_heads=8
 num_vis_ins_attn_layers=3
 train_iters=600000
 val_freq=4000
-precompute_instruction_encodings=true
+precompute_instruction_encodings=false
 num_workers=4
 dataset=Peract2
 ngpus=1
 bimanual=True
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=newC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=none
 eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_fast.py \
+    main_fast_new.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \

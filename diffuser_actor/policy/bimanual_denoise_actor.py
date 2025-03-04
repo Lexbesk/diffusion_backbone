@@ -22,6 +22,7 @@ class BimanualDenoiseActor(DenoiseActor):
                  denoise_model="ddpm",
                  nhist=3,
                  relative=False,
+                 finetune_backbone=False,
                  ayush=False):
         super().__init__(
             backbone=backbone,
@@ -36,6 +37,7 @@ class BimanualDenoiseActor(DenoiseActor):
             denoise_model=denoise_model,
             nhist=nhist * 2,
             relative=relative,
+            finetune_backbone=finetune_backbone,
             ayush=ayush
         )
         self.traj_encoder = nn.Linear(9, embedding_dim)
@@ -276,14 +278,13 @@ class BimanualTransformerHead(TransformerHead):
                 fps_feats, fps_pos):
         """
         Arguments:
-            trajectory_feats: (B, trajectory_length, 2, C)
-            trajectory: (B, trajectory_length, 2, 3+6+X)
+            trajectory: (B, trajectory_length, 3+6+X)
             timestep: (B, 1)
             context_feats: (B, N, F)
             context: (B, N, F, 2)
             instr_feats: (B, max_instruction_length, F)
-            adaln_gripper_feats: (B, nhist * 2, F)
-            fps_feats: (N, B, F), N < context_feats.size(1)
+            adaln_gripper_feats: (B, nhist, F)
+            fps_feats: (B, N, F), N < context_feats.size(1)
             fps_pos: (B, N, F, 2)
         """
         B, traj_len, nhand, C = trajectory.shape
@@ -300,20 +301,14 @@ class BimanualTransformerHead(TransformerHead):
         )[None, None].repeat(len(traj_feats), 1, nhand, 1)
         traj_time_pos = einops.rearrange(traj_time_pos, 'b l h c -> b (l h) c')
         if self.use_instruction:
-            traj_feats, _ = self.traj_lang_attention[0](
-                seq1=traj_feats, seq1_key_padding_mask=None,
-                seq2=instr_feats, seq2_key_padding_mask=None,
-                seq1_pos=None, seq2_pos=None,
+            traj_feats = self.traj_lang_attention(
+                seq1=traj_feats,
+                seq2=instr_feats,
                 seq1_sem_pos=traj_time_pos, seq2_sem_pos=None
-            )
+            )[-1]
         traj_feats = traj_feats + traj_time_pos
 
         # Predict position, rotation, opening
-        traj_feats = einops.rearrange(traj_feats, 'b l c -> l b c')
-        context_feats = einops.rearrange(context_feats, 'b l c -> l b c')
-        adaln_gripper_feats = einops.rearrange(
-            adaln_gripper_feats, 'b l c -> l b c'
-        )
         pos_pred, rot_pred, openess_pred = self.prediction_head(
             trajectory[..., :3], traj_feats,
             context[..., :3], context_feats,
