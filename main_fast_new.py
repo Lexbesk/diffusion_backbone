@@ -16,6 +16,8 @@ from torch import nn
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from tqdm import trange
 from tqdm import tqdm
 
 from engine import BaseTrainTester
@@ -24,11 +26,11 @@ from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractSingleCamDataset,
     Peract2Dataset,
+    Peract2Dataset3cam,
     PeractTwoCamDataset
 )
 from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
-from diffuser_actor.encoder.text.clip import ClipTextEncoder
 from diffuser_actor.policy import BimanualDenoiseActor, DenoiseActor
 from diffuser_actor.policy.denoise_sa_actor import DenoiseActor as DenoiseActorSA
 from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor as RefactoredActor
@@ -64,8 +66,6 @@ def parse_arguments():
                         default=Path(__file__).parent / "train_logs")
     parser.add_argument('--exp_log_dir', type=Path, default="exp")
     parser.add_argument('--run_log_dir', type=Path, default="run")
-    # Text encoder
-    parser.add_argument('--text_max_length', type=int, default=53)
     # Model
     parser.add_argument('--bimanual', type=str2bool, default=False)
     parser.add_argument('--refactored', type=str2bool, default=False)
@@ -105,6 +105,7 @@ class TrainTester(BaseTrainTester):
             "PeractSingleCam": GNFactorDepth2Cloud,
             "PeractTwoCam": PeractTwoCam2Cloud,
             "Peract2": NewDepth2Cloud,
+            "Peract2TC": NewDepth2Cloud,
             "GNFactor": GNFactorDepth2Cloud,
             "RLComp": GNFactorDepth2Cloud,
             "ABC_D": None,
@@ -136,6 +137,7 @@ class TrainTester(BaseTrainTester):
             "PeractSingleCam": PeractSingleCamDataset,
             "PeractTwoCam": PeractTwoCamDataset,
             "Peract2": Peract2Dataset,
+            "Peract2TC": Peract2Dataset3cam,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
             "ABC_D": ABC_DDataset,
@@ -198,6 +200,7 @@ class TrainTester(BaseTrainTester):
             "PeractSingleCam": PeractSingleCamDataset,
             "PeractTwoCam": PeractTwoCamDataset,
             "Peract2": Peract2Dataset,
+            "Peract2TC": Peract2Dataset3cam,
             "GNFactor": GNFactorDataset,
             "RLComp": RLBenchCompDataset,
             "ABC_D": ABC_DDataset,
@@ -257,12 +260,96 @@ class TrainTester(BaseTrainTester):
         optimizer = optim.AdamW(optimizer_grouped_parameters)
         return optimizer
 
-    def get_text_encoder(self):
-        """Initialize the model."""
-        return ClipTextEncoder(self.args.text_max_length)
+    def main(self, collate_fn):
+        """Run main training/testing pipeline."""
+        # Get loaders
+        train_loader, test_loader = self.get_loaders(collate_fn)
+
+        # Get model
+        model = self.get_model()
+        if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
+            normalizer = self.get_workspace_normalizer(train_loader)
+            model.workspace_normalizer.copy_(normalizer)
+            dist.barrier()
+
+        # Get criterion
+        criterion = self.get_criterion()
+
+        # Get optimizer
+        optimizer = self.get_optimizer(model)
+        lr_scheduler = self.get_lr_scheduler(optimizer)
+        scaler = torch.GradScaler()
+
+        # Move model to devices
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model = DistributedDataParallel(
+            model, device_ids=[self.args.local_rank],
+            broadcast_buffers=False, find_unused_parameters=True
+        )
+
+        # Check for a checkpoint
+        start_iter, best_loss = 0, None
+        if self.args.checkpoint:
+            start_iter, best_loss = self.load_checkpoint(model, optimizer)
+        print(model.module.workspace_normalizer)
+
+        # Eval only
+        if bool(self.args.eval_only):
+            if dist.get_rank() == 0:
+                print("Test evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, test_loader, step_id=-1,
+                    val_iters=-1
+                )
+            dist.barrier()
+            return model
+
+        # Step the lr scheduler to the current step
+        for _ in range(start_iter):
+            lr_scheduler.step()
+
+        # Training loop
+        iter_loader = iter(train_loader)
+        model.train()
+        for step_id in trange(start_iter, self.args.train_iters):
+            try:
+                sample = next(iter_loader)
+            except StopIteration:
+                iter_loader = iter(train_loader)
+                sample = next(iter_loader)
+
+            self.train_one_step(
+                model, criterion, optimizer, scaler, lr_scheduler,
+                step_id, sample
+            )
+
+            if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
+                print("Train evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, train_loader, step_id,
+                    val_iters=max(5, self.args.val_iters),
+                    split='train'
+                )
+                print("Test evaluation.......")
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, test_loader, step_id,
+                    val_iters=-1,
+                )
+                # save model
+                best_loss = self.save_checkpoint(
+                    model, optimizer, step_id,
+                    new_loss, best_loss
+                )
+                model.train()
+            dist.barrier()
+
+        return model
 
     @torch.no_grad()
-    def prepare_batch(self, sample, text_encoder, augment=False):
+    def prepare_batch(self, sample, augment=False):
         # Actions
         if self.args.keypose_only:
             sample["action"] = sample["action"][:, [-1]]
@@ -290,38 +377,23 @@ class TrainTester(BaseTrainTester):
         else:
             rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
 
-        # Instructions
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if not self.args.precompute_instruction_encodings and self.args.backbone not in ['florence2', 'siglip2_256', 'siglip2_512']:
-                instr = text_encoder(sample['instr'], "cuda")
-            else:
-                instr = sample["instr"]
-        # print(sample["proprioception"].shape)
-        # print(sample["proprioception"][0])
-        # print(sample["proprioception"][1])
-        # for i, img in enumerate(rgbs.cpu()):
-        #     assert img.shape == (1, 3, 256, 256)
-        #     plt.imshow(img[0].permute(1, 2, 0))
-        #     plt.savefig(f'ex_{i}.jpg')
-        #     plt.close()
-        # from ipdb import set_trace as st; st()
         return (
             sample["action"].cuda(non_blocking=True),
             sample["action_mask"].cuda(non_blocking=True),
             rgbs,
             pcds,
-            instr,
+            sample["instr"],
             sample["proprioception"].cuda(non_blocking=True)
         )
 
-    def train_one_step(self, model, text_encoder, criterion,
+    def train_one_step(self, model, criterion,
                        optimizer, scaler, lr_scheduler, step_id, sample):
         """Run a single training step."""
         optimizer.zero_grad()
 
         # Forward pass
         action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
-            sample, text_encoder, augment=True
+            sample, augment=True
         )
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = model(action, action_mask, rgbs, pcds, instr, prop)
@@ -338,7 +410,7 @@ class TrainTester(BaseTrainTester):
         lr_scheduler.step()
 
     @torch.inference_mode()
-    def evaluate_nsteps(self, model, text_encoder, criterion, loader,
+    def evaluate_nsteps(self, model, criterion, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
         values = {}
@@ -350,7 +422,7 @@ class TrainTester(BaseTrainTester):
                 break
 
             action, action_mask, rgbs, pcds, instr, prop = self.prepare_batch(
-                sample, text_encoder, augment=False
+                sample, augment=False
             )
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 pred_action = model(

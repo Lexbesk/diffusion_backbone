@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 
 
@@ -154,3 +157,26 @@ def keypoint_discovery(demo, method="heuristic", bimanual=False):
 
     else:
         raise NotImplementedError
+
+
+def _store_instructions(root, task):
+    # both root and path are strings
+    var2text = {}
+    for split in ['train', 'val']:
+        folder = f'{root}/{split}/{task}/all_variations/episodes'
+        eps = {ep for ep in os.listdir(folder) if ep.startswith('ep')}
+        for ep in eps:
+            # Load variation
+            with open(f'{folder}/{ep}/variation_number.pkl', 'rb') as f:
+                var_ = pickle.load(f)
+            if var_ in var2text:
+                continue
+            # Read different descriptions
+            with open(f'{folder}/{ep}/variation_descriptions.pkl', 'rb') as f:
+                var2text[var_] = pickle.load(f)
+    return var2text
+
+
+def store_instructions(root, task_list):
+    # {task: {var: [text]}}
+    return {task: _store_instructions(root, task) for task in task_list}

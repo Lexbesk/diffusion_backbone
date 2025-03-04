@@ -1,3 +1,4 @@
+import json
 import os
 import pickle
 
@@ -9,35 +10,20 @@ from tqdm import tqdm
 
 from data_processing.rlbench_utils import (
     keypoint_discovery,
-    image_to_float_array
+    image_to_float_array,
+    store_instructions
 )
 
 
 ROOT = '/data/group_data/katefgroup/VLA/peract2_raw_squash/'
 STORE_PATH = '/data/user_data/ngkanats/Peract2_zarr/'
-STORE_PATH = 'Peract2_zarr/'
 STORE_EVERY = 1  # in keyposes
 NCAM = 5
 IM_SIZE = 256
 DEPTH_SCALE = 2**24 - 1
 
 
-def all_tasks_main(split):
-    tasks = [
-        'bimanual_push_box',
-        'bimanual_lift_ball',
-        'bimanual_dual_push_buttons',
-        'bimanual_pick_plate',
-        'bimanual_put_item_in_drawer',
-        'bimanual_put_bottle_in_fridge',
-        'bimanual_handover_item',
-        'bimanual_pick_laptop',
-        'bimanual_straighten_rope',
-        'bimanual_sweep_to_dustpan',
-        'bimanual_lift_tray',
-        'bimanual_handover_item_easy',
-        'bimanual_take_tray_out_of_oven'
-    ]
+def all_tasks_main(split, tasks):
     cameras = [
         "front", "over_shoulder_left", "over_shoulder_right",
         "wrist_left", "wrist_right"
@@ -205,5 +191,26 @@ def _num2id(int_):
 
 
 if __name__ == "__main__":
+    tasks = [
+        'bimanual_push_box',
+        'bimanual_lift_ball',
+        'bimanual_dual_push_buttons',
+        'bimanual_pick_plate',
+        'bimanual_put_item_in_drawer',
+        'bimanual_put_bottle_in_fridge',
+        'bimanual_handover_item',
+        'bimanual_pick_laptop',
+        'bimanual_straighten_rope',
+        'bimanual_sweep_to_dustpan',
+        'bimanual_lift_tray',
+        'bimanual_handover_item_easy',
+        'bimanual_take_tray_out_of_oven'
+    ]
+    # Create zarr data
     for split in ['train', 'val']:
-        all_tasks_main(split)
+        all_tasks_main(split, tasks)
+    # Store instructions as json (can be run independently)
+    os.makedirs('instructions/peract2', exist_ok=True)
+    instr_dict = store_instructions(ROOT, tasks)
+    with open('instructions/peract2/instructions.json', 'w') as fid:
+        json.dump(instr_dict, fid)

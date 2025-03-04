@@ -179,6 +179,12 @@ class Peract2Dataset(RLBenchDataset):
     def _get_pcd(self, idx):
         return to_tensor(self.annos['depth'][idx])[:1]
 
+    def _get_instr(self, idx):
+        t_ = int(self.annos['task_id'][idx])
+        v_ = int(self.annos['variation'][idx])
+        task = self.tasks[t_]
+        return [random.choice(self._instructions[task][v_])]
+
     def __getitem__(self, idx):
         """
         self.annos: {
@@ -201,4 +207,66 @@ class Peract2Dataset(RLBenchDataset):
             "action": self._get_action(idx),  # tensor(T, 8)
             "extrinsics": to_tensor(self.annos['extrinsics'][idx])[:1],
             "intrinsics": to_tensor(self.annos['intrinsics'][idx])[:1]
+        }
+
+
+class Peract2Dataset3cam(RLBenchDataset):
+    """RLBench dataset under Peract2 setup."""
+    tasks = [
+        'bimanual_push_box',
+        'bimanual_lift_ball',
+        'bimanual_dual_push_buttons',
+        'bimanual_pick_plate',
+        'bimanual_put_item_in_drawer',
+        'bimanual_put_bottle_in_fridge',
+        'bimanual_handover_item',
+        'bimanual_pick_laptop',
+        'bimanual_straighten_rope',
+        'bimanual_sweep_to_dustpan',
+        'bimanual_lift_tray',
+        'bimanual_handover_item_easy',
+        'bimanual_take_tray_out_of_oven'
+    ]
+    variations = range(0, 199)
+    # cameras = (
+    #     "front", "over_shoulder_left", "over_shoulder_right",
+    #     "wrist_left", "wrist_right"
+    # )
+    cameras = ("front", "wrist_left", "wrist_right")
+    train_copies = 10  # how many copies of the dataset to load
+
+    def _get_rgb(self, idx):
+        return to_tensor(self.annos['rgb'][idx])[(0, 3, 4),]
+
+    def _get_pcd(self, idx):
+        return to_tensor(self.annos['depth'][idx])[(0, 3, 4),]
+
+    def _get_instr(self, idx):
+        t_ = int(self.annos['task_id'][idx])
+        v_ = int(self.annos['variation'][idx])
+        task = self.tasks[t_]
+        return [random.choice(self._instructions[task][v_])]
+
+    def __getitem__(self, idx):
+        """
+        self.annos: {
+            action: (N, T, 8) float
+            depth: (N, n_cam, H, W) float16
+            proprioception: (N, nhist, 8) float
+            rgb: (N, n_cam, 3, H, W) uint8
+        }
+        In addition self.annos may contain fields for task/instruction ids
+        """
+        idx = idx % len(self.annos['rgb'])
+        if self._actions_only:
+            return {"action": self._get_action(idx)}
+        return {
+            "task": self._get_task(idx),
+            "instr": self._get_instr(idx),  # [str] or tensor(53, 512)
+            "rgb": self._get_rgb(idx),  # tensor(n_cam, 3, H, W)
+            "depth": self._get_pcd(idx),  # tensor(n_cam, H, W)
+            "proprioception": self._get_proprioception(idx),  # tensor(1, 8)
+            "action": self._get_action(idx),  # tensor(T, 8)
+            "extrinsics": to_tensor(self.annos['extrinsics'][idx])[(0, 3, 4),],
+            "intrinsics": to_tensor(self.annos['intrinsics'][idx])[(0, 3, 4),]
         }

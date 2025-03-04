@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 
-from .denoise_actor import DenoiseActor, TransformerHead
+from .denoise_refactored_actor import DenoiseActor, TransformerHead
 from diffuser_actor.utils.utils import normalise_quat
 
 

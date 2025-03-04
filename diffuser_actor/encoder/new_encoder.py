@@ -11,10 +11,11 @@ from ..utils.position_encodings import RotaryPositionEncoding3D
 from ..utils.new_layers import AttentionModule
 from .vision.resnet import load_resnet50, load_resnet18
 from .vision.clip import load_clip
-from .vision.tiny_vit import load_tiny
-from .vision.florence2 import load_florence2
+# from .vision.tiny_vit import load_tiny
+# from .vision.florence2 import load_florence2
 from .vision.siglip2 import load_siglip2_256, load_siglip2_512
 from .vision.fpn import EfficientFeaturePyramidNetwork
+from .text.clip import ClipTextEncoder
 
 
 class Encoder(nn.Module):
@@ -89,6 +90,9 @@ class Encoder(nn.Module):
         self.curr_gripper_rot_proj = nn.Linear(6, embedding_dim)
 
         # Instruction encoder
+        self.text_encoder = ClipTextEncoder()
+        for p in self.text_encoder.parameters():
+            p.requires_grad = False
         self.instruction_encoder = nn.Linear(
             768 if self.use_florence or use_siglip else 512, embedding_dim
         )
@@ -136,7 +140,7 @@ class Encoder(nn.Module):
 
         return gripper_feats, gripper_pos
 
-    def encode_images(self, rgb, pcd):
+    def encode_clip(self, rgb, pcd, text):
         """
         Compute visual features/pos embeddings at different scales.
 
@@ -188,7 +192,9 @@ class Encoder(nn.Module):
             rgb_feats_pyramid.append(rgb_features_i)
             pcd_pyramid.append(pcd_i)
 
-        return rgb_feats_pyramid, pcd_pyramid
+        with torch.no_grad():
+            instruction = self.text_encoder(text)
+        return rgb_feats_pyramid, pcd_pyramid, instruction
 
     def encode_florence(self, rgb, pcd, text):
         """

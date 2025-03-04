@@ -259,7 +259,7 @@ class TrainTester(BaseTrainTester):
 
     def get_text_encoder(self):
         """Initialize the model."""
-        return ClipTextEncoder(self.args.text_max_length)
+        return ClipTextEncoder()
 
     @torch.no_grad()
     def prepare_batch(self, sample, text_encoder, augment=False):

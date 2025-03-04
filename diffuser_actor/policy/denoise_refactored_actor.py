@@ -73,8 +73,8 @@ class DenoiseActor(nn.Module):
                 visible_rgb, visible_pcd, instruction
             )
         else:
-            rgb_feats_pyramid, pcd_pyramid = self.encoder.encode_images(
-                visible_rgb, visible_pcd
+            rgb_feats_pyramid, pcd_pyramid, instruction = self.encoder.encode_clip(
+                visible_rgb, visible_pcd, instruction
             )
         # Keep only low-res scale
         context_feats = einops.rearrange(
@@ -500,7 +500,7 @@ class TransformerHead(nn.Module):
             num_layers=2,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
-            dropout=0.0,
+            dropout=0.1,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -514,7 +514,7 @@ class TransformerHead(nn.Module):
             num_layers=4,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
-            dropout=0.0,
+            dropout=0.1,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -530,7 +530,7 @@ class TransformerHead(nn.Module):
             num_layers=2,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
-            dropout=0.0,
+            dropout=0.1,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
@@ -550,7 +550,7 @@ class TransformerHead(nn.Module):
             num_layers=2,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
-            dropout=0.0,
+            dropout=0.1,
             n_heads=num_attn_heads,
             pre_norm=False,
             rotary_pe=True,
