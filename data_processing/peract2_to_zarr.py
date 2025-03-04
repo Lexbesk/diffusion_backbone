@@ -174,15 +174,15 @@ def all_tasks_main(split, tasks):
                 var_ = np.array([int(var_)] * len(key_frames[:-1]))
                 var_ = var_.astype(np.uint8)
 
-            # Write
-            zarr_file['rgb'].append(rgb)
-            zarr_file['depth'].append(depth)
-            zarr_file['proprioception'].append(prop)
-            zarr_file['action'].append(actions)
-            zarr_file['extrinsics'].append(extrinsics)
-            zarr_file['intrinsics'].append(intrinsics)
-            zarr_file['task_id'].append(task_id)
-            zarr_file['variation'].append(var_)
+                # Write
+                zarr_file['rgb'].append(rgb)
+                zarr_file['depth'].append(depth)
+                zarr_file['proprioception'].append(prop)
+                zarr_file['action'].append(actions)
+                zarr_file['extrinsics'].append(extrinsics)
+                zarr_file['intrinsics'].append(intrinsics)
+                zarr_file['task_id'].append(task_id)
+                zarr_file['variation'].append(var_)
 
 
 def _num2id(int_):
