@@ -3,7 +3,7 @@ checkpoints=(
     interm120000.pth interm160000.pth interm200000.pth interm240000.pth interm280000.pth interm320000.pth interm360000.pth interm40000.pth interm400000.pth interm440000.pth interm480000.pth interm520000.pth interm560000.pth interm600000.pth interm80000.pth
 )
 checkpoints=(
-    rf_new.pth
+    ddpm_new.pth
 )
 tasks=(
     close_jar insert_onto_square_peg light_bulb_in meat_off_grill open_drawer place_shape_in_shape_sorter place_wine_at_rack_location push_buttons put_groceries_in_cupboard put_item_in_drawer put_money_in_safe reach_and_drag slide_block_to_color_target stack_blocks stack_cups sweep_to_dustpan_of_size turn_tap place_cups
@@ -18,8 +18,8 @@ max_steps=20
 verbose=false
 interpolation_length=2
 num_history=3
-denoise_timesteps=20
-denoise_model=moritz
+denoise_timesteps=100
+denoise_model=ddpm
 quaternion_format=xyzw  # IMPORTANT: change this to be the same as the training script IF you're not using our checkpoint
 rotation_parametrization=6D
 use_instruction=true
