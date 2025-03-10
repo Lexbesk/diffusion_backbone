@@ -1,17 +1,14 @@
 main_dir=Peract2
 
-train_data_dir=data/peract2/peract2/train
-eval_data_dir=data/peract2/peract2/test
-train_data_dir=/data/user_data/ngkanats/peract2/train
-eval_data_dir=/data/user_data/ngkanats/peract2/test
-instructions=instructions/peract2/instructions.pkl
+train_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/train.zarr
+eval_data_dir=/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract2_zarr/val.zarr
+train_instructions=instructions/peract2/instructions.json
+val_instructions=instructions/peract2/instructions.json
 
 lr=1e-4
 lr_scheduler=constant
-dense_interpolation=1
-interpolation_length=2
 num_history=3
-denoise_timesteps=10
+denoise_timesteps=10  # 10
 denoise_model=rectified_flow
 keypose_only=true
 quaternion_format=xyzw
@@ -20,37 +17,33 @@ fps_subsampling_factor=5
 backbone=clip
 use_instruction=true
 workspace_normalizer_buffer=0.05
-B=1
-B_val=24
+B=64
+B_val=64
 C=120
 num_attn_heads=8
 num_vis_ins_attn_layers=3
-train_iters=200000
+train_iters=600000
 val_freq=4000
-workspace_normalizer_iter=128
-precompute_instruction_encodings=true
+precompute_instruction_encodings=false
 num_workers=4
-dataset=Peract2
+dataset=Peract2TC
 ngpus=4
-ngpus=1
-bimanual=true
+bimanual=True
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=new_three_camerasC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=peract2flow.pth
-# eval_only=true
 # checkpoint=none
-eval_only=true
+eval_only=false
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main.py \
+    main_fast_new.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
-    --instructions $instructions \
+    --train_instructions $train_instructions \
+    --val_instructions $val_instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
-    --workspace_normalizer_iter $workspace_normalizer_iter \
     --num_workers $num_workers \
     --train_iters $train_iters \
     --embedding_dim $C \
@@ -64,16 +57,14 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --denoise_timesteps $denoise_timesteps \
     --denoise_model $denoise_model \
     --val_freq $val_freq \
-    --dense_interpolation $dense_interpolation \
-    --interpolation_length $interpolation_length \
     --batch_size $B \
     --batch_size_val $B_val \
     --keypose_only $keypose_only \
     --lr $lr\
     --lr_scheduler $lr_scheduler \
-    --bimanual $bimanual \
     --num_history $num_history \
     --eval_only $eval_only \
     --checkpoint $checkpoint \
     --exp_log_dir $main_dir \
-    --run_log_dir ${run_log_dir}
+    --run_log_dir ${run_log_dir} \
+    --bimanual $bimanual

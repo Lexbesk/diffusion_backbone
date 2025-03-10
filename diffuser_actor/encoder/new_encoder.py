@@ -87,7 +87,7 @@ class Encoder(nn.Module):
             num_layers=3, d_model=embedding_dim, dim_fw=embedding_dim,
             n_heads=num_attn_heads, rotary_pe=True, use_adaln=False
         )
-        self.curr_gripper_rot_proj = nn.Linear(6, embedding_dim)
+        # self.curr_gripper_rot_proj = nn.Linear(6, embedding_dim)
 
         # Instruction encoder
         self.text_encoder = ClipTextEncoder()
@@ -124,9 +124,9 @@ class Encoder(nn.Module):
             len(gripper), 1, 1
         )
 
-        # Project rotation features
-        gripper_rot_feats = self.curr_gripper_rot_proj(gripper_feats[..., 3:9])
-        gripper_feats = gripper_feats + gripper_rot_feats
+        # # Project rotation features
+        # gripper_rot_feats = self.curr_gripper_rot_proj(gripper_feats[..., 3:9])
+        # gripper_feats = gripper_feats + gripper_rot_feats
 
         # Rotary positional encoding
         gripper_pos = self.relative_pe_layer(gripper[..., :3])
@@ -193,7 +193,7 @@ class Encoder(nn.Module):
             pcd_pyramid.append(pcd_i)
 
         with torch.no_grad():
-            instruction = self.text_encoder(text)
+            instruction = self.text_encoder(text, rgb.device)
         return rgb_feats_pyramid, pcd_pyramid, instruction
 
     def encode_florence(self, rgb, pcd, text):

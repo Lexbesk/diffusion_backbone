@@ -10,13 +10,12 @@ do
        -p polar,polar3,polar4,grizzly \
        -N 1 \
        --ntasks=1 \
-       --gpus 8 \
-       --cpus-per-task 42 \
-       --mem=160G \
+       --gpus 4 \
+       --cpus-per-task 24 \
+       --mem=96G \
        --unbuffered \
-       --exclusive \
        -t 04:00:00 \
-       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_peract_fast.sh"
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_peract2.sh"
 
     sleep 1m
 

@@ -183,7 +183,7 @@ class Peract2Dataset(RLBenchDataset):
         t_ = int(self.annos['task_id'][idx])
         v_ = int(self.annos['variation'][idx])
         task = self.tasks[t_]
-        return [random.choice(self._instructions[task][v_])]
+        return [random.choice(self._instructions[task][str(v_)])]
 
     def __getitem__(self, idx):
         """
@@ -245,7 +245,7 @@ class Peract2Dataset3cam(RLBenchDataset):
         t_ = int(self.annos['task_id'][idx])
         v_ = int(self.annos['variation'][idx])
         task = self.tasks[t_]
-        return [random.choice(self._instructions[task][v_])]
+        return [random.choice(self._instructions[task][str(v_)])]
 
     def __getitem__(self, idx):
         """
