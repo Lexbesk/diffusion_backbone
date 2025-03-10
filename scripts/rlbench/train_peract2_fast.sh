@@ -27,7 +27,7 @@ val_freq=4000
 precompute_instruction_encodings=false
 num_workers=4
 dataset=Peract2
-ngpus=1
+ngpus=4
 bimanual=True
 
 run_log_dir=newC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
