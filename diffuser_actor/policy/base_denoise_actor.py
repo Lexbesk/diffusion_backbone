@@ -25,7 +25,6 @@ class DenoiseActor(nn.Module):
                  backbone="clip",
                  embedding_dim=60,
                  num_vis_ins_attn_layers=2,
-                 use_instruction=False,
                  num_attn_heads=9,
                  fps_subsampling_factor=5,
                  rotation_parametrization='6D',
@@ -34,13 +33,14 @@ class DenoiseActor(nn.Module):
                  denoise_model="ddpm",
                  nhist=3,
                  relative=False,
-                 finetune_backbone=False,
-                 ayush=False):
+                 finetune_backbone=False):
         super().__init__()
+        # Arguments to be accessed by the main class
         self._rotation_parametrization = rotation_parametrization
         self._quaternion_format = quaternion_format
         self._relative = relative
-        self.use_instruction = use_instruction
+
+        # Vision-language encoder, runs only once
         self.encoder = Encoder(
             backbone=backbone,
             embedding_dim=embedding_dim,
@@ -49,17 +49,23 @@ class DenoiseActor(nn.Module):
             num_vis_ins_attn_layers=num_vis_ins_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor,
             finetune_backbone=finetune_backbone,
-            ayush=ayush
         )
+
+        # Action decoder, runs at every denoising timestep
         self.prediction_head = TransformerHead(
             embedding_dim=embedding_dim,
-            use_instruction=use_instruction,
             rotation_parametrization=rotation_parametrization,
             nhist=nhist,
             num_attn_heads=num_attn_heads
         )
-        self.position_noise_scheduler, self.rotation_noise_scheduler = fetch_schedulers(denoise_model, denoise_timesteps)
+
+        # Noise/denoise schedulers and hyperparameters
+        self.position_scheduler, self.rotation_scheduler = fetch_schedulers(
+            denoise_model, denoise_timesteps
+        )
         self.n_steps = denoise_timesteps
+
+        # Normalization for the 3D space, will be loaded in the main process
         self.workspace_normalizer = nn.Parameter(
             torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
             requires_grad=False
@@ -84,16 +90,13 @@ class DenoiseActor(nn.Module):
         context = pcd_pyramid[0]
 
         # Encode instruction (B, 53, F)
-        instr_feats = None
-        if self.use_instruction:
-            instr_feats, _ = self.encoder.encode_instruction(instruction)
+        instr_feats, _ = self.encoder.encode_instruction(instruction)
 
         # Cross-attention vision to language
-        if self.use_instruction:
-            # Attention from vision to language
-            context_feats = self.encoder.vision_language_attention(
-                context_feats, instr_feats
-            )
+        # Attention from vision to language
+        context_feats = self.encoder.vision_language_attention(
+            context_feats, instr_feats
+        )
 
         # Encode gripper history (B, nhist, F)
         adaln_gripper_feats, _ = self.encoder.encode_curr_gripper(
@@ -172,10 +175,10 @@ class DenoiseActor(nn.Module):
         )
 
     def conditional_sample(self, condition_data, condition_mask, fixed_inputs):
-        self.position_noise_scheduler.set_timesteps(
+        self.position_scheduler.set_timesteps(
             self.n_steps, device=condition_data.device
         )
-        self.rotation_noise_scheduler.set_timesteps(
+        self.rotation_scheduler.set_timesteps(
             self.n_steps, device=condition_data.device
         )
 
@@ -188,11 +191,11 @@ class DenoiseActor(nn.Module):
         # Noisy condition data
         noise_t = torch.ones(
             (len(condition_data),), device=condition_data.device
-        ).long().mul(self.position_noise_scheduler.timesteps[0])
-        noise_pos = self.position_noise_scheduler.add_noise(
+        ).long().mul(self.position_scheduler.timesteps[0])
+        noise_pos = self.position_scheduler.add_noise(
             condition_data[..., :3], noise[..., :3], noise_t
         )
-        noise_rot = self.rotation_noise_scheduler.add_noise(
+        noise_rot = self.rotation_scheduler.add_noise(
             condition_data[..., 3:9], noise[..., 3:9], noise_t
         )
         noisy_condition_data = torch.cat((noise_pos, noise_rot), -1)
@@ -201,20 +204,20 @@ class DenoiseActor(nn.Module):
         )
 
         # Iterative denoising
-        timesteps = self.position_noise_scheduler.timesteps
+        timesteps = self.position_scheduler.timesteps
         for t in timesteps:
-            c_skip, c_out, c_in = self.position_noise_scheduler.get_scalings(t)
+            c_skip, c_out, c_in = self.position_scheduler.get_scalings(t)
             out = self.policy_forward_pass(
                 trajectory * c_in,
                 t * torch.ones(len(trajectory)).to(trajectory.device).long(),
                 fixed_inputs
             )
             out = out[-1]  # keep only last layer's output
-            pos = self.position_noise_scheduler.step(
+            pos = self.position_scheduler.step(
                 out[..., :3] * c_out + trajectory[..., :3] * c_skip,
                 t, trajectory[..., :3]
             ).prev_sample
-            rot = self.rotation_noise_scheduler.step(
+            rot = self.rotation_scheduler.step(
                 out[..., 3:9] * c_out + trajectory[..., 3:9] * c_skip,
                 t, trajectory[..., 3:9]
             ).prev_sample
@@ -412,23 +415,23 @@ class DenoiseActor(nn.Module):
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
 
         # Sample a random timestep
-        timesteps = self.position_noise_scheduler.sample_noise_step(
+        timesteps = self.position_scheduler.sample_noise_step(
             num_noise=len(noise), device=noise.device
         )
 
         # Add noise to the clean trajectories
-        pos = self.position_noise_scheduler.add_noise(
+        pos = self.position_scheduler.add_noise(
             gt_trajectory[..., :3], noise[..., :3],
             timesteps
         )
-        rot = self.rotation_noise_scheduler.add_noise(
+        rot = self.rotation_scheduler.add_noise(
             gt_trajectory[..., 3:9], noise[..., 3:9],
             timesteps
         )
         noisy_trajectory = torch.cat((pos, rot), -1)
 
         # Predict the noise residual
-        _, _, c_in = self.position_noise_scheduler.get_scalings(timesteps)
+        _, _, c_in = self.position_scheduler.get_scalings(timesteps)
         pred = self.policy_forward_pass(
             noisy_trajectory * c_in[:, None, None],
             timesteps, fixed_inputs
@@ -439,7 +442,7 @@ class DenoiseActor(nn.Module):
         for layer_pred in pred:
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
-            denoise_target = self.position_noise_scheduler.prepare_target(
+            denoise_target = self.position_scheduler.prepare_target(
                 noise, gt_trajectory, noisy_trajectory, timesteps
             )
             loss = (
@@ -458,11 +461,9 @@ class TransformerHead(nn.Module):
     def __init__(self,
                  embedding_dim=60,
                  num_attn_heads=8,
-                 use_instruction=False,
                  rotation_parametrization='quat',
                  nhist=3):
         super().__init__()
-        self.use_instruction = use_instruction
         if '6D' in rotation_parametrization:
             rotation_dim = 6  # continuous 6D
         else:
@@ -595,12 +596,11 @@ class TransformerHead(nn.Module):
         traj_time_pos = self.traj_time_emb(
             torch.arange(0, traj_feats.size(1), device=traj_feats.device)
         )[None].repeat(len(traj_feats), 1, 1)
-        if self.use_instruction:
-            traj_feats = self.traj_lang_attention(
-                seq1=traj_feats,
-                seq2=instr_feats,
-                seq1_sem_pos=traj_time_pos, seq2_sem_pos=None
-            )[-1]
+        traj_feats = self.traj_lang_attention(
+            seq1=traj_feats,
+            seq2=instr_feats,
+            seq1_sem_pos=traj_time_pos, seq2_sem_pos=None
+        )[-1]
         traj_feats = traj_feats + traj_time_pos
 
         # Predict position, rotation, opening
