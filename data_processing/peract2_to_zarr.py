@@ -86,7 +86,7 @@ def all_tasks_main(split, tasks):
             dtype="uint8"
         )
 
-        # Loop through episodes and episodes
+        # Loop through episodes
         for task in tasks:
             print(task)
             task_folder = f'{ROOT}/{split}/{task}/all_variations/episodes'

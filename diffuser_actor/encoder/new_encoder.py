@@ -13,7 +13,7 @@ from .vision.resnet import load_resnet50, load_resnet18
 from .vision.clip import load_clip
 # from .vision.tiny_vit import load_tiny
 # from .vision.florence2 import load_florence2
-from .vision.siglip2 import load_siglip2_256, load_siglip2_512
+# from .vision.siglip2 import load_siglip2_256, load_siglip2_512
 from .vision.fpn import EfficientFeaturePyramidNetwork
 from .text.clip import ClipTextEncoder
 

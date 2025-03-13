@@ -1,43 +1,17 @@
-from pathlib import Path
-import pickle
-
-import blosc
 from numcodecs import Blosc
 import zarr
 import numpy as np
 import torch
 from tqdm import tqdm
 
-from datasets.utils import TrajectoryInterpolator
 import utils.pytorch3d_transforms as pytorch3d_transforms
 
 
-ROOT = '/data/user_data/ngkanats/calvin/packaged_ABC_D/'
-STORE_PATH = '/data/user_data/ngkanats/CALVIN_zarr'
+ROOT = '/data/group_data/katefgroup/VLA/calvin_dataset/task_ABC_D'
+STORE_PATH = '/data/group_data/katefgroup/VLA/CALVIN_zarr'
 STORE_EVERY = 1  # in keyposes
+SUBSAMPLE = 3
 IM_SIZE = 160
-
-
-def inverse_depth_batched(pcds, viewMatrix):
-    """Convert point cloud in world frame to depth."""
-    # pcds is (b, 3, h, w)
-    T_cam_world = np.array(viewMatrix).reshape((4, 4)).T
-
-    b, _, h, w = pcds.shape
-    pcds = pcds.transpose(1, 0, 2, 3).reshape(3, -1)  # 3 B*H*W
-    pcds = np.concatenate((pcds, np.ones_like(pcds)[:1]))
-
-    pcds = T_cam_world @ pcds  # 4 B*H*W`
-    return -pcds[2].reshape(b, h, w)
-
-
-def to_numpy(x):
-    if isinstance(x, torch.Tensor):
-        return x.numpy()
-    elif isinstance(x, np.ndarray):
-        return x
-    else:
-        return np.array(x)
 
 
 def convert_rotation(action):
@@ -52,97 +26,91 @@ def convert_rotation(action):
 
 
 def all_tasks_main(split):
-    tasks = ["A", "B", "C"] if split == 'train' else ['D']
+    # All CALVIN episodes
     suffix = 'training' if split == 'train' else 'validation'
-    camera_order = ['front', 'wrist']
-    _interpolate_traj = TrajectoryInterpolator(True, 20)
-
-    # Collect all episodes
-    episodes = []
-    for task in tasks:
-        _path = Path(f'{ROOT}/{suffix}/{task}/')
-        episodes.extend(_path.glob("*.dat"))
-
-    # Read once to get the number of keyposes
-    n_keyposes = 0
-    for ep in tqdm(episodes):
-        with open(ep, "rb") as f:
-            content = pickle.loads(blosc.decompress(f.read()))
-        n_keyposes += len(content[0])
+    annos = np.load(
+        f'{ROOT}/{suffix}/lang_annotations/auto_lang_ann.npy',
+        allow_pickle=True
+    ).item()
 
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
     with zarr.open_group(f"{STORE_PATH}/{split}.zarr", mode="w") as zarr_file:
-        ncam = 2
         zarr_file.create_dataset(
-            "rgb",
-            shape=(n_keyposes, ncam, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, ncam, 3, IM_SIZE, IM_SIZE),
+            "rgb_front",
+            shape=(0, 1, 3, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, 1, 3, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="uint8"
         )
         zarr_file.create_dataset(
-            "pcd",
-            shape=(n_keyposes, ncam, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, ncam, IM_SIZE, IM_SIZE),
+            "rgb_wrist",
+            shape=(0, 1, 3, 84, 84),
+            chunks=(STORE_EVERY, 1, 3, 84, 84),
+            compressor=compressor,
+            dtype="uint8"
+        )
+        zarr_file.create_dataset(
+            "depth_front",
+            shape=(0, 1, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, 1, IM_SIZE, IM_SIZE),
             compressor=compressor,
             dtype="float16"
         )
         zarr_file.create_dataset(
-            "instr_id", shape=(n_keyposes,), chunks=(STORE_EVERY,),
+            "instr_id", shape=(0,), chunks=(STORE_EVERY,),
             compressor=compressor,
             dtype="int"
         )
         zarr_file.create_dataset(
             "proprioception",
-            shape=(n_keyposes, 3, 8),
-            chunks=(STORE_EVERY, 3, 8),
+            shape=(0, 1, 8),
+            chunks=(STORE_EVERY, 1, 8),
             compressor=compressor,
             dtype="float32"
         )
         zarr_file.create_dataset(
             "action",
-            shape=(n_keyposes, 20, 8),
-            chunks=(STORE_EVERY, 20, 8),
+            shape=(0, 16, 8),
+            chunks=(STORE_EVERY, 16, 8),
             compressor=compressor,
             dtype="float32"
         )
 
         # Loop through episodes
-        start = 0
-        for ep in tqdm(episodes):
-            with open(ep, "rb") as f:
-                content = pickle.loads(blosc.decompress(f.read()))
-            # Map [-1, 1] to [0, 255] uint8 and crop
-            rgb = (
-                127.5 * (content[1][:, :, 0, :, 20:180, 20:180] + 1)
-            ).astype(np.uint8)
-            # Point cloud
-            pcd = content[1][:, :, 1, :, 20:180, 20:180].astype(np.float16)
-            # Store current eef pose as well as two previous ones
-            prop = np.stack([
-                convert_rotation(to_numpy(tens)).astype(np.float32)
-                for tens in content[4]
-            ])
-            prop_1 = np.concatenate([prop[:1], prop[:-1]])
-            prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
-            prop = np.concatenate([prop_2, prop_1, prop], 1)
-            # Trajectories
-            actions = np.stack([
-                convert_rotation(_interpolate_traj(torch.tensor(item)).numpy())
-                for item in content[5]
-            ]).astype(np.float32)
-            # Language indices
-            instr_ids = np.array([content[6][0]] * len(rgb)).astype(int)
+        for ann_id, (start, end) in tqdm(enumerate(annos['info']['indx'])):
+            rgb_front, rgb_wrist, depth_front, prop = [], [], [], []
+            # Each episode is split in multiple files
+            for ep_id in range(start, end + 1):
+                episode = 'episode_{:07d}.npz'.format(ep_id)
+                data = np.load(f'{ROOT}/{suffix}/{episode}')
+                rgb_front.append(data['rgb_static'].transpose(2, 0, 1).astype(np.uint8))
+                rgb_wrist.append(data['rgb_gripper'].transpose(2, 0, 1).astype(np.uint8))
+                depth_front.append(data['depth_static'].astype(np.float16))
+                prop.append(convert_rotation(np.concatenate([
+                    data['robot_obs'][:3],
+                    data['robot_obs'][3:6],  # Euler to quat
+                    (data['robot_obs'][[-1]] > 0).astype(np.float32)  # [0, 1]
+                ], axis=-1)))
 
-            # write
-            end = start + len(rgb)
-            zarr_file['rgb'][start:end] = rgb
-            zarr_file['pcd'][start:end] = pcd
-            zarr_file['proprioception'][start:end] = prop
-            zarr_file['action'][start:end] = actions
-            zarr_file['instr_id'][start:end] = instr_ids
-            start = end
+            # Merge
+            rgb_front = np.stack(rgb_front)[:, None, :, 20:180, 20:180]
+            rgb_wrist = np.stack(rgb_wrist)[:, None]
+            depth_front = np.stack(depth_front)[:, None, 20:180, 20:180]
+            instr_id = np.array([ann_id] * len(rgb_front))
+            prop = np.stack(prop).astype(np.float32)
+            actions16 = np.concatenate((prop[1:], np.stack([prop[-1]] * 16)))
+            actions16 = np.array([
+                actions16[i:i+16] for i in range(len(actions16) - 16 + 1)
+            ])[:len(prop)]
+
+            # Write
+            zarr_file['rgb_front'].append(rgb_front[:-1][::SUBSAMPLE])
+            zarr_file['rgb_wrist'].append(rgb_wrist[:-1][::SUBSAMPLE])
+            zarr_file['depth_front'].append(depth_front[:-1][::SUBSAMPLE])
+            zarr_file['instr_id'].append(instr_id[:-1][::SUBSAMPLE])
+            zarr_file['proprioception'].append(prop[:-1, None][::SUBSAMPLE])
+            zarr_file['action'].append(actions16[:-1][::SUBSAMPLE])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import json
 import os
 
 
-FOLDER = 'eval_logs/refactored_better_3dda_peract_sc20/ddpm_new.pth/seed0'
+FOLDER = 'eval_logs/flow_bimanual_3dda_train/peract2_front.pth/seed0'
 
 sum_ = 0
 tasks = sorted(os.listdir(FOLDER))

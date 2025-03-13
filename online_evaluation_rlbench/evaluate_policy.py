@@ -10,13 +10,14 @@ import torch
 import numpy as np
 import argparse
 
-from diffuser_actor.policy import BimanualDenoiseActor  # , DenoiseActor
+from diffuser_actor.policy.bimanual_denoise_actor import BimanualDenoiseActor  # , DenoiseActor
 from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,
     PeractDataset,
     Peract2Dataset,
+    Peract2Dataset3cam,
     PeractSingleCamDataset,
     PeractTwoCamDataset
 )
@@ -116,6 +117,7 @@ if __name__ == "__main__":
     dataset_cls = {
         "Peract": PeractDataset,
         "Peract2": Peract2Dataset,
+        "Peract2TC": Peract2Dataset3cam,
         "GNFactor": GNFactorDataset,
         "PeractSingleCam": PeractSingleCamDataset,
         "PeractTwoCam": PeractTwoCamDataset
@@ -146,8 +148,12 @@ if __name__ == "__main__":
         )
 
         # Load instructions
-        with open(args.instructions, "rb") as fid:
-            instruction = pickle.load(fid)
+        if args.instructions.endswith('.pkl'):
+            with open(args.instructions, "rb") as fid:
+                instruction = pickle.load(fid)
+        else:
+            with open(args.instructions, "r") as fid:
+                instruction = json.load(fid)
 
         # Actioner (runs the policy online)
         actioner = rlbench_utils.Actioner(

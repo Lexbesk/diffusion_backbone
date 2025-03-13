@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import blosc
 from PIL import Image
+from tqdm import tqdm
 
 from calvin_env.envs.play_table_env import get_env
 from utils.utils_with_calvin import (
@@ -17,16 +18,58 @@ from utils.utils_with_calvin import (
     get_gripper_camera_view_matrix,
     convert_rotation
 )
+from ipdb import set_trace as st
+
+
+class CALVINDepth2Cloud:
+
+    def __init__(self):
+        self.T_world_cam = torch.from_numpy(np.linalg.inv(np.asarray([
+            0.7232445478439331, -0.030260592699050903, 0.6899287700653076, 0.0,
+            0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0,
+            -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0,
+            0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0
+        ]).reshape((4, 4)).T)).float()
+        self.width, self.height, self.fov = 200, 200, 10
+        self.foc = self.height / (2 * np.tan(np.deg2rad(self.fov) / 2))
+
+    def __call__(self, depth):
+        """
+        Args
+            depth: (B, H, W), if H,W != 200, we assume center crop
+        Output
+            point cloud: (B, 3, H, W)
+        """
+        b, h, w = depth.shape
+        v, u = torch.meshgrid(torch.arange(200), torch.arange(200))
+        h_offset = (200 - h) // 2
+        w_offset = (200 - w) // 2
+        v = v[h_offset:h+h_offset, w_offset:w+w_offset]
+        u = u[h_offset:h+h_offset, w_offset:w+w_offset]
+
+        # Camera XYZ
+        x = (u - self.width // 2)[None] * depth / self.foc
+        y = -(v - self.height // 2)[None] * depth / self.foc
+        z = -depth
+        ones = torch.ones_like(z)
+
+        # Unproject to world coordinates
+        cam_pos = torch.stack([x, y, z, ones], 1).reshape(b, 4, -1)  # B 4 HW
+        T_world_cam = self.T_world_cam[None].repeat(b, 1, 1)  # B 4 4
+        world_pos = torch.matmul(T_world_cam, cam_pos)  # B 4 HW
+
+        # Reshape
+        return world_pos[:, :3].reshape(b, 3, h, w)
 
 
 class Arguments(tap.Tap):
     traj_len: int = 16
     execute_every: int = 4
     save_path: str = './data/calvin/packaged_ABC_D'
-    root_dir: str = './calvin/dataset/task_ABC_D'
+    root_dir: str = '/data/group_data/katefgroup/VLA/calvin_dataset/task_ABC_D/'
     mode: str = 'keypose'  # [keypose, close_loop]
     tasks: Optional[List[str]] = None
-    split: str = 'training'  # [training, validation]
+    split: str = 'validation'  # [training, validation]
 
 
 def make_env(dataset_path, split):
@@ -188,28 +231,48 @@ def load_episode(env, root_dir, split, episode, datas, ann_id):
     rgb_static = data['rgb_static']  # (200, 200, 3)
     rgb_gripper = data['rgb_gripper']  # (84, 84, 3)
     depth_static = data['depth_static']  # (200, 200)
-    depth_gripper = data['depth_gripper']  # (84, 84)
+    # depth_gripper = data['depth_gripper']  # (84, 84)
 
-    # data['robot_obs'] is (15,), data['scene_obs'] is (24,)
-    env.reset(robot_obs=data['robot_obs'], scene_obs=data['scene_obs'])
-    static_cam = env.cameras[0]
-    gripper_cam = env.cameras[1]
-    gripper_cam.viewMatrix = get_gripper_camera_view_matrix(gripper_cam)
+    # # data['robot_obs'] is (15,), data['scene_obs'] is (24,)
+    # env.reset(robot_obs=data['robot_obs'], scene_obs=data['scene_obs'])
+    # static_cam = env.cameras[0]
+    # # print(static_cam.viewMatrix)
+    # # print(static_cam.width, static_cam.height, static_cam.fov)
+    # # 200 200 10
+    # # A (0.7232445478439331, -0.030260592699050903, 0.6899287700653076, 0.0, 0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0, -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0, 0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0)
+    # # B (0.7232445478439331, -0.030260592699050903, 0.6899287700653076, 0.0, 0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0, -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0, 0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0)
+    # # C (0.7232445478439331, -0.030260592699050903, 0.6899287700653076, 0.0, 0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0, -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0, 0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0)
+    # # D (0.7232445478439331, -0.030260592699050903, 0.6899287700653076, 0.0, 0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0, -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0, 0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0)
 
-    static_pcd = deproject(
-        static_cam, depth_static,
-        homogeneous=False, sanity_check=False
-    ).transpose(1, 0)
-    static_pcd = np.reshape(
-        static_pcd, (depth_static.shape[0], depth_static.shape[1], 3)
-    )
-    gripper_pcd = deproject(
-        gripper_cam, depth_gripper,
-        homogeneous=False, sanity_check=False
-    ).transpose(1, 0)
-    gripper_pcd = np.reshape(
-        gripper_pcd, (depth_gripper.shape[0], depth_gripper.shape[1], 3)
-    )
+    # # gripper_cam = env.cameras[1]
+    # # gripper_cam.viewMatrix = get_gripper_camera_view_matrix(gripper_cam)
+
+    # static_pcd = deproject(
+    #     static_cam, depth_static,
+    #     homogeneous=False, sanity_check=False
+    # ).transpose(1, 0)
+    # print(static_pcd.shape)
+    # my_static_pcd200 = CALVINDepth2Cloud()(
+    #     torch.from_numpy(np.stack([depth_static]*3)).float()
+    # )[1].numpy()
+    # my_static_pcd = my_static_pcd200.reshape(3, -1).transpose(1, 0)
+    # print(np.abs(static_pcd - my_static_pcd).max())
+    # my_static_pcd160 = CALVINDepth2Cloud()(
+    #     torch.from_numpy(np.stack([depth_static[20:180, 20:180]]*3)).float()
+    # )[1].numpy()  # 3 h w
+    # print(np.abs(my_static_pcd200[:, 20:180, 20:180] - my_static_pcd160).max())
+    # # st()
+    # assert np.allclose(static_pcd, my_static_pcd)
+    # static_pcd = np.reshape(
+    #     static_pcd, (depth_static.shape[0], depth_static.shape[1], 3)
+    # )
+    # gripper_pcd = deproject(
+    #     gripper_cam, depth_gripper,
+    #     homogeneous=False, sanity_check=False
+    # ).transpose(1, 0)
+    # gripper_pcd = np.reshape(
+    #     gripper_pcd, (depth_gripper.shape[0], depth_gripper.shape[1], 3)
+    # )
 
     # map RGB to [-1, 1]
     rgb_static = rgb_static / 255. * 2 - 1
@@ -223,9 +286,9 @@ def load_episode(env, root_dir, split, episode, datas, ann_id):
     ], axis=-1)
 
     # Put them into a dict
-    datas['static_pcd'].append(static_pcd)  # (200, 200, 3)
+    # datas['static_pcd'].append(static_pcd)  # (200, 200, 3)
     datas['static_rgb'].append(rgb_static)  # (200, 200, 3)
-    datas['gripper_pcd'].append(gripper_pcd)  # (84, 84, 3)
+    # datas['gripper_pcd'].append(gripper_pcd)  # (84, 84, 3)
     datas['gripper_rgb'].append(rgb_gripper)  # (84, 84, 3)
     datas['proprios'].append(proprio)  # (8,)
     datas['annotation_id'].append(ann_id)  # int
@@ -280,7 +343,7 @@ def main(split, args):
     ).item()
     env = make_env(args.root_dir, split)
 
-    for anno_ind, (start_id, end_id) in enumerate(annotations['info']['indx']):
+    for anno_ind, (start_id, end_id) in tqdm(enumerate(annotations['info']['indx'])):
         # Step 1. load episodes of the same task
         len_anno = len(annotations['info']['indx'])
         if args.tasks is not None and annotations['language']['task'][anno_ind] not in args.tasks:
@@ -297,13 +360,17 @@ def main(split, args):
                 datas,
                 anno_ind
             )
+        st()
+        for key in datas:
+            print(key, np.stack(datas[key]).shape if datas[key] != [] else 0)
+        print(start_id, end_id)
 
-        # Step 2. detect keyframes within the episode
-        _, keyframe_inds = keypoint_discovery(datas['proprios'])
+        # # Step 2. detect keyframes within the episode
+        # _, keyframe_inds = keypoint_discovery(datas['proprios'])
 
-        state_dict = process_datas(
-            datas, args.mode, args.traj_len, args.execute_every, keyframe_inds
-        )
+        # state_dict = process_datas(
+        #     datas, args.mode, args.traj_len, args.execute_every, keyframe_inds
+        # )
 
         # Step 3. determine scene
         if split == 'training':
@@ -324,12 +391,14 @@ def main(split, args):
                 scene = "D"
         else:
             scene = 'D'
+        print(scene)
+        nkjn
 
-        # Step 4. save to .dat file
-        ep_save_path = f'{args.save_path}/{split}/{scene}/ann_{anno_ind}.dat'
-        os.makedirs(os.path.dirname(ep_save_path), exist_ok=True)
-        with open(ep_save_path, "wb") as f:
-            f.write(blosc.compress(pickle.dumps(state_dict)))
+        # # Step 4. save to .dat file
+        # ep_save_path = f'{args.save_path}/{split}/{scene}/ann_{anno_ind}.dat'
+        # os.makedirs(os.path.dirname(ep_save_path), exist_ok=True)
+        # with open(ep_save_path, "wb") as f:
+        #     f.write(blosc.compress(pickle.dumps(state_dict)))
 
     env.close()
 

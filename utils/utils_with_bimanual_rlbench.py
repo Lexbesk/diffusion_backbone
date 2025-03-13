@@ -27,11 +27,19 @@ from online_evaluation_rlbench.get_stored_demos import get_stored_demos
 # ??? pick up a plate, put item in drawer is missing from this.
 # ??? bimanual_sweep_to_dustpan and coordinated_lift_tray are interchanged in the download links, tell Markus
 ALL_RLBENCH_TASKS = [
-    'coordinated_push_box', 'coordinated_lift_ball', 'dual_push_buttons', 'bimanual_pick_plate', 
-    'coordinated_put_bottle_in_fridge', 'handover_item', 'bimanual_pick_laptop', 'bimanual_straighten_rope', 
-    'coordinated_lift_tray', 'bimanual_sweep_to_dustpan', 'handover_item_easy',
-    'coordinated_take_tray_out_of_oven',
-    'coordinated_put_item_in_drawer',
+    'bimanual_push_box',
+    'bimanual_lift_ball',
+    'bimanual_dual_push_buttons',
+    'bimanual_pick_plate',
+    'bimanual_put_item_in_drawer',
+    'bimanual_put_bottle_in_fridge',
+    'bimanual_handover_item',
+    'bimanual_pick_laptop',
+    'bimanual_straighten_rope',
+    'bimanual_sweep_to_dustpan',
+    'bimanual_lift_tray',
+    'bimanual_handover_item_easy',
+    'bimanual_take_tray_out_of_oven'
 ]
 TASK_TO_ID = {task: i for i, task in enumerate(ALL_RLBENCH_TASKS)}
 
@@ -140,8 +148,7 @@ class Actioner:
 
     def load_episode(self, task_str, variation):
         self._task_str = task_str
-        instructions = list(self._instructions[task_str][variation])
-        self._instr = random.choice(instructions).unsqueeze(0)
+        self._instr = [random.choice(self._instructions[task_str][str(variation)])]
         self._task_id = torch.tensor(TASK_TO_ID[task_str]).unsqueeze(0)
         self._actions = {}
 
@@ -164,7 +171,7 @@ class Actioner:
         if self._instr is None:
             raise ValueError()
 
-        self._instr = self._instr.to(rgbs.device)
+        # self._instr = self._instr.to(rgbs.device)
         self._task_id = self._task_id.to(rgbs.device)
 
         gripper = gripper.unflatten(-1, (2, -1))
@@ -176,6 +183,10 @@ class Actioner:
         traj_mask = torch.full(
             [1, interpolation_length - 1], False
         ).to(rgbs.device)
+        # import pickle
+        # with open('first.pkl', 'wb') as f:
+        #     pickle.dump([rgbs.cpu(), pcds.cpu(), self._instr], f)
+        # jkjk
         output["action"] = self._policy(
             fake_traj,
             traj_mask,
@@ -333,7 +344,7 @@ class RLBenchEnv:
         var_success_rates = {}
         var_num_valid_demos = {}
 
-        for variation in task_variations:
+        for variation in tqdm(task_variations):
             task.set_variation(variation)
             success_rate, valid, num_valid_demos = (
                 self._evaluate_task_on_one_variation(
@@ -526,7 +537,7 @@ class RLBenchEnv:
             depth=apply_depth,
             mask=False,
             image_size=image_size,
-            render_mode=RenderMode.OPENGL,
+            render_mode=RenderMode.OPENGL3,
             **kwargs,
         )
 

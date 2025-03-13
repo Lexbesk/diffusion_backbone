@@ -1,15 +1,27 @@
 exp=flow_bimanual_3dda_train
 tasks=(
-    bimanual_pick_laptop bimanual_pick_plate bimanual_straighten_rope bimanual_sweep_to_dustpan coordinated_lift_ball coordinated_lift_tray coordinated_push_box coordinated_put_bottle_in_fridge coordinated_put_item_in_drawer coordinated_take_tray_out_of_oven dual_push_buttons handover_item_easy handover_item
+    bimanual_push_box
+    bimanual_lift_ball
+    bimanual_dual_push_buttons
+    bimanual_pick_plate
+    bimanual_put_item_in_drawer
+    bimanual_put_bottle_in_fridge
+    bimanual_handover_item
+    bimanual_pick_laptop
+    bimanual_straighten_rope
+    bimanual_sweep_to_dustpan
+    bimanual_lift_tray
+    bimanual_handover_item_easy
+    bimanual_take_tray_out_of_oven
 )
 
-data_dir=/data/group_data/katefgroup/VLA/peract2_raw/train
+data_dir=/data/group_data/katefgroup/VLA/peract2_raw_squash/test/
 dataset=Peract2
-instructions=instructions/peract2/instructions.pkl
+instructions=instructions/peract2/instructions.json
 num_episodes=100
 max_tries=2
 max_steps=25
-verbose=true
+verbose=false
 interpolation_length=2
 num_history=3
 denoise_timesteps=10
@@ -23,7 +35,7 @@ num_vis_ins_attn_layers=3
 fps_subsampling_factor=5
 relative_action=false
 seed=0
-checkpoint=peract2flow.pth
+checkpoint=peract2_front.pth
 headless=true
 
 num_ckpts=${#tasks[@]}
@@ -45,7 +57,7 @@ for ((i=0; i<$num_ckpts; i++)); do
         --rotation_parametrization $rotation_parametrization \
         --data_dir $data_dir \
         --num_episodes $num_episodes \
-        --output_file eval_logs/$exp/seed$seed/${tasks[$i]}/eval.json  \
+        --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
         --use_instruction $use_instruction \
         --instructions $instructions \
         --max_tries $max_tries \

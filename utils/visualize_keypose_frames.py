@@ -280,15 +280,15 @@ def visualize_actions_and_point_clouds(visible_pcd, visible_rgb,
     cur_vis_rgb = visible_rgb[0].permute(0, 2, 3, 1).flatten(0, -2).data.cpu().numpy()
     if rand_inds is None:
         rand_inds = torch.randperm(cur_vis_pcd.shape[0]).data.cpu().numpy()[:50000]
-        # mask = (
-        #     # (cur_vis_pcd[rand_inds, 2] >= 0.2) &
-        #     # (cur_vis_pcd[rand_inds, 1] <= 2) &
-        #     # (cur_vis_pcd[rand_inds, 0] <= 1.5)
-        #     (cur_vis_pcd[rand_inds, 2] >= 0.5)
-        #     & (cur_vis_pcd[rand_inds, 0] >= -0.2)
-        # )
-        # # from ipdb import set_trace; set_trace()
-        # rand_inds = rand_inds[mask]
+        mask = (
+            # (cur_vis_pcd[rand_inds, 2] >= 0.2) &
+            # (cur_vis_pcd[rand_inds, 1] <= 2) &
+            # (cur_vis_pcd[rand_inds, 0] <= 1.5)
+            (cur_vis_pcd[rand_inds, 2] >= 0.5)
+            & (cur_vis_pcd[rand_inds, 0] >= -0.2)
+        )
+        # from ipdb import set_trace; set_trace()
+        rand_inds = rand_inds[mask]
     fig = plt.figure()
     canvas = fig.canvas
     # ax = fig.add_subplot(projection='3d')
