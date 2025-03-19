@@ -11,7 +11,7 @@ import numpy as np
 import argparse
 
 from diffuser_actor.policy.bimanual_denoise_actor import BimanualDenoiseActor  # , DenoiseActor
-from diffuser_actor.policy.denoise_refactored_actor import DenoiseActor
+from diffuser_actor.policy.denoise_actor_3d import DenoiseActor
 from utils.common_utils import str2bool, str_none, round_floats
 from datasets.dataset_rlbench import (
     GNFactorDataset,

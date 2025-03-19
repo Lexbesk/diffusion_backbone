@@ -1,11 +1,5 @@
 import warnings
 import torch
-from torch.nn import Linear
-from torch.nn.init import xavier_uniform_
-from torch.nn.init import constant_
-from torch.nn.init import xavier_normal_
-from torch.nn.parameter import Parameter
-from torch.nn import Module
 from torch.nn import functional as F
 from xformers.ops import memory_efficient_attention
 import einops

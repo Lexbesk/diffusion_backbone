@@ -7,38 +7,49 @@ import random
 import argparse
 
 import cv2
+from kornia import augmentation as K
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import optim
+from torch import nn
 import torch.distributed as dist
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
 from tqdm import trange
+from tqdm import tqdm
 
 from engine import BaseTrainTester
-from datasets.old_dataset_rlbench import (
-    GNFactorDataset,
+from datasets.dataset_rlbench import (
     PeractDataset,
-    Peract2Dataset
+    GNFactorDataset,
+    PeractSingleCamDataset,
+    Peract2Dataset,
+    Peract2Dataset3cam,
+    PeractTwoCamDataset
 )
-from datasets.dataset_calvin import TrainABCTestD_CalvinDataset
-from diffuser_actor.encoder.text.clip import ClipTextEncoder
-from diffuser_actor.policy import DenoiseActor, BimanualDenoiseActor
+from datasets.dataset_comp import RLBenchCompDataset
+from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
+from diffuser_actor.policy import DenoiseActor3D, DenoiseActor2D
+from diffuser_actor.depth2cloud.rlbench import (
+    PeractDepth2Cloud,
+    PeractTwoCam2Cloud,
+    GNFactorDepth2Cloud,
+    NewDepth2Cloud
+)
 from utils.common_utils import count_parameters, str2bool, str_none
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser("Parse arguments for main.py")
-    # Trainign and testing
-    parser.add_argument('--seed', type=int, default=0)
+    # Training and testing
     parser.add_argument('--checkpoint', type=str_none, default=None)
-    parser.add_argument('--accumulate_grad_batches', type=int, default=1)
     parser.add_argument('--val_freq', type=int, default=500)
     parser.add_argument('--eval_only', type=str2bool, default=False)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--lr_scheduler', type=str, default="constant")
-    parser.add_argument('--wd', type=float, default=5e-4)
+    parser.add_argument('--wd', type=float, default=5e-3)
     parser.add_argument('--train_iters', type=int, default=200000)
     parser.add_argument('--val_iters', type=int, default=-1)
     # Dataset arguments
@@ -48,36 +59,31 @@ def parse_arguments():
     parser.add_argument('--num_workers', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--batch_size_val', type=int, default=4)
-    parser.add_argument('--image_rescale', type=str, default="0.75,1.25")
     # Logging
     parser.add_argument('--base_log_dir', type=Path,
                         default=Path(__file__).parent / "train_logs")
     parser.add_argument('--exp_log_dir', type=Path, default="exp")
     parser.add_argument('--run_log_dir', type=Path, default="run")
-    # Text encoder
-    parser.add_argument('--text_max_length', type=int, default=53)
     # Model
-    parser.add_argument('--bimanual', type=str2bool, default=False)
+    parser.add_argument('--use2dmodel', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
-    parser.add_argument('--workspace_normalizer_iter', type=int, default=256)
-    parser.add_argument('--dense_interpolation', type=str2bool, default=False)
-    parser.add_argument('--interpolation_length', type=int, default=100)
     parser.add_argument('--backbone', type=str, default="clip")
+    parser.add_argument('--finetune_backbone', type=str2bool, default=False)
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
     parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
-    parser.add_argument('--instructions', type=Path, required=True)
-    parser.add_argument('--precompute_instruction_encodings', type=str2bool, required=True)
-    parser.add_argument('--use_instruction', type=str2bool, default=False)
-    parser.add_argument('--rotation_parametrization', type=str, default='quat')
+    parser.add_argument('--train_instructions', type=Path, default='')
+    parser.add_argument('--val_instructions', type=Path, default='')
+    parser.add_argument('--precompute_instruction_encodings', type=str2bool, default=True)
     parser.add_argument('--quaternion_format', type=str, default='wxyz')
     parser.add_argument('--denoise_timesteps', type=int, default=10)
-    parser.add_argument('--denoise_model', type=str, default="rectified_flow",
-                        choices=["ddpm", "rectified_flow"])
+    parser.add_argument('--denoise_model', type=str, default="rectified_flow")
     parser.add_argument('--keypose_only', type=str2bool, default=True)
     parser.add_argument('--num_history', type=int, default=0)
     parser.add_argument('--relative_action', type=str2bool, default=False)
+    parser.add_argument('--relative_attention', type=str2bool, default=False)
     parser.add_argument('--fps_subsampling_factor', type=int, default=5)
+    parser.add_argument('--memory_limit', type=float, default=8)
 
     return parser.parse_args()
 
@@ -85,206 +91,335 @@ def parse_arguments():
 class TrainTester(BaseTrainTester):
     """Train/test a trajectory optimization algorithm."""
 
+    def __init__(self, args):
+        super().__init__(args)
+        _cls = {
+            "Peract": PeractDepth2Cloud,
+            "PeractSingleCam": GNFactorDepth2Cloud,
+            "PeractTwoCam": PeractTwoCam2Cloud,
+            "Peract2": NewDepth2Cloud,
+            "Peract2TC": NewDepth2Cloud,
+            "GNFactor": GNFactorDepth2Cloud,
+            "RLComp": GNFactorDepth2Cloud,
+            "ABC_D": None,
+            "ABC_DSingleCam": None
+        }[args.dataset]
+        im_size = 160 if args.dataset.startswith("ABC") else 256
+        if _cls is not None:
+            self.depth2cloud = _cls((256, 256))
+        else:
+            self.depth2cloud = None
+        self.aug = K.AugmentationSequential(
+            K.RandomHorizontalFlip(p=0.5),
+            K.RandomAffine(
+                degrees=0,
+                scale=(0.75, 1.25),
+                padding_mode="reflection",
+                p=1.0
+            ),
+            K.RandomResizedCrop(
+                size=(im_size, im_size),
+                scale=(0.7, 1.0)
+            )
+        ).cuda()
+
     def get_datasets(self):
         """Initialize datasets."""
         dataset_cls = {
             "Peract": PeractDataset,
+            "PeractSingleCam": PeractSingleCamDataset,
+            "PeractTwoCam": PeractTwoCamDataset,
             "Peract2": Peract2Dataset,
+            "Peract2TC": Peract2Dataset3cam,
             "GNFactor": GNFactorDataset,
-            "TrainABCTestD_CalvinDataset": TrainABCTestD_CalvinDataset
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset,
+            "ABC_DSingleCam": ABC_DSingleCamDataset
         }[args.dataset]
 
         # Initialize datasets with arguments
         train_dataset = dataset_cls(
             root=self.args.train_data_dir,
-            instructions=self.args.instructions,
+            instructions=self.args.train_instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            training=True,
-            image_rescale=tuple(
-                float(x) for x in self.args.image_rescale.split(",")
-            ),
-            dense_interpolation=self.args.dense_interpolation,
-            interpolation_length=self.args.interpolation_length,
             relative_action=self.args.relative_action,
+            mem_limit=self.args.memory_limit
         )
         test_dataset = dataset_cls(
             root=self.args.eval_data_dir,
-            instructions=self.args.instructions,
+            instructions=self.args.val_instructions,
             precompute_instruction_encodings=self.args.precompute_instruction_encodings,
-            training=False,
-            image_rescale=tuple(
-                float(x) for x in self.args.image_rescale.split(",")
-            ),
-            dense_interpolation=self.args.dense_interpolation,
-            interpolation_length=self.args.interpolation_length,
+            copies=1,
             relative_action=self.args.relative_action,
+            mem_limit=0.1
         )
         return train_dataset, test_dataset
 
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        if self.args.bimanual:
-            model_class = BimanualDenoiseActor
+        if self.args.use2dmodel:
+            model_class = DenoiseActor2D
         else:
-            model_class = DenoiseActor
+            model_class = DenoiseActor3D
         _model = model_class(
             backbone=self.args.backbone,
             embedding_dim=self.args.embedding_dim,
             num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
-            use_instruction=self.args.use_instruction,
             num_attn_heads=self.args.num_attn_heads,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
-            rotation_parametrization=self.args.rotation_parametrization,
             quaternion_format=self.args.quaternion_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model,
             nhist=self.args.num_history,
             relative=self.args.relative_action,
+            finetune_backbone=self.args.finetune_backbone
         )
         print("Model parameters:", count_parameters(_model))
 
         return _model
 
-    def get_workspace_normalizer(self, data_loader, total_iter=None):
+    def get_workspace_normalizer(self, data_loader=None):
         print("Computing workspace normalizer...")
+        dataset_cls = {
+            "Peract": PeractDataset,
+            "PeractSingleCam": PeractSingleCamDataset,
+            "PeractTwoCam": PeractTwoCamDataset,
+            "Peract2": Peract2Dataset,
+            "Peract2TC": Peract2Dataset3cam,
+            "GNFactor": GNFactorDataset,
+            "RLComp": RLBenchCompDataset,
+            "ABC_D": ABC_DDataset,
+            "ABC_DSingleCam": ABC_DSingleCamDataset
+        }[args.dataset]
+
+        # Initialize datasets with arguments
+        train_dataset = dataset_cls(
+            root=self.args.train_data_dir,
+            instructions=self.args.train_instructions,
+            precompute_instruction_encodings=self.args.precompute_instruction_encodings,
+            copies=1,
+            relative_action=self.args.relative_action,
+            mem_limit=0.1,
+            actions_only=True
+        )
 
         data_loader = DataLoader(
-            data_loader.dataset,
+            train_dataset,
             batch_size=self.args.batch_size,
-            collate_fn=traj_collate_fn,
+            collate_fn=actions_collate_fn,
             shuffle=False,
-            num_workers=0,
+            num_workers=self.args.num_workers
         )
 
         bounds = []
-        iter_loader = iter(data_loader)
-        if total_iter is None:
-            total_iter = max(len(iter_loader), self.args.workspace_normalizer_iter)
-        for _ in trange(total_iter):
-            try:
-                sample = next(iter_loader)
-            except StopIteration:
-                iter_loader = iter(data_loader)
-                sample = next(iter_loader)
+        for sample in tqdm(data_loader):
             bounds.append(sample["action"][..., :3].reshape([-1, 3]))
 
         bounds = torch.cat(bounds, dim=0)
-        min_bound = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
-        max_bound = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
-        normalizer = nn.Parameter(torch.stack([min_bound, max_bound]),
-                                  requires_grad=False)
-
-        return normalizer
+        min_ = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
+        max_ = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
+        return nn.Parameter(torch.stack([min_, max_]), requires_grad=False)
 
     @staticmethod
     def get_criterion():
         return TrajectoryCriterion()
 
-    def get_text_encoder(self):
-        """Initialize the model."""
-        return ClipTextEncoder(self.args.text_max_length)
+    def get_optimizer(self, model):
+        """Initialize optimizer."""
+        optimizer_grouped_parameters = [
+            {"params": [], "weight_decay": 0.0, "lr": self.args.lr},
+            {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr}
+        ]
+        if self.args.finetune_backbone:
+            optimizer_grouped_parameters.append(
+                {"params": [], "weight_decay": self.args.wd, "lr": 0.1 * self.args.lr}
+            )
+        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
+        for name, param in model.named_parameters():
+            if self.args.finetune_backbone and 'backbone' in name:
+                optimizer_grouped_parameters[2]["params"].append(param)
+            elif any(nd in name for nd in no_decay):
+                optimizer_grouped_parameters[0]["params"].append(param)
+            else:
+                optimizer_grouped_parameters[1]["params"].append(param)
+        optimizer = optim.AdamW(optimizer_grouped_parameters)
+        return optimizer
 
-    def train_one_step(self, model, text_encoder, criterion,
-                       optimizer, scaler, lr_scheduler, step_id, sample):
-        """Run a single training step."""
-        if step_id % self.args.accumulate_grad_batches == 0:
-            optimizer.zero_grad()
+    def main(self, collate_fn):
+        """Run main training/testing pipeline."""
+        # Get loaders
+        train_loader, test_loader = self.get_loaders(collate_fn)
 
+        # Get model
+        model = self.get_model()
+        if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
+            normalizer = self.get_workspace_normalizer(train_loader)
+            model.workspace_normalizer.copy_(normalizer)
+            dist.barrier()
+
+        # Get criterion
+        criterion = self.get_criterion()
+
+        # Get optimizer
+        optimizer = self.get_optimizer(model)
+        lr_scheduler = self.get_lr_scheduler(optimizer)
+        scaler = torch.GradScaler()
+
+        # Move model to devices
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model = DistributedDataParallel(
+            model, device_ids=[self.args.local_rank],
+            broadcast_buffers=False, find_unused_parameters=True
+        )
+
+        # Check for a checkpoint
+        start_iter, best_loss = 0, None
+        if self.args.checkpoint:
+            start_iter, best_loss = self.load_checkpoint(model, optimizer)
+        print(model.module.workspace_normalizer)
+
+        # Eval only
+        if bool(self.args.eval_only):
+            if dist.get_rank() == 0:
+                print("Test evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, test_loader, step_id=-1,
+                    val_iters=-1
+                )
+            dist.barrier()
+            return model
+
+        # Step the lr scheduler to the current step
+        for _ in range(start_iter):
+            lr_scheduler.step()
+
+        # Training loop
+        iter_loader = iter(train_loader)
+        model.train()
+        for step_id in trange(start_iter, self.args.train_iters):
+            try:
+                sample = next(iter_loader)
+            except StopIteration:
+                iter_loader = iter(train_loader)
+                sample = next(iter_loader)
+
+            self.train_one_step(
+                model, criterion, optimizer, scaler, lr_scheduler,
+                step_id, sample
+            )
+
+            if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
+                print("Train evaluation.......")
+                model.eval()
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, train_loader, step_id,
+                    val_iters=max(5, self.args.val_iters),
+                    split='train'
+                )
+                print("Test evaluation.......")
+                new_loss = self.evaluate_nsteps(
+                    model, criterion, test_loader, step_id,
+                    val_iters=-1,
+                )
+                # save model
+                best_loss = self.save_checkpoint(
+                    model, optimizer, step_id,
+                    new_loss, best_loss
+                )
+                model.train()
+            dist.barrier()
+
+        return model
+
+    @torch.no_grad()
+    def prepare_batch(self, sample, augment=False):
+        # Actions
         if self.args.keypose_only:
             sample["action"] = sample["action"][:, [-1]]
             sample["action_mask"] = sample["action_mask"][:, [-1]]
+
+        # Observations
+        if self.depth2cloud is not None:
+            pcds = self.depth2cloud(
+                sample['depth'].cuda(non_blocking=True).float(),
+                sample['extrinsics'].cuda(non_blocking=True).float(),
+                sample['intrinsics'].cuda(non_blocking=True).float()
+            )
         else:
-            sample["action"] = sample["action"][:, 1:]
-            sample["action_mask"] = sample["action_mask"][:, 1:]
+            pcds = sample['depth'].cuda(non_blocking=True).float()
+        if augment:
+            b, nc, _, h, w = sample['rgb'].shape
+            obs = torch.cat((
+                sample['rgb'].cuda(non_blocking=True).half() / 255,
+                pcds.half()
+            ), 2)  # (B, ncam, 6, H, W)
+            obs = obs.reshape(-1, 6, h, w)
+            obs = self.aug(obs)
+            rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
+            pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
+        else:
+            rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
+
+        return (
+            sample["action"].cuda(non_blocking=True),
+            sample["action_mask"].cuda(non_blocking=True),
+            rgbs,
+            None,
+            pcds,
+            sample["instr"],
+            sample["proprioception"].cuda(non_blocking=True)
+        )
+
+    def train_one_step(self, model, criterion,
+                       optimizer, scaler, lr_scheduler, step_id, sample):
+        """Run a single training step."""
+        optimizer.zero_grad()
 
         # Forward pass
-        proprioception = (
-            sample["proprioception"][:, -self.args.num_history:]
+        action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
+            sample, augment=True
         )
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if not self.args.precompute_instruction_encodings:
-                instr = text_encoder(sample['instr'], "cuda")
-            else:
-                instr = sample["instr"]
-            out = model(
-                sample["action"],
-                sample["action_mask"],
-                sample["rgbs"],
-                sample["pcds"],
-                instr,
-                proprioception
-            )
+            out = model(action, action_mask, rgbs, rgb2d, pcds, instr, prop)
 
             # Backward pass
             loss = criterion.compute_loss(out)
         scaler.scale(loss).backward()
 
         # Update
-        if step_id % self.args.accumulate_grad_batches == self.args.accumulate_grad_batches - 1:
-            scaler.step(optimizer)
-            scaler.update()
+        scaler.step(optimizer)
+        scaler.update()
 
         # Step the lr scheduler
         lr_scheduler.step()
 
-        # Log
-        if dist.get_rank() == 0 and (step_id + 1) % self.args.val_freq == 0:
-            self.writer.add_scalar("lr", self.args.lr, step_id)
-            self.writer.add_scalar("train-loss/noise_mse", loss, step_id)
-
     @torch.inference_mode()
-    def evaluate_nsteps(self, model, text_encoder, criterion, loader,
+    def evaluate_nsteps(self, model, criterion, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
-        if self.args.val_iters != -1:
-            val_iters = self.args.val_iters
         values = {}
         device = next(model.parameters()).device
         model.eval()
 
-        for i, sample in enumerate(loader):
+        for i, sample in tqdm(enumerate(loader)):
             if i == val_iters:
                 break
 
-            if self.args.keypose_only:
-                sample["action"] = sample["action"][:, [-1]]
-                sample["action_mask"] = sample["action_mask"][:, [-1]]
-            else:
-                sample["action"] = sample["action"][:, 1:]
-                sample["action_mask"] = sample["action_mask"][:, 1:]
-
-
-            proprioception = (
-                sample["proprioception"][:, -self.args.num_history:]
+            action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
+                sample, augment=False
             )
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                # Encode text instructions
-                if not self.args.precompute_instruction_encodings:
-                    instr = text_encoder(sample['instr'], device)
-                else:
-                    instr = sample["instr"].to(device)
-                for i, img in enumerate(sample["rgbs"].cpu()):
-                    assert img.shape == (1, 3, 256, 256)
-                    plt.imshow(img[0].permute(1, 2, 0))
-                    plt.savefig(f'ex_{i}.jpg')
-                    plt.close()
-                from ipdb import set_trace as st; st()
-                action = model(
-                    sample["action"].to(device),
-                    sample["action_mask"].to(device),
-                    sample["rgbs"].to(device),
-                    sample["pcds"].to(device),
-                    instr,
-                    proprioception.to(device),
+                pred_action = model(
+                    action, action_mask, rgbs, rgb2d, pcds, instr, prop,
                     run_inference=True
                 )
 
-                losses, losses_B = criterion.compute_metrics(
-                    action,
-                    sample["action"].to(device),
-                    sample["action_mask"].to(device)
-                )
+            losses, losses_B = criterion.compute_metrics(
+                pred_action, action, action_mask
+            )
 
             # Gather global statistics
             for n, l in losses.items():
@@ -307,9 +442,7 @@ class TrainTester(BaseTrainTester):
             if i == 0 and dist.get_rank() == 0 and step_id > -1:
                 viz_key = f'{split}-viz/viz'
                 viz = generate_visualizations(
-                    action,
-                    sample["action"].to(device),
-                    sample["action_mask"].to(device)
+                    pred_action, action, action_mask
                 )
                 self.writer.add_image(viz_key, viz, step_id)
 
@@ -325,30 +458,33 @@ class TrainTester(BaseTrainTester):
             for key, value in values.items():
                 print(f"{key}: {value:.03f}")
 
-        return values.get('val-losses/traj_pos_acc_001', None)
+        return -values[f'{split}-losses/mean/traj_pos_acc_001']
 
 
 def traj_collate_fn(batch):
+    # Values for these come as tensors
     keys = [
-        "action", "action_mask", "rgbs", "pcds", "proprioception",
+        "action", "proprioception",
+        "rgb", "depth", "extrinsics", "intrinsics"
     ]
     if isinstance(batch[0].get("instr", None), torch.Tensor):
         keys.append("instr")
-    ret_dict = {
-        key: torch.cat([
-            item[key].float() if key != 'action_mask' else item[key]
-            for item in batch
-        ]) for key in keys
-    }
+    ret_dict = {k_: torch.stack([item[k_] for item in batch]) for k_ in keys}
+    ret_dict["action_mask"] = torch.zeros(
+        ret_dict["action"].shape[:2], dtype=bool
+    )
 
+    # Values for these come as lists
     list_keys = ["task"]
-    if isinstance(batch[0].get("instr", None), str):
+    if isinstance(batch[0].get("instr", None), list):
         list_keys.append("instr")
     for key in list_keys:
-        ret_dict[key] = []
-        for item in batch:
-            ret_dict[key] += item[key]
+        ret_dict[key] = [item[key][0] for item in batch]
     return ret_dict
+
+
+def actions_collate_fn(batch):
+    return {"action": torch.stack([item["action"] for item in batch])}
 
 
 class TrajectoryCriterion:
@@ -483,6 +619,7 @@ def generate_visualizations(pred, gt, mask, box_size=0.3):
 
 
 if __name__ == '__main__':
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     # Arguments
     args = parse_arguments()
     print("Arguments:")
@@ -501,9 +638,9 @@ if __name__ == '__main__':
     args.local_rank = int(os.environ["LOCAL_RANK"])
 
     # Seeds
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
+    torch.manual_seed(args.local_rank)
+    np.random.seed(args.local_rank)
+    random.seed(args.local_rank)
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)

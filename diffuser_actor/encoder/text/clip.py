@@ -1,6 +1,3 @@
-"""
-Precompute embeddings of instructions.
-"""
 import transformers
 import torch
 import torch.nn as nn
