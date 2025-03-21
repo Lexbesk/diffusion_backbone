@@ -39,7 +39,7 @@ class Encoder(BaseEncoder):
                 [64, 256, 512, 1024, 2048],
                 embedding_dim, output_level="res3"
             )
-            self.rgb2d_proj = nn.Conv2d(2048, embedding_dim, 1)
+            # self.rgb2d_proj = nn.Conv2d(2048, embedding_dim, 1)
         else:
             self.inner_block = Conv2dNormActivation(
                 768, embedding_dim, kernel_size=1, padding=0,
@@ -185,9 +185,9 @@ class Encoder(BaseEncoder):
 
         # Sample features
         expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, ch)  # B Np F
-        sampled_features = torch.gather(features, 0, expanded_inds)
+        sampled_features = torch.gather(features, 1, expanded_inds)
 
         # Sample positions
         expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, 3)  # B Np 3
-        sampled_pos = torch.gather(pos, 0, expanded_inds)
+        sampled_pos = torch.gather(pos, 1, expanded_inds)
         return sampled_features, sampled_pos

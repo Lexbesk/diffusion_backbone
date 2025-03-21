@@ -64,7 +64,7 @@ class Encoder(nn.Module):
             'clip': self.encode_clip,
             # 'siglip2_256': self.encode_siglip,
             # 'siglip2_512': self.encode_siglip
-        }
+        }[self._backbone_name]
         # Compute scene features/positional embeddings, language embeddings
         rgb3d_feats, rgb2d_feats, pcd, instr_feats = vl_enc_fn(
             rgb3d, rgb2d, pcd, instruction

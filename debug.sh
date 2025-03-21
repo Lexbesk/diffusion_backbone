@@ -1,58 +1,53 @@
-# rm -r /scratch/GNFactor_zarr
-# cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
+main_dir=Peract2
 
-main_dir=GNFactorFast
-
-train_data_dir=/scratch/GNFactor_zarr/train_randomized.zarr
-eval_data_dir=/scratch/GNFactor_zarr/val_randomized.zarr
-instructions=instructions/peract/instructions.pkl
+train_data_dir=/data/user_data/ngkanats/Peract2_zarr/train.zarr
+eval_data_dir=/data/user_data/ngkanats/Peract2_zarr/val.zarr
+train_instructions=instructions/peract2/instructions.json
+val_instructions=instructions/peract2/instructions.json
 
 lr=1e-4
 lr_scheduler=constant
-num_history=1
-denoise_timesteps=100  # 10
-denoise_model=ddpm  # rectified_flow
+num_history=3
+denoise_timesteps=10  # 10
+denoise_model=rectified_flow
 keypose_only=true
 quaternion_format=xyzw
-rotation_parametrization=6D
 fps_subsampling_factor=5
 backbone=clip
-use_instruction=true
-workspace_normalizer_buffer=0.08  # 0.05
-B=128
+bimanual=true
+workspace_normalizer_buffer=0.05
+B=64
 B_val=64
-C=120  # 144
+C=120
 num_attn_heads=8
-num_vis_ins_attn_layers=3
+num_vis_instr_attn_layers=3
 train_iters=600000
 val_freq=4000
-precompute_instruction_encodings=true
+precompute_instruction_encodings=false
 num_workers=4
-dataset=GNFactor
-ngpus=4
+dataset=Peract2TC
 ngpus=1
 
-run_log_dir=reproduce2gpu_C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-# checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=none
-# checkpoint=/home/ngkanats/repos/lbs/analogical_manipulation/train_logs/GNFactorFast/clip_debugged144-B128-lr1e-4-constant-H1-rectified_flow-DT10/last.pth
-eval_only=false
+run_log_dir=new_three_camerasC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+checkpoint=peract2_front_wrist3d_2.pth
+eval_only=true
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
-    main_fast.py \
+    main.py \
     --dataset $dataset \
     --train_data_dir $train_data_dir \
     --eval_data_dir $eval_data_dir \
-    --instructions $instructions \
+    --train_instructions $train_instructions \
+    --val_instructions $val_instructions \
     --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
     --num_workers $num_workers \
     --train_iters $train_iters \
+    --bimanual $bimanual \
     --embedding_dim $C \
     --num_attn_heads $num_attn_heads \
-    --num_vis_ins_attn_layers $num_vis_ins_attn_layers \
-    --use_instruction $use_instruction \
-    --rotation_parametrization $rotation_parametrization \
+    --num_vis_instr_attn_layers $num_vis_instr_attn_layers \
     --fps_subsampling_factor $fps_subsampling_factor \
     --backbone $backbone \
     --quaternion_format $quaternion_format \

@@ -1,26 +1,29 @@
 """Main script for training and testing."""
 
+import argparse
 import io
 import os
 from pathlib import Path
 import random
-import argparse
 
 import cv2
 from kornia import augmentation as K
 from matplotlib import pyplot as plt
 import numpy as np
+from omegaconf import OmegaConf
 import torch
 from torch import optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
+from torch.utils.data.distributed import DistributedSampler
 from torch import nn
 import torch.distributed as dist
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 from tqdm import tqdm
 
-from engine import BaseTrainTester
 from datasets.dataset_rlbench import (
     PeractDataset,
     GNFactorDataset,
@@ -31,14 +34,10 @@ from datasets.dataset_rlbench import (
 )
 from datasets.dataset_comp import RLBenchCompDataset
 from datasets.dataset_calvin_zarr import ABC_DDataset, ABC_DSingleCamDataset
-from diffuser_actor.policy import DenoiseActor3D, DenoiseActor2D
-from diffuser_actor.depth2cloud.rlbench import (
-    PeractDepth2Cloud,
-    PeractTwoCam2Cloud,
-    GNFactorDepth2Cloud,
-    NewDepth2Cloud
-)
+from modeling.policy import DenoiseActor3D, DenoiseActor2D
+from training.depth2cloud import fetch_depth2cloud
 from utils.common_utils import count_parameters, str2bool, str_none
+from utils.tristage_scheduler import TriStageLRScheduler
 
 
 def parse_arguments():
@@ -66,12 +65,14 @@ def parse_arguments():
     parser.add_argument('--run_log_dir', type=Path, default="run")
     # Model
     parser.add_argument('--use2dmodel', type=str2bool, default=False)
+    parser.add_argument('--bimanual', type=str2bool, default=False)
     parser.add_argument('--workspace_normalizer_buffer', type=float, default=0.04)
     parser.add_argument('--backbone', type=str, default="clip")
     parser.add_argument('--finetune_backbone', type=str2bool, default=False)
+    parser.add_argument('--finetune_text_encoder', type=str2bool, default=False)
     parser.add_argument('--embedding_dim', type=int, default=144)
     parser.add_argument('--num_attn_heads', type=int, default=9)
-    parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
+    parser.add_argument('--num_vis_instr_attn_layers', type=int, default=2)
     parser.add_argument('--train_instructions', type=Path, default='')
     parser.add_argument('--val_instructions', type=Path, default='')
     parser.add_argument('--precompute_instruction_encodings', type=str2bool, default=True)
@@ -88,27 +89,24 @@ def parse_arguments():
     return parser.parse_args()
 
 
-class TrainTester(BaseTrainTester):
+class TrainTester:
     """Train/test a trajectory optimization algorithm."""
 
     def __init__(self, args):
-        super().__init__(args)
-        _cls = {
-            "Peract": PeractDepth2Cloud,
-            "PeractSingleCam": GNFactorDepth2Cloud,
-            "PeractTwoCam": PeractTwoCam2Cloud,
-            "Peract2": NewDepth2Cloud,
-            "Peract2TC": NewDepth2Cloud,
-            "GNFactor": GNFactorDepth2Cloud,
-            "RLComp": GNFactorDepth2Cloud,
-            "ABC_D": None,
-            "ABC_DSingleCam": None
-        }[args.dataset]
+        """Initialize."""
+        if dist.get_rank() == 0:
+            args_dict = vars(args)
+            conf = OmegaConf.create(args_dict)
+            output_file = str(args.log_dir / "config.yaml")
+            OmegaConf.save(conf, output_file)
+
+        self.args = args
+
+        if dist.get_rank() == 0:
+            self.writer = SummaryWriter(log_dir=args.log_dir)
+
         im_size = 160 if args.dataset.startswith("ABC") else 256
-        if _cls is not None:
-            self.depth2cloud = _cls((256, 256))
-        else:
-            self.depth2cloud = None
+        self.depth2cloud = fetch_depth2cloud(args.dataset, (256, 256))
         self.aug = K.AugmentationSequential(
             K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
@@ -155,6 +153,47 @@ class TrainTester(BaseTrainTester):
         )
         return train_dataset, test_dataset
 
+    def get_loaders(self, collate_fn=default_collate):
+        """Initialize data loaders."""
+        def seed_worker(worker_id):
+            worker_seed = torch.initial_seed() % 2**32
+            np.random.seed(worker_seed)
+            random.seed(worker_seed)
+            np.random.seed(np.random.get_state()[1][0] + worker_id)
+        # Datasets
+        train_dataset, test_dataset = self.get_datasets()
+        # Samplers and loaders
+        g = torch.Generator()
+        g.manual_seed(0)
+        train_sampler = DistributedSampler(train_dataset)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=False,
+            num_workers=self.args.num_workers,
+            worker_init_fn=seed_worker,
+            collate_fn=collate_fn,
+            pin_memory=True,
+            sampler=train_sampler,
+            drop_last=True,
+            generator=g
+        )
+        # No sampler for val!
+        if dist.get_rank() == 0:
+            test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.args.batch_size_val,
+                shuffle=False,
+                num_workers=self.args.num_workers,
+                collate_fn=collate_fn,
+                pin_memory=True,
+                sampler=None,
+                drop_last=False
+            )
+        else:
+            test_loader = None
+        return train_loader, test_loader
+
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
@@ -164,22 +203,24 @@ class TrainTester(BaseTrainTester):
             model_class = DenoiseActor3D
         _model = model_class(
             backbone=self.args.backbone,
-            embedding_dim=self.args.embedding_dim,
-            num_vis_ins_attn_layers=self.args.num_vis_ins_attn_layers,
-            num_attn_heads=self.args.num_attn_heads,
+            finetune_backbone=self.args.finetune_backbone,
+            finetune_text_encoder=self.args.finetune_text_encoder,
+            num_vis_instr_attn_layers=self.args.num_vis_instr_attn_layers,
             fps_subsampling_factor=self.args.fps_subsampling_factor,
+            embedding_dim=self.args.embedding_dim,
+            num_attn_heads=self.args.num_attn_heads,
+            nhist=self.args.num_history,
+            nhand=2 if self.args.bimanual else 1,
+            relative=self.args.relative_action,
             quaternion_format=self.args.quaternion_format,
             denoise_timesteps=self.args.denoise_timesteps,
-            denoise_model=self.args.denoise_model,
-            nhist=self.args.num_history,
-            relative=self.args.relative_action,
-            finetune_backbone=self.args.finetune_backbone
+            denoise_model=self.args.denoise_model
         )
         print("Model parameters:", count_parameters(_model))
 
         return _model
 
-    def get_workspace_normalizer(self, data_loader=None):
+    def get_workspace_normalizer(self):
         print("Computing workspace normalizer...")
         dataset_cls = {
             "Peract": PeractDataset,
@@ -221,10 +262,6 @@ class TrainTester(BaseTrainTester):
         max_ = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
         return nn.Parameter(torch.stack([min_, max_]), requires_grad=False)
 
-    @staticmethod
-    def get_criterion():
-        return TrajectoryCriterion()
-
     def get_optimizer(self, model):
         """Initialize optimizer."""
         optimizer_grouped_parameters = [
@@ -246,6 +283,21 @@ class TrainTester(BaseTrainTester):
         optimizer = optim.AdamW(optimizer_grouped_parameters)
         return optimizer
 
+    def get_lr_scheduler(self, optimizer):
+        """Initialize learning rate scheduler."""
+        if self.args.lr_scheduler == "constant":
+            scheduler = ConstantLR(
+                optimizer, factor=1.0, total_iters=self.args.train_iters
+            )
+        elif self.args.lr_scheduler == "cosine":
+            scheduler = CosineAnnealingLR(optimizer, T_max=self.args.train_iters)
+        elif self.args.lr_scheduler == "tristage":
+            scheduler = TriStageLRScheduler(optimizer)
+        else:
+            raise NotImplementedError
+
+        return scheduler
+
     def main(self, collate_fn):
         """Run main training/testing pipeline."""
         # Get loaders
@@ -254,12 +306,9 @@ class TrainTester(BaseTrainTester):
         # Get model
         model = self.get_model()
         if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
-            normalizer = self.get_workspace_normalizer(train_loader)
+            normalizer = self.get_workspace_normalizer()
             model.workspace_normalizer.copy_(normalizer)
             dist.barrier()
-
-        # Get criterion
-        criterion = self.get_criterion()
 
         # Get optimizer
         optimizer = self.get_optimizer(model)
@@ -286,7 +335,7 @@ class TrainTester(BaseTrainTester):
                 print("Test evaluation.......")
                 model.eval()
                 new_loss = self.evaluate_nsteps(
-                    model, criterion, test_loader, step_id=-1,
+                    model, test_loader, step_id=-1,
                     val_iters=-1
                 )
             dist.barrier()
@@ -306,23 +355,20 @@ class TrainTester(BaseTrainTester):
                 iter_loader = iter(train_loader)
                 sample = next(iter_loader)
 
-            self.train_one_step(
-                model, criterion, optimizer, scaler, lr_scheduler,
-                step_id, sample
-            )
+            self.train_one_step(model, optimizer, scaler, lr_scheduler, sample)
 
             if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
                 print("Train evaluation.......")
                 model.eval()
                 new_loss = self.evaluate_nsteps(
-                    model, criterion, train_loader, step_id,
-                    val_iters=max(5, self.args.val_iters),
+                    model, train_loader, step_id,
+                    val_iters=10,
                     split='train'
                 )
                 print("Test evaluation.......")
                 new_loss = self.evaluate_nsteps(
-                    model, criterion, test_loader, step_id,
-                    val_iters=-1,
+                    model, test_loader, step_id,
+                    val_iters=-1
                 )
                 # save model
                 best_loss = self.save_checkpoint(
@@ -373,8 +419,8 @@ class TrainTester(BaseTrainTester):
             sample["proprioception"].cuda(non_blocking=True)
         )
 
-    def train_one_step(self, model, criterion,
-                       optimizer, scaler, lr_scheduler, step_id, sample):
+    def train_one_step(self, model,
+                       optimizer, scaler, lr_scheduler, sample):
         """Run a single training step."""
         optimizer.zero_grad()
 
@@ -383,10 +429,8 @@ class TrainTester(BaseTrainTester):
             sample, augment=True
         )
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            out = model(action, action_mask, rgbs, rgb2d, pcds, instr, prop)
+            loss = model(action, action_mask, rgbs, rgb2d, pcds, instr, prop)
 
-            # Backward pass
-            loss = criterion.compute_loss(out)
         scaler.scale(loss).backward()
 
         # Update
@@ -397,7 +441,7 @@ class TrainTester(BaseTrainTester):
         lr_scheduler.step()
 
     @torch.inference_mode()
-    def evaluate_nsteps(self, model, criterion, loader,
+    def evaluate_nsteps(self, model, loader,
                         step_id, val_iters, split='val'):
         """Run a given number of evaluation steps."""
         values = {}
@@ -417,8 +461,8 @@ class TrainTester(BaseTrainTester):
                     run_inference=True
                 )
 
-            losses, losses_B = criterion.compute_metrics(
-                pred_action, action, action_mask
+            losses, losses_B = compute_metrics(
+                pred_action, action
             )
 
             # Gather global statistics
@@ -441,9 +485,7 @@ class TrainTester(BaseTrainTester):
             # Generate visualizations
             if i == 0 and dist.get_rank() == 0 and step_id > -1:
                 viz_key = f'{split}-viz/viz'
-                viz = generate_visualizations(
-                    pred_action, action, action_mask
-                )
+                viz = generate_visualizations(pred_action, action)
                 self.writer.add_image(viz_key, viz, step_id)
 
         # Log all statistics
@@ -460,6 +502,57 @@ class TrainTester(BaseTrainTester):
 
         return -values[f'{split}-losses/mean/traj_pos_acc_001']
 
+    def load_checkpoint(self, model, optimizer):
+        """Load from checkpoint."""
+        print("=> trying checkpoint '{}'".format(self.args.checkpoint))
+        if not os.path.exists(self.args.checkpoint):
+            print('Warning: checkpoint was not found, starting from scratch')
+            print('The main process will compute workspace bounds')
+            return 0, None
+
+        model_dict = torch.load(
+            self.args.checkpoint,
+            map_location="cpu",
+            weights_only=True
+        )
+        model.load_state_dict(model_dict["weight"])
+        if 'optimizer' in model_dict:
+            optimizer.load_state_dict(model_dict["optimizer"])
+        start_iter = model_dict.get("iter", 0)
+        best_loss = model_dict.get("best_loss", None)
+
+        print("=> loaded successfully '{}' (step {})".format(
+            self.args.checkpoint, model_dict.get("iter", 0)
+        ))
+        del model_dict
+        torch.cuda.empty_cache()
+        return start_iter, best_loss
+
+    def save_checkpoint(self, model, optimizer, step_id, new_loss, best_loss):
+        """Save checkpoint if requested."""
+        if new_loss is None or best_loss is None or new_loss <= best_loss:
+            best_loss = new_loss
+            torch.save({
+                "weight": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "iter": step_id + 1,
+                "best_loss": best_loss
+            }, self.args.log_dir / "best.pth")
+        torch.save({
+            "weight": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "iter": step_id + 1,
+            "best_loss": best_loss
+        }, self.args.log_dir / "last.pth")
+        if (step_id + 1) % 40000 == 0:
+            torch.save({
+                "weight": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "iter": step_id + 1,
+                "best_loss": best_loss
+            }, self.args.log_dir / f"interm{step_id + 1}.pth")
+        return best_loss
+
 
 def traj_collate_fn(batch):
     # Values for these come as tensors
@@ -471,7 +564,7 @@ def traj_collate_fn(batch):
         keys.append("instr")
     ret_dict = {k_: torch.stack([item[k_] for item in batch]) for k_ in keys}
     ret_dict["action_mask"] = torch.zeros(
-        ret_dict["action"].shape[:2], dtype=bool
+        ret_dict["action"].shape[:-1], dtype=bool
     )
 
     # Values for these come as lists
@@ -487,70 +580,34 @@ def actions_collate_fn(batch):
     return {"action": torch.stack([item["action"] for item in batch])}
 
 
-class TrajectoryCriterion:
+def compute_metrics(pred, gt):
+    # pred/gt are (B, L, 7), mask (B, L)
+    pos_l2 = ((pred[..., :3] - gt[..., :3]) ** 2).sum(-1).sqrt()
+    # symmetric quaternion eval
+    quat_l1 = (pred[..., 3:7] - gt[..., 3:7]).abs().sum(-1)
+    quat_l1_ = (pred[..., 3:7] + gt[..., 3:7]).abs().sum(-1)
+    select_mask = (quat_l1 < quat_l1_).float()
+    quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
+    # gripper openess
+    openess = ((pred[..., 7:] >= 0.5) == (gt[..., 7:] > 0.0)).bool()
+    tr = 'traj_'
 
-    def __init__(self):
-        pass
+    # Trajectory metrics
+    ret_1, ret_2 = {
+        tr + 'action_mse': F.mse_loss(pred, gt),
+        tr + 'pos_l2': pos_l2.mean(),
+        tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(),
+        tr + 'rot_l1': quat_l1.mean(),
+        tr + 'rot_acc_0025': (quat_l1 < 0.025).float().mean(),
+        tr + 'gripper': openess.flatten().float().mean()
+    }, {
+        tr + 'pos_l2': pos_l2.mean(-1),
+        tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(-1),
+        tr + 'rot_l1': quat_l1.mean(-1),
+        tr + 'rot_acc_0025': (quat_l1 < 0.025).float().mean(-1)
+    }
 
-    def compute_loss(self, pred, gt=None, mask=None, is_loss=True):
-        if not is_loss:
-            assert gt is not None and mask is not None
-            return self.compute_metrics(pred, gt, mask)[0]['action_mse']
-        return pred
-
-    @staticmethod
-    def compute_metrics(pred, gt, mask):
-        # pred/gt are (B, L, 7), mask (B, L)
-        pos_l2 = ((pred[..., :3] - gt[..., :3]) ** 2).sum(-1).sqrt()
-        # symmetric quaternion eval
-        quat_l1 = (pred[..., 3:7] - gt[..., 3:7]).abs().sum(-1)
-        quat_l1_ = (pred[..., 3:7] + gt[..., 3:7]).abs().sum(-1)
-        select_mask = (quat_l1 < quat_l1_).float()
-        quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
-        # gripper openess
-        openess = ((pred[..., 7:] >= 0.5) == (gt[..., 7:] > 0.0)).bool()
-        tr = 'traj_'
-
-        # Trajectory metrics
-        ret_1, ret_2 = {
-            tr + 'action_mse': F.mse_loss(pred, gt),
-            tr + 'pos_l2': pos_l2.mean(),
-            tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(),
-            tr + 'rot_l1': quat_l1.mean(),
-            tr + 'rot_acc_0025': (quat_l1 < 0.025).float().mean(),
-            tr + 'gripper': openess.flatten().float().mean()
-        }, {
-            tr + 'pos_l2': pos_l2.mean(-1),
-            tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(-1),
-            tr + 'rot_l1': quat_l1.mean(-1),
-            tr + 'rot_acc_0025': (quat_l1 < 0.025).float().mean(-1)
-        }
-
-        # Keypose metrics
-        if pred.ndim == gt.ndim == 3:
-            pos_l2 = ((pred[:, -1, :3] - gt[:, -1, :3]) ** 2).sum(-1).sqrt()
-            quat_l1 = (pred[:, -1, 3:7] - gt[:, -1, 3:7]).abs().sum(-1)
-            quat_l1_ = (pred[:, -1, 3:7] + gt[:, -1, 3:7]).abs().sum(-1)
-        else:
-            pos_l2 = ((pred[:, -1, :, :3] - gt[:, -1, :, :3]) ** 2).sum(-1).sqrt()
-            quat_l1 = (pred[:, -1, :, 3:7] - gt[:, -1, :, 3:7]).abs().sum(-1)
-            quat_l1_ = (pred[:, -1, :, 3:7] + gt[:, -1, :, 3:7]).abs().sum(-1)
-        select_mask = (quat_l1 < quat_l1_).float()
-        quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
-        ret_1.update({
-            'pos_l2_final': pos_l2.mean(),
-            'pos_l2_final<0.01': (pos_l2 < 0.01).float().mean(),
-            'rot_l1': quat_l1.mean(),
-            'rot_l1<0025': (quat_l1 < 0.025).float().mean()
-        })
-        ret_2.update({
-            'pos_l2_final': pos_l2,
-            'pos_l2_final<0.01': (pos_l2 < 0.01).float(),
-            'rot_l1': quat_l1,
-            'rot_l1<0.025': (quat_l1 < 0.025).float(),
-        })
-
-        return ret_1, ret_2
+    return ret_1, ret_2
 
 
 def fig_to_numpy(fig, dpi=60):
@@ -563,44 +620,43 @@ def fig_to_numpy(fig, dpi=60):
     return img
 
 
-def generate_visualizations(pred, gt, mask, box_size=0.3):
+def generate_visualizations(pred, gt, box_size=0.3):
     batch_idx = 0
     pred = pred[batch_idx].detach().cpu().numpy()
     gt = gt[batch_idx].detach().cpu().numpy()
-    mask = mask[batch_idx].detach().cpu().numpy()
 
     fig = plt.figure(figsize=(10, 10))
     ax = plt.axes(projection='3d')
     if pred.ndim == 2 and gt.ndim == 2:
         ax.scatter3D(
-            pred[~mask][:, 0], pred[~mask][:, 1], pred[~mask][:, 2],
+            pred[:, 0], pred[:, 1], pred[:, 2],
             color='red', label='pred'
         )
         ax.scatter3D(
-            gt[~mask][:, 0], gt[~mask][:, 1], gt[~mask][:, 2],
+            gt[:, 0], gt[:, 1], gt[:, 2],
             color='blue', label='gt'
         )
-        center = gt[~mask].mean(0)
+        center = gt.mean(0)
     elif pred.ndim == 3 and gt.ndim == 3:
         ax.scatter3D(
-            pred[~mask][:, 0, 0], pred[~mask][:, 0, 1], pred[~mask][:, 0, 2],
+            pred[:, 0, 0], pred[:, 0, 1], pred[:, 0, 2],
             color='red', label='pred-left'
         )
-        if(pred[~mask].shape[1]>1):
+        if(pred.shape[1]>1):
             ax.scatter3D(
-                pred[~mask][:, 1, 0], pred[~mask][:, 1, 1], pred[~mask][:, 1, 2],
+                pred[:, 1, 0], pred[:, 1, 1], pred[:, 1, 2],
                 color='magenta', label='pred-right'
             )
         ax.scatter3D(
-            gt[~mask][:, 0, 0], gt[~mask][:, 0, 1], gt[~mask][:, 0, 2],
+            gt[:, 0, 0], gt[:, 0, 1], gt[:, 0, 2],
             color='blue', label='gt-left'
         )
-        if(pred[~mask].shape[1]>1):
+        if(pred.shape[1]>1):
             ax.scatter3D(
-                gt[~mask][:, 1, 0], gt[~mask][:, 1, 1], gt[~mask][:, 1, 2],
+                gt[:, 1, 0], gt[:, 1, 1], gt[:, 1, 2],
                 color='cyan', label='gt-right'
             )
-        center = np.reshape(gt[~mask], (-1, gt.shape[-1])).mean(0)
+        center = np.reshape(gt, (-1, gt.shape[-1])).mean(0)
     else:
         raise ValueError("Invalid dimensions")
 

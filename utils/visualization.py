@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from utils.visualize_keypose_frames import visualize_actions_and_point_clouds
 from datasets.utils import read_zarr_with_cache
-from diffuser_actor.depth2cloud.rlbench import GNFactorDepth2Cloud
+from modeling.depth2cloud.rlbench import GNFactorDepth2Cloud
 from matplotlib import pyplot as plt
 
 

@@ -3,10 +3,10 @@ from torch import nn
 from torch.nn import functional as F
 import einops
 
-from diffuser_actor.noise_scheduler import fetch_schedulers
-from diffuser_actor.utils.layers import AttentionModule
-from diffuser_actor.utils.position_encodings import SinusoidalPosEmb
-from diffuser_actor.utils.utils import (
+from ..noise_scheduler import fetch_schedulers
+from ..utils.layers import AttentionModule
+from ..utils.position_encodings import SinusoidalPosEmb
+from ..utils.utils import (
     compute_rotation_matrix_from_ortho6d,
     get_ortho6d_from_rotation_matrix,
     normalise_quat,

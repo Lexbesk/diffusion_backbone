@@ -4,7 +4,7 @@ import transformers
 import torch
 import numpy as np
 
-from diffuser_actor.policy.denoise_actor import DenoiseActor
+from modeling.policy.denoise_actor import DenoiseActor
 from online_evaluation_calvin.evaluate_utils import convert_action
 from utils.utils_with_calvin import relative_to_absolute
 

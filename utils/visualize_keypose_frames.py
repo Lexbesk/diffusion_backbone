@@ -17,7 +17,7 @@ import PIL.Image as Image
 import moviepy.video.io.ImageSequenceClip
 import cv2
 
-from diffuser_actor.utils.utils import (
+from modeling.utils.utils import (
     cross_product,
     compute_rotation_matrix_from_ortho6d
 )

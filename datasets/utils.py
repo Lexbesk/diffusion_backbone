@@ -5,7 +5,7 @@ import zarr
 from zarr.storage import DirectoryStore
 from zarr import LRUStoreCache
 
-from diffuser_actor.utils.utils import normalise_quat
+from modeling.utils.utils import normalise_quat
 import utils.pytorch3d_transforms as pytorch3d_transforms
 
 
