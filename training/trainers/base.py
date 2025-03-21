@@ -101,7 +101,7 @@ class BaseTrainTester:
     def get_model(self):
         """Initialize the model."""
         # Initialize model with arguments
-        _model = self.model_class(
+        _model = self.model_cls(
             backbone=self.args.backbone,
             finetune_backbone=self.args.finetune_backbone,
             finetune_text_encoder=self.args.finetune_text_encoder,
@@ -293,12 +293,15 @@ class BaseTrainTester:
             pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
         else:
             rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
+        rgb2d = sample["rgb2d"]
+        if rgb2d is not None:
+            rgb2d = sample['rgb2d'].cuda(non_blocking=True).float() / 255
 
         return (
             sample["action"].cuda(non_blocking=True),
             sample["action_mask"].cuda(non_blocking=True),
             rgbs,
-            None,
+            rgb2d,
             pcds,
             sample["instr"],
             sample["proprioception"].cuda(non_blocking=True)
