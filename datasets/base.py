@@ -10,14 +10,12 @@ class BaseDataset(Dataset):
         self,
         root,  # the directory path of the dataset
         instructions,  # path to instruction file
-        precompute_instruction_encodings,  # if true, load tensors, else str
         copies=None,  # copy the dataset for less loader restarts
         relative_action=False,  # whether to return relative actions
         mem_limit=8,  # cache limit per dataset class in GigaBytes
         actions_only=False  # return actions without observations
     ):
         super().__init__()
-        self._precompute_instr_encs = precompute_instruction_encodings
         self.copies = self.train_copies if copies is None else copies
         self._relative_action = relative_action
         self._actions_only = actions_only
@@ -35,13 +33,19 @@ class BaseDataset(Dataset):
         return ["task"]
 
     def _get_instr(self, idx):
-        return [""]
+        return ["instruction"]
 
     def _get_rgb(self, idx):
-        return to_tensor(self.annos['rgb'][idx])
+        t = to_tensor(self.annos['rgb'][idx])
+        if self.camera_inds is not None:
+            t = t[self.camera_inds,]
+        return t
 
-    def _get_pcd(self, idx):
-        return to_tensor(self.annos['depth'][idx])
+    def _get_depth(self, idx):
+        t = to_tensor(self.annos['depth'][idx])
+        if self.camera_inds is not None:
+            t = t[self.camera_inds,]
+        return t
 
     def _get_proprioception(self, idx):
         return to_tensor(self.annos['proprioception'][idx])
@@ -67,9 +71,9 @@ class BaseDataset(Dataset):
             return {"action": self._get_action(idx)}
         return {
             "task": self._get_task(idx),
-            "instr": self._get_instr(idx),  # [str] or tensor(53, 512)
-            "rgbs": self._get_rgb(idx),  # tensor(n_cam, 3, H, W)
-            "pcds": self._get_pcd(idx),  # tensor(n_cam, H, W)
+            "instr": self._get_instr(idx),  # [str]
+            "rgb": self._get_rgb(idx),  # tensor(n_cam, 3, H, W)
+            "depth": self._get_depth(idx),  # tensor(n_cam, H, W)
             "proprioception": self._get_proprioception(idx),  # tensor(1, 8)
             "action": self._get_action(idx)  # tensor(T, 8)
         }
