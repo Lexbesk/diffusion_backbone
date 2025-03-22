@@ -1,120 +1,195 @@
-from pathlib import Path
+import json
+import os
 import pickle
 
-import blosc
 from numcodecs import Blosc
 import zarr
 import numpy as np
-import torch
+from PIL import Image
 from tqdm import tqdm
 
+from data_processing.rlbench_utils import (
+    keypoint_discovery,
+    image_to_float_array,
+    store_instructions
+)
 
-ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_packaged/'
-STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/'
+
+ROOT = '/data/group_data/katefgroup/VLA/peract_raw/'
+STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
-NCAM = 4
+NCAM = 5
 IM_SIZE = 256
+DEPTH_SCALE = 2**24 - 1
 
 
-left_shoulder_camera_extrinsics = np.array([
-    [ 1.73648179e-01,  8.92538846e-01,  4.16198105e-01, -1.74999714e-01],
-    [ 9.84807789e-01, -1.57378674e-01, -7.33871460e-02, 2.00000003e-01],
-    [-1.78813934e-07,  4.22618657e-01, -9.06307697e-01, 1.97999895e+00],
-    [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00, 1.00000000e+00]
-])
-left_shoulder_camera_intrinsics = np.array([
-    [-351.6771208,    0.       ,  128.       ],
-    [   0.       , -351.6771208,  128.       ],
-    [   0.       ,    0.       ,    1.       ]
-])
-right_shoulder_camera_extrinsics = np.array([
-    [-1.73648357e-01,  8.92538846e-01,  4.16198105e-01, -1.74997091e-01],
-    [ 9.84807789e-01,  1.57378793e-01,  7.33869076e-02, -2.00000003e-01],
-    [-1.19209290e-07,  4.22618628e-01, -9.06307697e-01, 1.97999227e+00],
-    [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00, 1.00000000e+00]
-])
-right_shoulder_camera_intrinsics = np.array([
-    [-351.6771208,    0.       ,  128.       ],
-    [   0.       , -351.6771208,  128.       ],
-    [   0.       ,    0.       ,    1.       ]
-])
-wrist_camera_extrinsics = np.array([
-    [ 8.34465027e-07,  9.87690389e-01,  1.56421274e-01, 3.04353595e-01],
-    [ 9.99999940e-01, -7.15255737e-07,  1.86264515e-07, -6.17044233e-03],
-    [ 3.05473804e-07,  1.56421274e-01, -9.87690210e-01, 1.57466102e+00],
-    [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00, 1.00000000e+00]
-])
-wrist_camera_intrinsics = np.array([
-    [-221.70249591,    0.        ,  128.        ],
-    [   0.        , -221.70249591,  128.        ],
-    [   0.        ,    0.        ,    1.        ]
-])
-front_camera_extrinsics = np.array([
-    [ 1.19209290e-07, -4.22617942e-01, -9.06307936e-01, 1.34999919e+00],
-    [-1.00000000e+00, -5.96046448e-07,  1.49011612e-07, 3.71546562e-08],
-    [-5.66244125e-07,  9.06307936e-01, -4.22617912e-01, 1.57999933e+00],
-    [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00, 1.00000000e+00]
-])
-front_camera_intrinsics = np.array([
-    [-351.6771208,    0.       ,  128.       ],
-    [   0.       , -351.6771208,  128.       ],
-    [   0.       ,    0.       ,    1.       ]
-])
-cameras = {
-    'left': {
-        'extrinsics': left_shoulder_camera_extrinsics,
-        'intrinsics': left_shoulder_camera_intrinsics
-    },
-    'right': {
-        'extrinsics': right_shoulder_camera_extrinsics,
-        'intrinsics': right_shoulder_camera_intrinsics
-    },
-    'wrist': {
-        'extrinsics': wrist_camera_extrinsics,
-        'intrinsics': wrist_camera_intrinsics
-    },
-    'front': {
-        'extrinsics': front_camera_extrinsics,
-        'intrinsics': front_camera_intrinsics
-    }
-}
+def all_tasks_main(split, tasks):
+    cameras = [
+        "shoulder_left_camera", "shoulder_right_camera", "wrist", "front"
+    ]
+    task2id = {task: t for t, task in enumerate(tasks)}
+
+    # Initialize zarr
+    compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
+    with zarr.open_group(f"{STORE_PATH}{split}.zarr", mode="w") as zarr_file:
+        zarr_file.create_dataset(
+            "rgb",
+            shape=(0, NCAM, 3, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, NCAM, 3, IM_SIZE, IM_SIZE),
+            compressor=compressor,
+            dtype="uint8"
+        )
+        zarr_file.create_dataset(
+            "depth",
+            shape=(0, NCAM, IM_SIZE, IM_SIZE),
+            chunks=(STORE_EVERY, NCAM, IM_SIZE, IM_SIZE),
+            compressor=compressor,
+            dtype="float16"
+        )
+        zarr_file.create_dataset(
+            "proprioception",
+            shape=(0, 3, 1, 8),
+            chunks=(STORE_EVERY, 3, 1, 8),
+            compressor=compressor,
+            dtype="float32"
+        )
+        zarr_file.create_dataset(
+            "action",
+            shape=(0, 1, 1, 8),
+            chunks=(STORE_EVERY, 1, 1, 8),
+            compressor=compressor,
+            dtype="float32"
+        )
+        zarr_file.create_dataset(
+            "extrinsics",
+            shape=(0, NCAM, 4, 4),
+            chunks=(STORE_EVERY, NCAM, 4, 4),
+            compressor=compressor,
+            dtype="float16"
+        )
+        zarr_file.create_dataset(
+            "intrinsics",
+            shape=(0, NCAM, 3, 3),
+            chunks=(STORE_EVERY, NCAM, 3, 3),
+            compressor=compressor,
+            dtype="float16"
+        )
+        zarr_file.create_dataset(
+            "task_id", shape=(0,), chunks=(STORE_EVERY,),
+            compressor=compressor,
+            dtype="uint8"
+        )
+        zarr_file.create_dataset(
+            "variation", shape=(0,), chunks=(STORE_EVERY,),
+            compressor=compressor,
+            dtype="uint8"
+        )
+
+        # Loop through episodes
+        for task in tasks:
+            print(task)
+            task_folder = f'{ROOT}/{split}/{task}/all_variations/episodes'
+            episodes = sorted(os.listdir(task_folder))
+            for ep in tqdm(episodes):
+                # Read low-dim file from RLBench
+                ld_file = f"{task_folder}/{ep}/low_dim_obs.pkl"
+                with open(ld_file, 'rb') as f:
+                    demo = pickle.load(f)
+
+                # Keypose discovery
+                key_frames = keypoint_discovery(demo, bimanual=False)
+                key_frames.insert(0, 0)
+
+                # Loop through keyposes and store:
+                # RGB (keyframes, cameras, 3, 256, 256)
+                rgb = np.stack([
+                    np.stack([
+                        np.array(Image.open(
+                            f"{task_folder}/{ep}/{cam}_rgb/rgb_{_num2id(k)}.png"
+                        ))
+                        for cam in cameras
+                    ])
+                    for k in key_frames[:-1]
+                ])
+                rgb = rgb.transpose(0, 1, 4, 2, 3)
+
+                # Depth (keyframes, cameras, 256, 256)
+                depth_list = []
+                for k in key_frames[:-1]:
+                    cam_d = []
+                    for cam in cameras:
+                        depth = image_to_float_array(Image.open(
+                            f"{task_folder}/{ep}/{cam}_depth/depth_{_num2id(k)}.png"
+                        ), DEPTH_SCALE)
+                        near = demo[k].misc[f'{cam}_camera_near']
+                        far = demo[k].misc[f'{cam}_camera_far']
+                        depth = near + depth * (far - near)
+                        cam_d.append(depth)
+                    depth_list.append(np.stack(cam_d).astype(np.float16))
+                depth = np.stack(depth_list)
+
+                # Proprioception (keyframes, 3, 2, 8)
+                states = np.stack([np.concatenate([
+                    demo[k].left.gripper_pose,
+                    [demo[k].left.gripper_open],
+                    demo[k].right.gripper_pose,
+                    [demo[k].right.gripper_open]
+                ]) for k in key_frames]).astype(np.float32)
+                # Store current eef pose as well as two previous ones
+                prop = states[:-1]
+                prop_1 = np.concatenate([prop[:1], prop[:-1]])
+                prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
+                prop = np.concatenate([prop_2, prop_1, prop], 1)
+                prop = prop.reshape(len(prop), 3, 1, 8)
+
+                # Action (keyframes, 3, 2, 8)
+                actions = states[1:].reshape(len(states[1:]), 1, 1, 8)
+
+                # Extrinsics (keyframes, cameras, 4, 4)
+                extrinsics = np.stack([
+                    np.stack([
+                        demo[k].misc[f'{cam}_camera_extrinsics'].astype(np.float16)
+                        for cam in cameras
+                    ])
+                    for k in key_frames[:-1]
+                ])
+
+                # Intrinsics (keyframes, cameras, 3, 3)
+                intrinsics = np.stack([
+                    np.stack([
+                        demo[k].misc[f'{cam}_camera_intrinsics'].astype(np.float16)
+                        for cam in cameras
+                    ])
+                    for k in key_frames[:-1]
+                ])
+
+                # Task id (keyframes,)
+                task_id = np.array([task2id[task]] * len(key_frames[:-1]))
+                task_id = task_id.astype(np.uint8)
+
+                # Variation (keyframes,)
+                with open(f"{task_folder}/{ep}/variation_number.pkl", 'rb') as f:
+                    var_ = pickle.load(f)
+                var_ = np.array([int(var_)] * len(key_frames[:-1]))
+                var_ = var_.astype(np.uint8)
+
+                # Write
+                zarr_file['rgb'].append(rgb)
+                zarr_file['depth'].append(depth)
+                zarr_file['proprioception'].append(prop)
+                zarr_file['action'].append(actions)
+                zarr_file['extrinsics'].append(extrinsics)
+                zarr_file['intrinsics'].append(intrinsics)
+                zarr_file['task_id'].append(task_id)
+                zarr_file['variation'].append(var_)
 
 
-def inverse_depth_batched(xyz, extrinsics, intrinsics):
-    """Convert point cloud in world frame to depth."""
-    # Construct camera projection
-    C = extrinsics[:3, 3][None].T  # (3, 1)
-    R = extrinsics[:3, :3]  # (3, 3)
-    R_inv = R.T  # inverse of rot matrix is transpose
-    R_inv_C = np.matmul(R_inv, C)  # (3, 1)
-    extrinsics = np.concatenate((R_inv, -R_inv_C), -1)  # (3, 4)
-    cam_proj_mat = np.matmul(intrinsics, extrinsics)  # (3, 4)
-    cam_proj_mat_homo = np.concatenate(
-        [cam_proj_mat, [np.array([0, 0, 0, 1])]]
-    )  # (4, 4)
-    cam_proj_mat_inv = np.linalg.inv(cam_proj_mat_homo)  # (4, 4)
-
-    # World space to pixel space
-    b, h, w = xyz.shape[:3]
-    xyz = np.concatenate([xyz, np.ones((b, h, w, 1))], -1)
-    xyz = np.reshape(xyz, (b * h * w, -1)).T
-    xyz = np.matmul(np.linalg.inv(cam_proj_mat_inv), xyz)
-    xyz = np.reshape(xyz.T, (b, h, w, -1))[..., :3]
-    
-    # Isolate the influence of depth
-    return xyz[..., -1]
+def _num2id(int_):
+    str_ = str(int_)
+    return '0' * (4 - len(str_)) + str_
 
 
-def to_numpy(x):
-    if isinstance(x, torch.Tensor):
-        return x.numpy()
-    elif isinstance(x, np.ndarray):
-        return x
-    else:
-        return np.array(x)
-
-
-def all_tasks_main(split):
+if __name__ == "__main__":
     tasks = [
         "place_cups", "close_jar", "insert_onto_square_peg",
         "light_bulb_in", "meat_off_grill", "open_drawer",
@@ -124,115 +199,11 @@ def all_tasks_main(split):
         "slide_block_to_color_target", "stack_blocks", "stack_cups",
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
-    camera_order = ['left', 'right', 'wrist', 'front']
-    task2id = {task: t for t, task in enumerate(tasks)}
-    variations = range(0, 199)
-
-    # Collect all episodes
-    episodes = []
-    for task in tasks:
-        for var in variations:
-            _path = Path(f'{ROOT}{split}/{task}+{var}/')
-            if not _path.is_dir():
-                continue
-            episodes.extend([
-                (task, var, ep) for ep in sorted(_path.glob("*.dat"))
-            ])
-
-    # Read once to get the number of keyposes
-    n_keyposes = 0
-    for _, _, ep in tqdm(episodes):
-        with open(ep, "rb") as f:
-            content = pickle.loads(blosc.decompress(f.read()))
-        n_keyposes += len(content[0])
-
-    # Initialize zarr
-    compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}{split}.zarr", mode="w") as zarr_file:
-        zarr_file.create_dataset(
-            "rgb",
-            shape=(n_keyposes, NCAM, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, NCAM, 3, IM_SIZE, IM_SIZE),
-            compressor=compressor,
-            dtype="uint8"
-        )
-        zarr_file.create_dataset(
-            "depth",
-            shape=(n_keyposes, NCAM, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, NCAM, IM_SIZE, IM_SIZE),
-            compressor=compressor,
-            dtype="float16"
-        )
-        zarr_file.create_dataset(
-            "task_id", shape=(n_keyposes,), chunks=(STORE_EVERY,),
-            compressor=compressor,
-            dtype="uint8"
-        )
-        zarr_file.create_dataset(
-            "variation", shape=(n_keyposes,), chunks=(STORE_EVERY,),
-            compressor=compressor,
-            dtype="uint8"
-        )
-        zarr_file.create_dataset(
-            "proprioception",
-            shape=(n_keyposes, 3, 8),
-            chunks=(STORE_EVERY, 3, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-        zarr_file.create_dataset(
-            "action",
-            shape=(n_keyposes, 2, 8),
-            chunks=(STORE_EVERY, 2, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-
-        # Loop through episodes
-        start = 0
-        for task, var, ep in tqdm(episodes):
-            # Read
-            with open(ep, "rb") as f:
-                content = pickle.loads(blosc.decompress(f.read()))
-            # Map [-1, 1] to [0, 255] uint8
-            rgb = (127.5 * (content[1][:, -NCAM:, 0] + 1)).astype(np.uint8)
-            # Extract depth from point cloud, faster loading
-            depth = np.stack([
-                inverse_depth_batched(
-                    content[1][:, c, 1].transpose(0, 2, 3, 1),
-                    cameras[cam]['extrinsics'],
-                    cameras[cam]['intrinsics']
-                )
-                for c, cam in enumerate(camera_order)
-                if c > 3 - NCAM
-            ], 1).astype(np.float16)
-            # Store current eef pose as well as two previous ones
-            prop = np.stack([
-                to_numpy(tens).astype(np.float32) for tens in content[4]
-            ])
-            prop_1 = np.concatenate([prop[:1], prop[:-1]])
-            prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
-            prop = np.concatenate([prop_2, prop_1, prop], 1)
-            # Next keypose (concatenate curr eef to form a "trajectory")
-            actions = np.stack([
-                to_numpy(tens).astype(np.float32) for tens in content[2]
-            ])
-            actions = np.concatenate([prop[:, -1:], actions], 1)
-            # Task ids and variation ids
-            tids = np.array([task2id[task]] * len(content[0])).astype(np.uint8)
-            _vars = np.array([var] * len(content[0])).astype(np.uint8)
-
-            # write
-            end = start + len(_vars)
-            zarr_file['rgb'][start:end] = rgb
-            zarr_file['depth'][start:end] = depth
-            zarr_file['proprioception'][start:end] = prop
-            zarr_file['action'][start:end] = actions
-            zarr_file['task_id'][start:end] = tids
-            zarr_file['variation'][start:end] = _vars
-            start = end
-
-
-if __name__ == "__main__":
+    # Create zarr data
     for split in ['train', 'val']:
-        all_tasks_main(split)
+        all_tasks_main(split, tasks)
+    # Store instructions as json (can be run independently)
+    os.makedirs('instructions/peract', exist_ok=True)
+    instr_dict = store_instructions(ROOT, tasks)
+    with open('instructions/peract/instructions.json', 'w') as fid:
+        json.dump(instr_dict, fid)

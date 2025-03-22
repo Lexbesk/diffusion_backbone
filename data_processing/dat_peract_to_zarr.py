@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 
 ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_packaged/'
-RAW_PATH = '/data/group_data/katefgroup/VLA/peract_train/close_jar/variation0/episodes/episode0/low_dim_obs.pkl'
 STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
 NCAM = 4
@@ -130,7 +129,6 @@ def all_tasks_main(split):
     variations = range(0, 199)
 
     # Collect all episodes
-    # /data/group_data/katefgroup/VLA/peract_train/close_jar/all_variations/episodes/episode0/
     episodes = []
     for task in tasks:
         for var in variations:

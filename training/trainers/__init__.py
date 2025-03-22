@@ -1,3 +1,4 @@
+from .calvin import CALVINTrainTester
 from .rlbench import RLBenchTrainTester
 
 
