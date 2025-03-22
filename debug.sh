@@ -23,7 +23,6 @@ num_attn_heads=8
 num_vis_instr_attn_layers=3
 train_iters=600000
 val_freq=4000
-precompute_instruction_encodings=false
 num_workers=4
 dataset=Peract2TC
 ngpus=1
@@ -40,7 +39,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --eval_data_dir $eval_data_dir \
     --train_instructions $train_instructions \
     --val_instructions $val_instructions \
-    --precompute_instruction_encodings $precompute_instruction_encodings \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
     --num_workers $num_workers \
     --train_iters $train_iters \
