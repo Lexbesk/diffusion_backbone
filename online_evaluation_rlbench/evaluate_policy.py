@@ -50,7 +50,6 @@ def parse_arguments():
         ('num_vis_instr_attn_layers', int, 2),
         ('num_history', int, 0),
         # Model arguments: head
-        ('workspace_normalizer_buffer', float, 0.04),
         ('relative_action', str2bool, False),
         ('quaternion_format', str, 'wxyz'),
         ('denoise_timesteps', int, 10),
