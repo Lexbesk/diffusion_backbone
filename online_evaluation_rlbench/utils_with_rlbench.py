@@ -160,6 +160,7 @@ class Actioner:
             None,
             torch.full([1, prediction_len], False, dtype=bool).to(rgbs.device),
             rgbs,
+            None,
             pcds,
             self._instr,
             gripper[..., :7],

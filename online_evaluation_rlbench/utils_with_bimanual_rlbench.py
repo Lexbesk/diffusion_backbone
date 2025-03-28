@@ -182,6 +182,7 @@ class Actioner:
             fake_traj,
             traj_mask,
             rgbs,
+            None,
             pcds,
             self._instr,
             gripper[..., :7],
