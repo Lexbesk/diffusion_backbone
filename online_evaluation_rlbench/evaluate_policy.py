@@ -4,85 +4,85 @@ import random
 from pathlib import Path
 import json
 import os
-import pickle
 
 import torch
 import numpy as np
 import argparse
 
-from modeling.policy.bimanual_denoise_actor import BimanualDenoiseActor  # , DenoiseActor
-from modeling.policy.denoise_actor_3d import DenoiseActor
+from datasets import fetch_dataset_class
+from modeling.policy import DenoiseActor3D, DenoiseActor2D
 from utils.common_utils import str2bool, str_none, round_floats
-from datasets.rlbench import (
-    GNFactorDataset,
-    PeractDataset,
-    Peract2Dataset,
-    Peract2Dataset3cam,
-    PeractSingleCamDataset,
-    PeractTwoCamDataset
-)
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser("Parse arguments for evaluate_policy.py")
-    # Trainign and testing
-    parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--checkpoint', type=str_none, default=None)
-    parser.add_argument('--task', type=str, default="close_jar")
-    parser.add_argument('--device', type=str, default="cuda")
-    parser.add_argument('--image_size', type=str, default="256,256")
-    parser.add_argument('--num_episodes', type=int, default=1)
-    parser.add_argument('--headless', type=str2bool, default=False)
-    parser.add_argument('--max_tries', type=int, default=10)
-    parser.add_argument('--dataset', type=str, default="Peract")
-    parser.add_argument('--data_dir', type=str, default=str(Path(__file__).parent / "demos"))
-    parser.add_argument('--verbose', type=str2bool, default=False)
-    parser.add_argument('--output_file', type=str, default=str(Path(__file__).parent / "eval.json"))
-    parser.add_argument('--max_steps', type=int, default=25)
-    parser.add_argument('--collision_checking', type=str2bool, default=False)
-    parser.add_argument('--bimanual', type=str2bool, default=False)
-    parser.add_argument('--interpolation_length', type=int, default=100)
-    parser.add_argument('--backbone', type=str, default="clip")
-    parser.add_argument('--embedding_dim', type=int, default=144)
-    parser.add_argument('--num_vis_ins_attn_layers', type=int, default=2)
-    parser.add_argument('--num_attn_heads', type=int, default=9)
-    parser.add_argument('--instructions', type=str, default="instructions.pkl")
-    parser.add_argument('--use_instruction', type=str2bool, default=False)
-    parser.add_argument('--rotation_parametrization', type=str, default='quat')
-    parser.add_argument('--quaternion_format', type=str, default='wxyz')
-    parser.add_argument('--denoise_timesteps', type=int, default=10)
-    parser.add_argument('--denoise_model', type=str, default="rectified_flow")
-    parser.add_argument('--num_history', type=int, default=0)
-    parser.add_argument('--relative_action', type=str2bool, default=False)
-    parser.add_argument('--fps_subsampling_factor', type=int, default=5)
-    parser.add_argument('--relative_attention', type=str2bool, default=False)
+    parser = argparse.ArgumentParser("Parse arguments for main.py")
+    # Tuples: (name, type, default)
+    arguments = [
+        # Testing arguments
+        ('checkpoint', str_none, None),
+        ('task', str, "close_jar"),
+        ('num_episodes', int, 100),
+        ('max_tries', int, 10),
+        ('max_steps', int, 25),
+        ('headless', str2bool, False),
+        ('collision_checking', str2bool, False),
+        ('seed', int, 0),
+        # Dataset arguments
+        ('data_dir', Path, Path(__file__).parent / "demos"),
+        ('test_instructions', str, "instructions/peract/instructions.json"),
+        ('dataset', str, "Peract"),
+        ('image_size', str, "256,256"),
+        # Logging arguments
+        ('output_file', Path, Path(__file__).parent / "eval.json"),
+        ('verbose', str2bool, False),
+        # Model arguments: general policy type
+        ('use2dmodel', str2bool, False),  # use 2D policy variant
+        ('bimanual', str2bool, False),
+        ('prediction_len', int, 1),
+        # Model arguments: encoder
+        ('backbone', str, "clip"),
+        ('finetune_backbone', str2bool, False),
+        ('finetune_text_encoder', str2bool, False),
+        ('fps_subsampling_factor', int, 5),
+        # Model arguments: encoder and head
+        ('embedding_dim', int, 144),
+        ('num_attn_heads', int, 9),
+        ('num_vis_instr_attn_layers', int, 2),
+        ('num_history', int, 0),
+        # Model arguments: head
+        ('workspace_normalizer_buffer', float, 0.04),
+        ('relative_action', str2bool, False),
+        ('quaternion_format', str, 'wxyz'),
+        ('denoise_timesteps', int, 10),
+        ('denoise_model', str, "rectified_flow")
+    ]
+    for arg in arguments:
+        parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
 
     return parser.parse_args()
 
 
 def load_models(args):
-    device = torch.device(args.device)
-
     print("Loading model from", args.checkpoint, flush=True)
 
-    if args.bimanual:
-        model_class = BimanualDenoiseActor
+    if args.use2dmodel:
+        model_class = DenoiseActor2D
     else:
-        model_class = DenoiseActor
+        model_class = DenoiseActor3D
     model = model_class(
         backbone=args.backbone,
-        embedding_dim=args.embedding_dim,
-        num_vis_ins_attn_layers=args.num_vis_ins_attn_layers,
-        num_attn_heads=args.num_attn_heads,
-        use_instruction=args.use_instruction,
+        finetune_backbone=args.finetune_backbone,
+        finetune_text_encoder=args.finetune_text_encoder,
+        num_vis_instr_attn_layers=args.num_vis_instr_attn_layers,
         fps_subsampling_factor=args.fps_subsampling_factor,
-        rotation_parametrization=args.rotation_parametrization,
+        embedding_dim=args.embedding_dim,
+        num_attn_heads=args.num_attn_heads,
+        nhist=args.num_history,
+        nhand=2 if args.bimanual else 1,
+        relative=args.relative_action,
         quaternion_format=args.quaternion_format,
         denoise_timesteps=args.denoise_timesteps,
-        denoise_model=args.denoise_model,
-        nhist=args.num_history,
-        relative=args.relative_action,
-        # relative_attention=args.relative_attention
+        denoise_model=args.denoise_model
     )
 
     # Load model weights
@@ -94,7 +94,7 @@ def load_models(args):
     model.load_state_dict(model_dict_weight)
     model.eval()
 
-    return model.to(device)
+    return model.cuda()
 
 
 if __name__ == "__main__":
@@ -109,19 +109,12 @@ if __name__ == "__main__":
 
     # Bimanual vs single-arm utils
     if args.bimanual:
-        import utils.utils_with_bimanual_rlbench as rlbench_utils
+        from .utils_with_bimanual_rlbench import RLBenchEnv, Actioner
     else:
-        import utils.utils_with_rlbench as rlbench_utils
+        from .utils_with_rlbench import RLBenchEnv, Actioner
 
-    # Dataset class (for getting cameras and tasks)
-    dataset_cls = {
-        "Peract": PeractDataset,
-        "Peract2": Peract2Dataset,
-        "Peract2TC": Peract2Dataset3cam,
-        "GNFactor": GNFactorDataset,
-        "PeractSingleCam": PeractSingleCamDataset,
-        "PeractTwoCam": PeractTwoCamDataset
-    }[args.dataset]
+    # Dataset class (for getting cameras and tasks/variations)
+    dataset_class = fetch_dataset_class(args.dataset)
 
     # Load models
     model = load_models(args)
@@ -137,40 +130,36 @@ if __name__ == "__main__":
         random.seed(args.seed)
 
         # Load RLBench environment
-        env = rlbench_utils.RLBenchEnv(
+        env = RLBenchEnv(
             data_path=args.data_dir,
             image_size=[int(x) for x in args.image_size.split(",")],
             apply_rgb=True,
             apply_pc=True,
             headless=bool(args.headless),
-            apply_cameras=dataset_cls.cameras,
+            apply_cameras=dataset_class.cameras,
             collision_checking=bool(args.collision_checking)
         )
 
         # Load instructions
-        if args.instructions.endswith('.pkl'):
-            with open(args.instructions, "rb") as fid:
-                instruction = pickle.load(fid)
-        else:
-            with open(args.instructions, "r") as fid:
-                instruction = json.load(fid)
+        with open(args.test_instructions, "r") as fid:
+            instruction = json.load(fid)
 
         # Actioner (runs the policy online)
-        actioner = rlbench_utils.Actioner(
+        actioner = Actioner(
             policy=model,
             instructions=instruction,
-            apply_cameras=dataset_cls.cameras
+            apply_cameras=dataset_class.cameras
         )
 
         # Evaluate
         var_success_rates = env.evaluate_task_on_multiple_variations(
             task_str,
             max_steps=args.max_steps,
-            num_variations=dataset_cls.variations[-1] + 1,
+            num_variations=dataset_class.variations[-1] + 1,
             num_demos=args.num_episodes,
             actioner=actioner,
             max_tries=args.max_tries,
-            interpolation_length=args.interpolation_length,
+            prediction_len=args.prediction_len,
             verbose=bool(args.verbose),
             num_history=args.num_history
         )

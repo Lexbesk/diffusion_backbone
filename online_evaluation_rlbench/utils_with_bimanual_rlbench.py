@@ -1,10 +1,8 @@
 import os
 import glob
 import random
-from typing import List
 
 import open3d
-import traceback
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -18,14 +16,12 @@ from rlbench.action_modes.action_mode import BimanualMoveArmThenGripper
 from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
 from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning
 from rlbench.backend.exceptions import InvalidActionError
-from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
 
 from online_evaluation_rlbench.get_stored_demos import get_stored_demos
 
-# ??? pick up a plate, put item in drawer is missing from this.
-# ??? bimanual_sweep_to_dustpan and coordinated_lift_tray are interchanged in the download links, tell Markus
+
 ALL_RLBENCH_TASKS = [
     'bimanual_push_box',
     'bimanual_lift_ball',
@@ -57,22 +53,17 @@ def task_file_to_task_class(task_file):
 
 class Mover:
 
-    def __init__(self, task, disabled=False, max_tries=1):
+    def __init__(self, task, max_tries=1):
         self._task = task
         self._last_action = None
         self._step_id = 0
         self._max_tries = max_tries
-        self._disabled = disabled
 
     def __call__(self, action, collision_checking=False):
-        # if self._disabled:
-        #     return self._task.step(action)
-
         target = action.copy()
         if self._last_action is not None:
             action[:, 7] = self._last_action[:, 7].copy()
 
-        images = []
         try_id = 0
         obs = None
         terminate = None
@@ -125,7 +116,7 @@ class Mover:
         self._step_id += 1
         self._last_action = action.copy()
 
-        return obs, reward, terminate, images
+        return obs, reward, terminate
 
 
 class Actioner:
@@ -153,13 +144,13 @@ class Actioner:
         self._actions = {}
 
     def predict(self, rgbs, pcds, gripper,
-                interpolation_length=None):
+                prediction_len=None):
         """
         Args:
             rgbs: (bs, num_hist, num_cameras, 3, H, W)
             pcds: (bs, num_hist, num_cameras, 3, H, W)
             gripper: (B, nhist, output_dim)
-            interpolation_length: an integer
+            prediction_len: an integer
 
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
@@ -178,10 +169,10 @@ class Actioner:
 
         # Predict trajectory
         fake_traj = torch.full(
-            [1, interpolation_length - 1, gripper.shape[-1]], 0
+            [1, prediction_len, gripper.shape[-1]], 0
         ).to(rgbs.device)
         traj_mask = torch.full(
-            [1, interpolation_length - 1], False
+            [1, prediction_len], False
         ).to(rgbs.device)
         # import pickle
         # with open('first.pkl', 'wb') as f:
@@ -286,7 +277,7 @@ class RLBenchEnv:
         :return: rgb, pcd, gripper
         """
         state_dict, gripper = self.get_obs_action(obs)
-        state = transform(state_dict, augmentation=False)
+        state = transform(state_dict)
         state = einops.rearrange(
             state,
             "(m n ch) h w -> n m ch h w",
@@ -300,23 +291,6 @@ class RLBenchEnv:
 
         return rgb, pcd, gripper
 
-    def get_demo(self, task_name, variation, episode_index):
-        """
-        Fetch a demo from the saved environment.
-            :param task_name: fetch task name
-            :param variation: fetch variation id
-            :param episode_index: fetch episode index: 0 ~ 99
-            :return: desired demo
-        """
-        demos = self.env.get_demos(
-            task_name=task_name,
-            variation_number=variation,
-            amount=1,
-            from_episode_number=episode_index,
-            random_selection=False
-        )
-        return demos
-
     def evaluate_task_on_multiple_variations(
         self,
         task_str: str,
@@ -326,7 +300,7 @@ class RLBenchEnv:
         actioner: Actioner,
         max_tries: int = 1,
         verbose: bool = False,
-        interpolation_length=100,
+        prediction_len=100,
         num_history=1
     ):
         self.env.launch()
@@ -356,7 +330,7 @@ class RLBenchEnv:
                     actioner=actioner,
                     max_tries=max_tries,
                     verbose=verbose,
-                    interpolation_length=interpolation_length,
+                    prediction_len=prediction_len,
                     num_history=num_history
                 )
             )
@@ -384,7 +358,7 @@ class RLBenchEnv:
         actioner: Actioner,
         max_tries: int = 1,
         verbose: bool = False,
-        interpolation_length=50,
+        prediction_len=50,
         num_history=0
     ):
         device = actioner.device
@@ -448,7 +422,7 @@ class RLBenchEnv:
                     rgbs_input,
                     pcds_input,
                     gripper_input,
-                    interpolation_length=interpolation_length
+                    prediction_len=prediction_len
                 )
 
                 if verbose:
@@ -464,8 +438,7 @@ class RLBenchEnv:
 
                     # execute
                     for action in actions:
-                        collision_checking = self._collision_checking(task_str, step_id)
-                        obs, reward, terminate, _ = move(action, collision_checking=collision_checking)
+                        obs, reward, terminate = move(action, collision_checking=False)
 
                     max_reward = max(max_reward, reward)
 
@@ -507,11 +480,6 @@ class RLBenchEnv:
             valid = True
 
         return success_rate, valid, num_valid_demos
-
-    def _collision_checking(self, task_str, step_id):
-        """Collision checking for planner."""
-        collision_checking = False
-        return collision_checking
 
     def create_obs_config(
         self, image_size, apply_rgb, apply_depth, apply_pc, apply_cameras, **kwargs
@@ -564,112 +532,7 @@ class RLBenchEnv:
         return obs_config
 
 
-# Identify way-point in each RLBench Demo by checking where the manipulator stops
-def _left_is_stopped(demo, i, obs, stopped_buffer, delta):
-
-    next_is_not_final = i == (len(demo) - 2) # Check if next step is not the final one
-    # gripper_state_no_change = i < (len(demo) - 2) and (
-    #     obs.gripper_open == demo[i + 1].gripper_open
-    #     and obs.gripper_open == demo[i - 1].gripper_open
-    #     and demo[i - 2].gripper_open == demo[i - 1].gripper_open
-    # )
-
-    # Check if the gripper state hasn't changed from (i-2) to (i+1)
-    gripper_state_no_change = i < (len(demo) - 2) and (     # Not the second last or last step
-        obs.left.gripper_open == demo[i + 1].left.gripper_open        # if the current and next gripper states are both same
-        and obs.left.gripper_open == demo[max(0, i - 1)].left.gripper_open    # if the current and previous gripper states are same
-        and demo[max(0, i - 2)].left.gripper_open == demo[max(0, i - 1)].left.gripper_open    # if the (i-1)th and (i-2)th gripper states are same
-    )
-    
-    # Check if the current velocities are zero to some delta tolerance.
-    small_delta = np.allclose(obs.left.joint_velocities, 0, atol=delta)
-    
-    # It is a stopping state if 1) the next is not final, 2) no change in gripper state, 3) vels are almost zero
-    stopped = (
-        stopped_buffer <= 0     # this is set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
-        and small_delta
-        and (not next_is_not_final)
-        and gripper_state_no_change
-    )
-
-    return stopped
-
-def _right_is_stopped(demo, i, obs, stopped_buffer, delta):
-
-    next_is_not_final = i == (len(demo) - 2) # Check if next step is not the final one
-    # gripper_state_no_change = i < (len(demo) - 2) and (
-    #     obs.gripper_open == demo[i + 1].gripper_open
-    #     and obs.gripper_open == demo[i - 1].gripper_open
-    #     and demo[i - 2].gripper_open == demo[i - 1].gripper_open
-    # )
-
-    # Check if the gripper state hasn't changed from (i-2) to (i+1)
-    gripper_state_no_change = i < (len(demo) - 2) and (     # Not the second last or last step
-        obs.right.gripper_open == demo[i + 1].right.gripper_open        # if the current and next gripper states are both same
-        and obs.right.gripper_open == demo[max(0, i - 1)].right.gripper_open    # if the current and previous gripper states are same
-        and demo[max(0, i - 2)].right.gripper_open == demo[max(0, i - 1)].right.gripper_open    # if the (i-1)th and (i-2)th gripper states are same
-    )
-    
-    # Check if the current velocities are zero to some delta tolerance.
-    small_delta = np.allclose(obs.right.joint_velocities, 0, atol=delta)
-    
-    # It is a stopping state if 1) the next is not final, 2) no change in gripper state, 3) vels are almost zero
-    stopped = (
-        stopped_buffer <= 0     # this is set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
-        and small_delta
-        and (not next_is_not_final)
-        and gripper_state_no_change
-    )
-
-    return stopped
-
-def keypoint_discovery(demo: Demo, stopping_delta=0.1) -> List[int]:
-    
-    episode_keypoints_left = []
-    episode_keypoints_right = []
-    
-    prev_left_gripper_open = demo[0].left.gripper_open
-    prev_right_gripper_open = demo[0].right.gripper_open
-    left_stopped_buffer = 0
-    right_stopped_buffer = 0
-
-    for i, obs in enumerate(demo):
-        
-        # Check if current state obs is a stopped state:
-        left_stopped = _left_is_stopped(demo, i, obs, left_stopped_buffer, stopping_delta)  # returns bool
-        right_stopped = _right_is_stopped(demo, i, obs, right_stopped_buffer, stopping_delta)  # returns bool
-
-        # Set as 4 at every stop point, so that there won't be less than 4 steps gap between stop points
-        left_stopped_buffer = 4 if left_stopped else left_stopped_buffer - 1
-        right_stopped_buffer = 4 if right_stopped else right_stopped_buffer - 1
-        
-        last = i == (len(demo) - 1)     # Check if end of episode
-        
-        # If change in gripper, stopped state, or end of episode, append the keypoint to the episode
-        if i != 0 and (obs.left.gripper_open != prev_left_gripper_open or last or left_stopped):   
-            episode_keypoints_left.append(i)
-        if i != 0 and (obs.right.gripper_open != prev_right_gripper_open or last or right_stopped):   
-            episode_keypoints_right.append(i)
-        
-        prev_left_gripper_open = obs.left.gripper_open
-        prev_right_gripper_open = obs.right.gripper_open
-
-    # If the last and second last keypoints are the same, pop it out.
-    if (
-        len(episode_keypoints_left) > 1
-        and (episode_keypoints_left[-1] - 1) == episode_keypoints_left[-2]
-    ):
-        episode_keypoints_left.pop(-2)
-    if (
-        len(episode_keypoints_right) > 1
-        and (episode_keypoints_right[-1] - 1) == episode_keypoints_right[-2]
-    ):
-        episode_keypoints_right.pop(-2)
-
-    return episode_keypoints_left, episode_keypoints_right
-
-
-def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
+def transform(obs_dict):
     apply_depth = len(obs_dict.get("depth", [])) > 0
     apply_pc = len(obs_dict["pc"]) > 0
     num_cams = len(obs_dict["rgb"])
@@ -687,9 +550,6 @@ def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
         pc = (
             torch.tensor(obs_dict["pc"][i]).float().permute(2, 0, 1) if apply_pc else None
         )
-
-        if augmentation:
-            raise NotImplementedError()  # Deprecated
 
         # normalise to [-1, 1]
         rgb = rgb / 255.0

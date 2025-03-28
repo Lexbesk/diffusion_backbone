@@ -1,4 +1,4 @@
-exp=flow_bimanual_3dda_train
+exp=flow_bimanual_3dda_train_q
 tasks=(
     bimanual_push_box
     bimanual_lift_ball
@@ -15,57 +15,63 @@ tasks=(
     bimanual_take_tray_out_of_oven
 )
 
-data_dir=/data/group_data/katefgroup/VLA/peract2_raw_squash/test/
-dataset=Peract2
-instructions=instructions/peract2/instructions.json
-num_episodes=100
+# Testing arguments
+checkpoint=peract2_front.pth
+num_episodes=5  # 100
 max_tries=2
 max_steps=25
+headless=true
+collision_checking=false
+seed=0
+# Dataset arguments
+data_dir=/data/group_data/katefgroup/VLA/peract2_raw_squash/test/
+instructions=instructions/peract2/instructions.json
+dataset=Peract2
+image_size=256,256
+# Logging arguments
 verbose=false
-interpolation_length=2
+# Model arguments
+use2dmodel=false
+bimanual=true
+prediction_len=1
+fps_subsampling_factor=5
+embedding_dim=120
+num_attn_heads=8
+num_vis_instr_attn_layers=3
 num_history=3
+relative_action=false
+quaternion_format=xyzw
 denoise_timesteps=10
 denoise_model=rectified_flow
-quaternion_format=xyzw  # IMPORTANT: change this to be the same as the training script IF you're not using our checkpoint
-rotation_parametrization=6D
-use_instruction=true
-C=120
-num_attn_heads=8
-num_vis_ins_attn_layers=3
-fps_subsampling_factor=5
-relative_action=false
-seed=0
-checkpoint=peract2_front.pth
-headless=true
 
 num_ckpts=${#tasks[@]}
 for ((i=0; i<$num_ckpts; i++)); do
     xvfb-run -a python online_evaluation_rlbench/evaluate_policy.py \
-        --task ${tasks[$i]} \
         --checkpoint $checkpoint \
-        --dataset $dataset \
-        --denoise_timesteps $denoise_timesteps \
-        --denoise_model $denoise_model \
-        --fps_subsampling_factor $fps_subsampling_factor \
-        --relative_action $relative_action \
-        --num_history $num_history \
-        --verbose $verbose \
-        --collision_checking false \
-        --embedding_dim $C \
-        --num_attn_heads $num_attn_heads \
-        --num_vis_ins_attn_layers $num_vis_ins_attn_layers \
-        --rotation_parametrization $rotation_parametrization \
-        --data_dir $data_dir \
+        --task ${tasks[$i]} \
         --num_episodes $num_episodes \
-        --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
-        --use_instruction $use_instruction \
-        --instructions $instructions \
         --max_tries $max_tries \
         --max_steps $max_steps \
-        --seed $seed \
-        --quaternion_format $quaternion_format \
-        --interpolation_length $interpolation_length \
         --headless $headless \
-        --bimanual true
+        --collision_checking $collision_checking \
+        --seed $seed \
+        --data_dir $data_dir \
+        --test_instructions $instructions \
+        --dataset $dataset \
+        --image_size $image_size \
+        --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
+        --verbose $verbose \
+        --use2dmodel $use2dmodel \
+        --bimanual $bimanual \
+        --prediction_len $prediction_len \
+        --fps_subsampling_factor $fps_subsampling_factor \
+        --embedding_dim $embedding_dim \
+        --num_attn_heads $num_attn_heads \
+        --num_vis_instr_attn_layers $num_vis_instr_attn_layers \
+        --num_history $num_history \
+        --relative_action $relative_action \
+        --quaternion_format $quaternion_format \
+        --denoise_timesteps $denoise_timesteps \
+        --denoise_model $denoise_model
 done
 

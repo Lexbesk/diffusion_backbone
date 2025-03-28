@@ -1,7 +1,6 @@
 import os
 import glob
 import random
-from typing import List
 
 import open3d  # DON'T DELETE THIS!
 from tqdm import tqdm
@@ -12,12 +11,10 @@ import einops
 
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
-from rlbench.task_environment import TaskEnvironment
 from rlbench.action_modes.action_mode import MoveArmThenGripper
 from rlbench.action_modes.gripper_action_modes import Discrete
 from rlbench.action_modes.arm_action_modes import EndEffectorPoseViaPlanning
 from rlbench.backend.exceptions import InvalidActionError
-from rlbench.demo import Demo
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
 
@@ -60,22 +57,17 @@ def task_file_to_task_class(task_file):
 
 class Mover:
 
-    def __init__(self, task, disabled=False, max_tries=1):
+    def __init__(self, task, max_tries=1):
         self._task = task
         self._last_action = None
         self._step_id = 0
         self._max_tries = max_tries
-        self._disabled = disabled
 
     def __call__(self, action, collision_checking=False):
-        if self._disabled:
-            return self._task.step(action)
-
         target = action.copy()
         if self._last_action is not None:
             action[7] = self._last_action[7].copy()
 
-        images = []
         try_id = 0
         obs = None
         terminate = None
@@ -114,7 +106,7 @@ class Mover:
         self._step_id += 1
         self._last_action = action.copy()
 
-        return obs, reward, terminate, images
+        return obs, reward, terminate
 
 
 class Actioner:
@@ -143,13 +135,13 @@ class Actioner:
         self._actions = {}
 
     def predict(self, rgbs, pcds, gripper,
-                interpolation_length=None):
+                prediction_len=None):
         """
         Args:
             rgbs: (bs, num_hist, num_cameras, 3, H, W)
             pcds: (bs, num_hist, num_cameras, 3, H, W)
             gripper: (B, nhist, output_dim)
-            interpolation_length: an integer
+            prediction_len: an integer
 
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
@@ -164,17 +156,9 @@ class Actioner:
         self._instr = self._instr.to(rgbs.device)
 
         # Predict trajectory
-        fake_traj = torch.full(
-            [1, interpolation_length - 1, gripper.shape[-1]], 0,
-            dtype=bool
-        ).to(rgbs.device)
-        traj_mask = torch.full(
-            [1, interpolation_length - 1], False,
-            dtype=bool
-        ).to(rgbs.device)
         output["action"] = self._policy(
-            fake_traj,
-            traj_mask,
+            None,
+            torch.full([1, prediction_len], False, dtype=bool).to(rgbs.device),
             rgbs,
             pcds,
             self._instr,
@@ -298,7 +282,7 @@ class RLBenchEnv:
         actioner: Actioner,
         max_tries: int = 1,
         verbose: bool = False,
-        interpolation_length=100,
+        prediction_len=100,
         num_history=1
     ):
         self.env.launch()
@@ -328,7 +312,7 @@ class RLBenchEnv:
                     actioner=actioner,
                     max_tries=max_tries,
                     verbose=verbose,
-                    interpolation_length=interpolation_length,
+                    prediction_len=prediction_len,
                     num_history=num_history
                 )
             )
@@ -348,16 +332,16 @@ class RLBenchEnv:
     @torch.no_grad()
     def _evaluate_task_on_one_variation(
         self,
-        task_str: str,
-        task: TaskEnvironment,
-        max_steps: int,
-        variation: int,
-        num_demos: int,
-        actioner: Actioner,
-        max_tries: int = 1,
-        verbose: bool = False,
-        interpolation_length=50,
-        num_history=0
+        task_str,
+        task,
+        max_steps,
+        variation,
+        num_demos,
+        actioner,
+        max_tries=1,
+        verbose=False,
+        prediction_len=50,
+        num_history=3
     ):
         device = actioner.device
 
@@ -420,7 +404,7 @@ class RLBenchEnv:
                     rgbs_input,
                     pcds_input,
                     gripper_input,
-                    interpolation_length=interpolation_length
+                    prediction_len=prediction_len
                 )
 
                 if verbose:
@@ -437,7 +421,7 @@ class RLBenchEnv:
                     # execute
                     for action in actions:
                         collision_checking = self._collision_checking(task_str, step_id)
-                        obs, reward, terminate, _ = move(action, collision_checking=collision_checking)
+                        obs, reward, terminate = move(action, collision_checking=collision_checking)
 
                     max_reward = max(max_reward, reward)
 
@@ -532,52 +516,6 @@ class RLBenchEnv:
         )
 
         return obs_config
-
-
-# Identify way-point in each RLBench Demo
-def _is_stopped(demo, i, obs, stopped_buffer, delta):
-    next_is_not_final = i == (len(demo) - 2)
-    # gripper_state_no_change = i < (len(demo) - 2) and (
-    #     obs.gripper_open == demo[i + 1].gripper_open
-    #     and obs.gripper_open == demo[i - 1].gripper_open
-    #     and demo[i - 2].gripper_open == demo[i - 1].gripper_open
-    # )
-    gripper_state_no_change = i < (len(demo) - 2) and (
-        obs.gripper_open == demo[i + 1].gripper_open
-        and obs.gripper_open == demo[max(0, i - 1)].gripper_open
-        and demo[max(0, i - 2)].gripper_open == demo[max(0, i - 1)].gripper_open
-    )
-    small_delta = np.allclose(obs.joint_velocities, 0, atol=delta)
-    stopped = (
-        stopped_buffer <= 0
-        and small_delta
-        and (not next_is_not_final)
-        and gripper_state_no_change
-    )
-    return stopped
-
-
-def keypoint_discovery(demo: Demo, stopping_delta=0.1) -> List[int]:
-    episode_keypoints = []
-    prev_gripper_open = demo[0].gripper_open
-    stopped_buffer = 0
-
-    for i, obs in enumerate(demo):
-        stopped = _is_stopped(demo, i, obs, stopped_buffer, stopping_delta)
-        stopped_buffer = 4 if stopped else stopped_buffer - 1
-        # If change in gripper, or end of episode.
-        last = i == (len(demo) - 1)
-        if i != 0 and (obs.gripper_open != prev_gripper_open or last or stopped):
-            episode_keypoints.append(i)
-        prev_gripper_open = obs.gripper_open
-
-    if (
-        len(episode_keypoints) > 1
-        and (episode_keypoints[-1] - 1) == episode_keypoints[-2]
-    ):
-        episode_keypoints.pop(-2)
-
-    return episode_keypoints
 
 
 def transform(obs_dict, scale_size=(0.75, 1.25), augmentation=False):
