@@ -172,14 +172,14 @@ class Actioner:
             [1, prediction_len, gripper.shape[-1]], 0
         ).to(rgbs.device)
         traj_mask = torch.full(
-            [1, prediction_len], False
+            [1, prediction_len, 2], False
         ).to(rgbs.device)
         # import pickle
         # with open('first.pkl', 'wb') as f:
         #     pickle.dump([rgbs.cpu(), pcds.cpu(), self._instr], f)
         # jkjk
         output["action"] = self._policy(
-            fake_traj,
+            None,
             traj_mask,
             rgbs,
             None,
