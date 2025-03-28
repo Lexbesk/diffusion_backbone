@@ -108,9 +108,9 @@ if __name__ == "__main__":
 
     # Bimanual vs single-arm utils
     if args.bimanual:
-        from .utils_with_bimanual_rlbench import RLBenchEnv, Actioner
+        from online_evaluation_rlbench.utils_with_bimanual_rlbench import RLBenchEnv, Actioner
     else:
-        from .utils_with_rlbench import RLBenchEnv, Actioner
+        from online_evaluation_rlbench.utils_with_rlbench import RLBenchEnv, Actioner
 
     # Dataset class (for getting cameras and tasks/variations)
     dataset_class = fetch_dataset_class(args.dataset)
