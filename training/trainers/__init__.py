@@ -1,6 +1,6 @@
 from .calvin import CALVINTrainTester
 from .rlbench import RLBenchTrainTester
-
+from .rh20t import RH20TTrainTester
 
 def fetch_train_tester(dataset_name):
     dataset_name = dataset_name.lower()
@@ -8,4 +8,6 @@ def fetch_train_tester(dataset_name):
         return RLBenchTrainTester
     if 'calvin' in dataset_name:
         return CALVINTrainTester
+    if 'rh20t' in dataset_name:
+        return RH20TTrainTester
     return None
