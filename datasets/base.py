@@ -24,6 +24,7 @@ class BaseDataset(Dataset):
         self._instructions = self._load_instructions(instructions)
 
         # Load all annotations lazily
+        print("root: ", root)
         self.annos = read_zarr_with_cache(root, mem_gb=mem_limit)
 
     def _load_instructions(self, instruction_file):
