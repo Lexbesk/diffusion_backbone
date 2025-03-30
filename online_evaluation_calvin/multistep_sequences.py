@@ -8,7 +8,7 @@ import multiprocessing
 from operator import add
 
 import numpy as np
-from online_evaluation_calvin.evaluate_utils import temp_seed
+from online_evaluation_calvin.utils_with_calvin import temp_seed
 
 logger = logging.getLogger(__name__)
 

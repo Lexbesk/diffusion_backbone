@@ -1,8 +1,17 @@
+import argparse
 import json
 import os
 
 
-FOLDER = 'eval_logs/flow_bimanual_3dda_train/peract2_front.pth/seed0'
+def parse_arguments():
+    parser = argparse.ArgumentParser("Parse arguments for main.py")
+    parser.add_argument('--folder', type=str)
+
+    return parser.parse_args()
+
+
+args = parse_arguments()
+FOLDER = args.folder
 
 sum_ = 0
 tasks = sorted(os.listdir(FOLDER))

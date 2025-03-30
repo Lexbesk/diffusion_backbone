@@ -10,17 +10,18 @@ base_log_dir=eval_logs/Planner_Calvin/
 save_video=0
 
 # Things you can change if you customize the model architecture
+model_type=denoise3d
+pred_len=20
 backbone=clip
+fps_subsampling_factor=3
 embedding_dim=192
 num_attn_heads=8
-num_vis_ins_attn_layers=3
+num_vis_instr_attn_layers=3
 rotation_parametrization=6D
+relative_action=1
 quaternion_format=wxyz
 denoise_timesteps=25
 denoise_model=ddpm
-fps_subsampling_factor=3
-interpolation_length=20
-relative_action=1
 
 ngpus=1
 
@@ -34,14 +35,14 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --checkpoint $checkpoint \
     --base_log_dir $base_log_dir \
     --save_video $save_video \
+    --model_type $model_type \
+    --pred_len $pred_len \
     --backbone $backbone \
+    --fps_subsampling_factor $fps_subsampling_factor \
     --embedding_dim $embedding_dim \
     --num_attn_heads $num_attn_heads \
-    --num_vis_ins_attn_layers $num_vis_ins_attn_layers \
-    --rotation_parametrization $rotation_parametrization \
+    --num_vis_instr_attn_layers $num_vis_instr_attn_layers \
+    --relative_action $relative_action \
     --quaternion_format $quaternion_format \
     --denoise_timesteps $denoise_timesteps \
-    --denoise_model $denoise_model \
-    --fps_subsampling_factor $fps_subsampling_factor \
-    --interpolation_length $interpolation_length \
-    --relative_action $relative_action
+    --denoise_model $denoise_model

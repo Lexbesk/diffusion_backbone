@@ -4,9 +4,9 @@
 #SBATCH --output=job_%j.out         # Output file (with job ID)
 #SBATCH --time=48:00:00             # Time limit (hh:mm:ss)
 #SBATCH --ntasks=1                  # Number of tasks (processes)
-#SBATCH --gpus=2                    # Number of tasks (processes)
-#SBATCH --cpus-per-task=16          # Number of cores per task
-#SBATCH --mem=96G                  # Memory limit per node
+#SBATCH --gpus=4                    # Number of tasks (processes)
+#SBATCH --cpus-per-task=24          # Number of cores per task
+#SBATCH --mem=120G                  # Memory limit per node
 #SBATCH --partition=preempt # Partition name
 
 # Load any necessary modules (example: Python)
@@ -24,14 +24,18 @@ nvidia-smi
 #     unzip Peract_packaged.zip
 #     rm Peract_packaged.zip
 # fi
-if [ ! -d /scratch/GNFactor_zarr ]; then
-    cd /scratch
-    cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
+rm -rf /scratch/Peract_packaged
+if [ ! -d /scratch/Peract_packaged ]; then
+    cp -r /data/user_data/ngkanats/Peract_packaged /scratch
 fi
+# if [ ! -d /scratch/GNFactor_zarr ]; then
+#     cd /scratch
+#     cp -r /data/user_data/ngkanats/GNFactor_zarr /scratch/
+# fi
 
 
 cd /home/ngkanats/repos/lbs/analogical_manipulation
 # bash scripts/rlbench/train_.sh
 # bash scripts/rlbench/train_gnfactor_fast.sh
 # bash scripts/calvin/train_mix.sh
-bash debug.sh
+bash scripts/rlbench/train_keypose_gnfactor_olddata.sh

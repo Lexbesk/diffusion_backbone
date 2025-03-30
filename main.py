@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from datasets import fetch_dataset_class
-from modeling.policy import DenoiseActor3D, DenoiseActor2D
+from modeling.policy import fetch_model_class
 from training.depth2cloud import fetch_depth2cloud
 from training.trainers import fetch_train_tester
 from utils.common_utils import str2bool, str_none
@@ -19,20 +19,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser("Parse arguments for main.py")
     # Tuples: (name, type, default)
     arguments = [
-        # Training and testing arguments
-        ('checkpoint', str_none, None),
-        ('val_freq', int, 500),
-        ('eval_only', str2bool, False),
-        ('lr', float, 1e-4),
-        ('lr_scheduler', str, "constant"),
-        ('wd', float, 5e-3),
-        ('train_iters', int, 200000),
         # Dataset/loader arguments
-        ('dataset', str, "Peract"),
         ('train_data_dir', Path, ''),
         ('eval_data_dir', Path, ''),
         ('train_instructions', Path, ''),
         ('val_instructions', Path, ''),
+        ('dataset', str, "Peract"),
         ('num_workers', int, 1),
         ('batch_size', int, 16),
         ('batch_size_val', int, 4),
@@ -41,8 +33,16 @@ def parse_arguments():
         ('base_log_dir', Path, Path(__file__).parent / "train_logs"),
         ('exp_log_dir', Path, "exp"),
         ('run_log_dir', Path, "run"),
+        # Training and testing arguments
+        ('checkpoint', str_none, None),
+        ('val_freq', int, 500),
+        ('eval_only', str2bool, False),
+        ('lr', float, 1e-4),
+        ('lr_scheduler', str, "constant"),
+        ('wd', float, 5e-3),
+        ('train_iters', int, 200000),
         # Model arguments: general policy type
-        ('use2dmodel', str2bool, False),  # use 2D policy variant
+        ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
         ('keypose_only', str2bool, True),
         # Model arguments: encoder
@@ -101,10 +101,7 @@ if __name__ == '__main__':
 
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)
-    if args.use2dmodel:
-        model_class = DenoiseActor2D
-    else:
-        model_class = DenoiseActor3D
+    model_class = fetch_model_class(args.model_type)
     depth2cloud = fetch_depth2cloud(args.dataset, (256, 256))
 
     # Run

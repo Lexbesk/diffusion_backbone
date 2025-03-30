@@ -194,7 +194,7 @@ class DenoiseActor(nn.Module):
         # Predict the noise residual
         _, _, c_in = self.position_scheduler.get_scalings(timesteps)
         pred = self.policy_forward_pass(
-            noisy_trajectory * c_in[:, None, None],
+            noisy_trajectory * c_in[:, None, None, None],
             timesteps, fixed_inputs
         )
 
@@ -292,6 +292,10 @@ class DenoiseActor(nn.Module):
         Note:
             The input rotation is ALWAYS expressed as a quaternion.
             The model converts it to 6D internally.
+
+        Returns:
+            - loss: scalar, if run_inference is False
+            - trajectory: (B, trajectory_length, nhand, 3+4+X), at inference
         """
         # Convert rotation to 6D
         _, nhist, nhand, _ = proprio.shape

@@ -16,7 +16,7 @@ tasks=(
 )
 
 # Testing arguments
-checkpoint=peract2_front.pth
+checkpoint=peract2_front_wrist3d_2.pth
 num_episodes=5  # 100
 max_tries=2
 max_steps=25
@@ -26,12 +26,12 @@ seed=0
 # Dataset arguments
 data_dir=/data/group_data/katefgroup/VLA/peract2_raw_squash/test/
 instructions=instructions/peract2/instructions.json
-dataset=Peract2
+dataset=Peract2TC
 image_size=256,256
 # Logging arguments
 verbose=false
 # Model arguments
-use2dmodel=false
+model_type=denoise3d
 bimanual=true
 prediction_len=1
 fps_subsampling_factor=5
@@ -61,7 +61,7 @@ for ((i=0; i<$num_ckpts; i++)); do
         --image_size $image_size \
         --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
         --verbose $verbose \
-        --use2dmodel $use2dmodel \
+        --model_type $model_type \
         --bimanual $bimanual \
         --prediction_len $prediction_len \
         --fps_subsampling_factor $fps_subsampling_factor \
@@ -75,3 +75,5 @@ for ((i=0; i<$num_ckpts; i++)); do
         --denoise_model $denoise_model
 done
 
+python online_evaluation_rlbench/collect_results.py \
+    --folder eval_logs/$exp/$checkpoint/seed$seed/

@@ -6,22 +6,64 @@ from collections import Counter
 import numpy as np
 from numpy import pi
 import torch
-import torch.nn.functional as F
 import utils.pytorch3d_transforms as pytorch3d_transforms
 import pybullet
 import hydra
 from omegaconf import OmegaConf
 
-from utils.utils_with_calvin import (
-    deproject,
-    get_gripper_camera_view_matrix,
-    convert_rotation
-)
-
 
 ############################################################
-# Functions to prepare inputs/outputs of 3D diffuser Actor #
+# Functions to prepare inputs/outputs of model
 ############################################################
+def convert_rotation(rot):
+    """Convert Euler angles to Quarternion
+    """
+    rot = torch.as_tensor(rot)
+    mat = pytorch3d_transforms.euler_angles_to_matrix(rot, "XYZ")
+    quat = pytorch3d_transforms.matrix_to_quaternion(mat)
+    return quat.numpy()
+
+
+def deproject(cam, depth_img, homogeneous=False, sanity_check=False):
+    """
+    Deprojects a pixel point to 3D coordinates
+    Args
+        point: tuple (u, v); pixel coordinates of point to deproject
+        depth_img: np.array; depth image used as reference to generate 3D coordinates
+        homogeneous: bool; if true it returns the 3D point in homogeneous coordinates,
+                     else returns the world coordinates (x, y, z) position
+    Output
+        (x, y, z): (3, npts) np.array; world coordinates of the deprojected point
+    """
+    h, w = depth_img.shape
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+    u, v = u.ravel(), v.ravel()
+
+    # Unproject to world coordinates
+    T_world_cam = np.linalg.inv(np.array(cam.viewMatrix).reshape((4, 4)).T)
+    z = depth_img[v, u]
+    foc = cam.height / (2 * np.tan(np.deg2rad(cam.fov) / 2))
+    x = (u - cam.width // 2) * z / foc
+    y = -(v - cam.height // 2) * z / foc
+    z = -z
+    ones = np.ones_like(z)
+
+    cam_pos = np.stack([x, y, z, ones], axis=0)
+    world_pos = T_world_cam @ cam_pos
+
+    # Sanity check by using camera.deproject function.  Check 2000 points.
+    if sanity_check:
+        sample_inds = np.random.permutation(u.shape[0])[:2000]
+        for ind in sample_inds:
+            cam_world_pos = cam.deproject((u[ind], v[ind]), depth_img, homogeneous=True)
+            assert np.abs(cam_world_pos-world_pos[:, ind]).max() <= 1e-3
+
+    if not homogeneous:
+        world_pos = world_pos[:3]
+
+    return world_pos
+
+
 def prepare_visual_states(obs, env):
 
     """Prepare point cloud given RGB-D observations.  In-place add point clouds
@@ -34,49 +76,21 @@ def prepare_visual_states(obs, env):
             - robot_obs: a dictionary of proprioceptive states
         env: a PlayTableSimEnv instance which contains camera information
     """
-    rgb_static = obs["rgb_obs"]["rgb_static"]
-    rgb_gripper = obs["rgb_obs"]["rgb_gripper"]
+    # Compute point cloud for front camera
     depth_static = obs["depth_obs"]["depth_static"]
-    depth_gripper = obs["depth_obs"]["depth_gripper"]
-
-    static_cam = env.cameras[0]
-    gripper_cam = env.cameras[1]
-    gripper_cam.viewMatrix = get_gripper_camera_view_matrix(gripper_cam)
-
     static_pcd = deproject(
-        static_cam, depth_static,
+        env.cameras[0], depth_static,
         homogeneous=False, sanity_check=False
     ).transpose(1, 0)
     static_pcd = np.reshape(
         static_pcd, (depth_static.shape[0], depth_static.shape[1], 3)
     )
-    gripper_pcd = deproject(
-        gripper_cam, depth_gripper,
-        homogeneous=False, sanity_check=False
-    ).transpose(1, 0)
-    gripper_pcd = np.reshape(
-        gripper_pcd, (depth_gripper.shape[0], depth_gripper.shape[1], 3)
-    )
-
-    # map RGB to [0, 1]
-    rgb_static = rgb_static / 255.
-    rgb_gripper = rgb_gripper / 255.
-
-    h, w = rgb_static.shape[:2]
-    rgb_gripper = F.interpolate(
-        torch.as_tensor(rgb_gripper).permute(2, 0, 1).unsqueeze(0),
-        size=(h, w), mode='bilinear', align_corners=False
-    ).squeeze(0).permute(1, 2, 0).numpy()
-    gripper_pcd = F.interpolate(
-        torch.as_tensor(gripper_pcd).permute(2, 0, 1).unsqueeze(0),
-        size=(h, w), mode='nearest'
-    ).squeeze(0).permute(1, 2, 0).numpy()
-
-    obs["rgb_obs"]["rgb_static"] = rgb_static
-    obs["rgb_obs"]["rgb_gripper"] = rgb_gripper
     obs["pcd_obs"] = {}
     obs["pcd_obs"]["pcd_static"] = static_pcd
-    obs["pcd_obs"]["pcd_gripper"] = gripper_pcd
+
+    # Map RGB to [0, 1]
+    obs["rgb_obs"]["rgb_static"] = obs["rgb_obs"]["rgb_static"] / 255.
+    obs["rgb_obs"]["rgb_gripper"] = obs["rgb_obs"]["rgb_gripper"] / 255.
 
     return obs
 
@@ -154,6 +168,22 @@ def convert_action(trajectory):
 
     trajectory = np.concatenate([position, rotation, openess], axis=-1)
     return trajectory
+
+
+def relative_to_absolute(action, proprio, max_rel_pos=1.0, max_rel_orn=1.0,
+                         magic_scaling_factor_pos=1, magic_scaling_factor_orn=1):
+    assert action.shape[-1] == 7
+    assert proprio.shape[-1] == 7
+
+    rel_pos, rel_orn, gripper = np.split(action, [3, 6], axis=-1)
+    rel_pos *= max_rel_pos * magic_scaling_factor_pos
+    rel_orn *= max_rel_orn * magic_scaling_factor_orn
+
+    pos_proprio, orn_proprio = proprio[..., :3], proprio[..., 3:6]
+
+    target_pos = pos_proprio + rel_pos
+    target_orn = orn_proprio + rel_orn
+    return np.concatenate([target_pos, target_orn, gripper], axis=-1)
 
 
 ######################################################

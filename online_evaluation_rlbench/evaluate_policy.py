@@ -1,5 +1,6 @@
 """Online evaluation script on RLBench."""
 
+import argparse
 import random
 from pathlib import Path
 import json
@@ -7,10 +8,9 @@ import os
 
 import torch
 import numpy as np
-import argparse
 
 from datasets import fetch_dataset_class
-from modeling.policy import DenoiseActor3D, DenoiseActor2D
+from modeling.policy import fetch_model_class
 from utils.common_utils import str2bool, str_none, round_floats
 
 
@@ -36,13 +36,11 @@ def parse_arguments():
         ('output_file', Path, Path(__file__).parent / "eval.json"),
         ('verbose', str2bool, False),
         # Model arguments: general policy type
-        ('use2dmodel', str2bool, False),  # use 2D policy variant
+        ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
         ('prediction_len', int, 1),
         # Model arguments: encoder
         ('backbone', str, "clip"),
-        ('finetune_backbone', str2bool, False),
-        ('finetune_text_encoder', str2bool, False),
         ('fps_subsampling_factor', int, 5),
         # Model arguments: encoder and head
         ('embedding_dim', int, 144),
@@ -64,14 +62,9 @@ def parse_arguments():
 def load_models(args):
     print("Loading model from", args.checkpoint, flush=True)
 
-    if args.use2dmodel:
-        model_class = DenoiseActor2D
-    else:
-        model_class = DenoiseActor3D
+    model_class = fetch_model_class(args.model_type)
     model = model_class(
         backbone=args.backbone,
-        finetune_backbone=args.finetune_backbone,
-        finetune_text_encoder=args.finetune_text_encoder,
         num_vis_instr_attn_layers=args.num_vis_instr_attn_layers,
         fps_subsampling_factor=args.fps_subsampling_factor,
         embedding_dim=args.embedding_dim,

@@ -1,11 +1,11 @@
-main_dir=CALVIN
+main_dir=Peract
 
-train_data_dir=/data/group_data/katefgroup/VLA/CALVIN_zarr/train.zarr
-eval_data_dir=/data/group_data/katefgroup/VLA/CALVIN_zarr/val.zarr
-train_instructions=instructions/CALVIN/instructions.json
-val_instructions=instructions/CALVIN/instructions.json
+train_data_dir=/data/user_data/ngkanats/Peract_zarr/train.zarr
+eval_data_dir=/data/user_data/ngkanats/Peract_zarr/val.zarr
+train_instructions=instructions/peract/instructions.json
+val_instructions=instructions/peract/instructions.json
 
-dataset=Calvin
+dataset=Peract
 num_workers=4
 B=64
 B_val=64
@@ -29,7 +29,7 @@ keypose_only=true
 backbone=clip
 finetune_backbone=false
 finetune_text_encoder=false
-fps_subsampling_factor=3
+fps_subsampling_factor=5
 
 C=120
 num_attn_heads=8
