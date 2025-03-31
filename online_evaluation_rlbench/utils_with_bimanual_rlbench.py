@@ -162,25 +162,12 @@ class Actioner:
         if self._instr is None:
             raise ValueError()
 
-        # self._instr = self._instr.to(rgbs.device)
-        self._task_id = self._task_id.to(rgbs.device)
-
-        gripper = gripper.unflatten(-1, (2, -1))
+        gripper = gripper.unflatten(-1, (2, -1))  # (1, nhist, nhand=2, 7)
 
         # Predict trajectory
-        fake_traj = torch.full(
-            [1, prediction_len, gripper.shape[-1]], 0
-        ).to(rgbs.device)
-        traj_mask = torch.full(
-            [1, prediction_len, 2], False
-        ).to(rgbs.device)
-        # import pickle
-        # with open('first.pkl', 'wb') as f:
-        #     pickle.dump([rgbs.cpu(), pcds.cpu(), self._instr], f)
-        # jkjk
         output["action"] = self._policy(
             None,
-            traj_mask,
+            torch.full([1, prediction_len, 2], False).to(rgbs.device),
             rgbs,
             None,
             pcds,

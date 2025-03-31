@@ -17,7 +17,7 @@ tasks=(
 
 # Testing arguments
 checkpoint=peract2_front_wrist3d_2.pth
-num_episodes=5  # 100
+num_episodes=100
 max_tries=2
 max_steps=25
 headless=true

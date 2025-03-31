@@ -18,14 +18,14 @@ from data_processing.rlbench_utils import (
 ROOT = '/data/group_data/katefgroup/VLA/peract_raw/'
 STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
-NCAM = 5
-IM_SIZE = 256
+NCAM = 4
+IM_SIZE = 128
 DEPTH_SCALE = 2**24 - 1
 
 
 def all_tasks_main(split, tasks):
     cameras = [
-        "shoulder_left_camera", "shoulder_right_camera", "wrist", "front"
+        "left_shoulder", "right_shoulder", "wrist", "front"
     ]
     task2id = {task: t for t, task in enumerate(tasks)}
 
@@ -90,6 +90,7 @@ def all_tasks_main(split, tasks):
             print(task)
             task_folder = f'{ROOT}/{split}/{task}/all_variations/episodes'
             episodes = sorted(os.listdir(task_folder))
+            episodes = [ep for ep in episodes if ep.startswith('episode')]
             for ep in tqdm(episodes):
                 # Read low-dim file from RLBench
                 ld_file = f"{task_folder}/{ep}/low_dim_obs.pkl"
@@ -105,7 +106,7 @@ def all_tasks_main(split, tasks):
                 rgb = np.stack([
                     np.stack([
                         np.array(Image.open(
-                            f"{task_folder}/{ep}/{cam}_rgb/rgb_{_num2id(k)}.png"
+                            f"{task_folder}/{ep}/{cam}_rgb/{k}.png"
                         ))
                         for cam in cameras
                     ])
@@ -119,7 +120,7 @@ def all_tasks_main(split, tasks):
                     cam_d = []
                     for cam in cameras:
                         depth = image_to_float_array(Image.open(
-                            f"{task_folder}/{ep}/{cam}_depth/depth_{_num2id(k)}.png"
+                            f"{task_folder}/{ep}/{cam}_depth/{k}.png"
                         ), DEPTH_SCALE)
                         near = demo[k].misc[f'{cam}_camera_near']
                         far = demo[k].misc[f'{cam}_camera_far']
@@ -128,12 +129,9 @@ def all_tasks_main(split, tasks):
                     depth_list.append(np.stack(cam_d).astype(np.float16))
                 depth = np.stack(depth_list)
 
-                # Proprioception (keyframes, 3, 2, 8)
+                # Proprioception (keyframes, 3, 1, 8)
                 states = np.stack([np.concatenate([
-                    demo[k].left.gripper_pose,
-                    [demo[k].left.gripper_open],
-                    demo[k].right.gripper_pose,
-                    [demo[k].right.gripper_open]
+                    demo[k].gripper_pose, [demo[k].gripper_open]
                 ]) for k in key_frames]).astype(np.float32)
                 # Store current eef pose as well as two previous ones
                 prop = states[:-1]
@@ -182,11 +180,6 @@ def all_tasks_main(split, tasks):
                 zarr_file['intrinsics'].append(intrinsics)
                 zarr_file['task_id'].append(task_id)
                 zarr_file['variation'].append(var_)
-
-
-def _num2id(int_):
-    str_ = str(int_)
-    return '0' * (4 - len(str_)) + str_
 
 
 if __name__ == "__main__":

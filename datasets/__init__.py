@@ -2,6 +2,7 @@ from .calvin import CALVINDataset
 from .rlbench import (
     Peract2SingleCamDataset,
     Peract2Dataset3cam,
+    PeractDataset
 )
 from .rh20t import RH20TDataset
 
@@ -10,6 +11,7 @@ def fetch_dataset_class(dataset_name):
     dataset_classes = {
         "Peract2": Peract2SingleCamDataset,
         "Peract2TC": Peract2Dataset3cam,
+        "Peract": PeractDataset,
         'Calvin': CALVINDataset,
         'RH20T': RH20TDataset,
     }

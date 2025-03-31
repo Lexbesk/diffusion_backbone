@@ -10,10 +10,6 @@ num_workers=4
 B=64
 B_val=64
 
-run_log_dir=new_three_camerasC$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-checkpoint=peract2_front_wrist3d_2.pth
-
 # Training/testing arguments, change these for HPT
 val_freq=4000
 eval_only=true
@@ -42,6 +38,10 @@ quaternion_format=xyzw
 relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
+
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
+checkpoint=peract2_front_wrist3d_2.pth
 
 ngpus=1
 

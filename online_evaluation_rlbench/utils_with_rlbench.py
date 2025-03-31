@@ -129,8 +129,7 @@ class Actioner:
 
     def load_episode(self, task_str, variation):
         self._task_str = task_str
-        instructions = list(self._instructions[task_str][variation])
-        self._instr = random.choice(instructions).unsqueeze(0)
+        self._instr = [random.choice(self._instructions[task_str][str(variation)])]
         self._task_id = torch.tensor(TASK_TO_ID[task_str]).unsqueeze(0)
         self._actions = {}
 
@@ -153,19 +152,17 @@ class Actioner:
         if self._instr is None:
             raise ValueError()
 
-        self._instr = self._instr.to(rgbs.device)
-
         # Predict trajectory
         output["action"] = self._policy(
             None,
-            torch.full([1, prediction_len], False, dtype=bool).to(rgbs.device),
+            torch.full([1, prediction_len, 1], False).to(rgbs.device),
             rgbs,
             None,
             pcds,
             self._instr,
-            gripper[..., :7],
+            gripper[:, :, None, :7],  # (1, nhist, nhand=1, 7)
             run_inference=True
-        )
+        ).view(1, prediction_len, 8)
 
         return output
 

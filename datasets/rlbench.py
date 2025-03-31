@@ -116,7 +116,9 @@ class PeractDataset(RLBenchDataset):
     tasks = PERACT_TASKS
     variations = range(0, 199)
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
-    train_copies = 1  # how many copies of the dataset to load
+    camera_inds = None
+    train_copies = 10  # how many copies of the dataset to load
+    camera_inds2d = None
 
 
 class PeractTwoCamDataset(RLBenchDataset):

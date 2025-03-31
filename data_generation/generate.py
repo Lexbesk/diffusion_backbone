@@ -1,3 +1,4 @@
+import open3d
 from multiprocessing import Process, Manager
 
 from pyrep.const import RenderMode
@@ -10,16 +11,16 @@ from rlbench.backend.utils import (
     task_file_to_task_class,
     float_array_to_rgb_image
 )
+import rlbench.backend.task as task
 
 import os
 import pickle
-import json
 from PIL import Image
 from rlbench.backend.const import *
 import numpy as np
 import random
 
-from .customized_rlbench import CustomizedEnvironment
+from data_generation.customized_rlbench import CustomizedEnvironment
 
 from absl import app
 from absl import flags
@@ -33,9 +34,6 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('save_path',
                     'data/train_dataset/microsteps/seed{seed}',
                     'Where to save the demos.')
-flags.DEFINE_string('all_task_file',
-                    'assets/rlbench_all_tasks.json',
-                    'A json file with list of all rlbench tasks.')
 flags.DEFINE_list('tasks', [],
                   'The tasks to collect. If empty, all tasks are collected.')
 flags.DEFINE_list('image_size', [128, 128],
@@ -268,8 +266,8 @@ def main(argv):
 
     FLAGS.save_path = FLAGS.save_path.format(seed=FLAGS.seed)
 
-    with open(FLAGS.all_task_file, 'r') as f:
-        task_files = json.load(f)
+    task_files = [t.replace('.py', '') for t in os.listdir(task.TASKS_PATH)
+                  if t != '__init__.py' and t.endswith('.py')]
 
     if len(FLAGS.tasks) > 0:
         for t in FLAGS.tasks:
@@ -278,8 +276,9 @@ def main(argv):
         task_files = FLAGS.tasks
 
     tasks = [task_file_to_task_class(t) for t in task_files]
-    from rlbench.tasks import MT100_V1
-    tasks = MT100_V1['train']
+    # from rlbench.tasks import MT100_V1
+    # tasks = MT100_V1['train']
+    print(tasks)
 
     manager = Manager()
 

@@ -21,7 +21,8 @@ tasks=(
 )
 
 # Testing arguments
-checkpoint=peract_front.pth
+checkpoint=train_logs/Peract/denoise3d-Peract-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10/best.pth
+exp=$exp/denoise3d-Peract-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10
 num_episodes=25
 max_tries=2
 max_steps=20
@@ -29,10 +30,10 @@ headless=true
 collision_checking=false
 seed=0
 # Dataset arguments
-data_dir=/data/group_data/katefgroup/VLA/peract_test
+data_dir=/data/group_data/katefgroup/VLA/peract_raw/test
 instructions=instructions/peract/instructions.json
 dataset=Peract
-image_size=256,256
+image_size=128,128
 # Logging arguments
 verbose=false
 # Model arguments
@@ -64,7 +65,7 @@ for ((i=0; i<$num_ckpts; i++)); do
         --test_instructions $instructions \
         --dataset $dataset \
         --image_size $image_size \
-        --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
+        --output_file eval_logs/$exp/seed$seed/${tasks[$i]}/eval.json  \
         --verbose $verbose \
         --model_type $model_type \
         --bimanual $bimanual \

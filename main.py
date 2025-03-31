@@ -102,7 +102,7 @@ if __name__ == '__main__':
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)
     model_class = fetch_model_class(args.model_type)
-    depth2cloud = fetch_depth2cloud(args.dataset, (256, 256))
+    depth2cloud = fetch_depth2cloud(args.dataset)
 
     # Run
     TrainTester = fetch_train_tester(args.dataset)
