@@ -2,45 +2,45 @@ main_dir=CALVIN
 
 train_data_dir=/data/group_data/katefgroup/VLA/CALVIN_zarr/train.zarr
 eval_data_dir=/data/group_data/katefgroup/VLA/CALVIN_zarr/val.zarr
-train_instructions=instructions/CALVIN/instructions.json
-val_instructions=instructions/CALVIN/instructions.json
+train_instructions=instructions/calvin/train_instructions.json
+val_instructions=instructions/calvin/val_instructions.json
 
 dataset=Calvin
 num_workers=4
 B=64
 B_val=64
 
-run_log_dir=C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
-checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-
 # Training/testing arguments, change these for HPT
-val_freq=4000
+val_freq=40
 eval_only=false
-lr=1e-4
+lr=3e-4
 lr_scheduler=constant
 wd=5e-3
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3d
+model_type=denoise3dsa
 bimanual=false
-keypose_only=true
+keypose_only=false
 
 backbone=clip
 finetune_backbone=false
 finetune_text_encoder=false
 fps_subsampling_factor=3
 
-C=120
+C=192
 num_attn_heads=8
 num_vis_instr_attn_layers=3
-num_history=3
+num_history=1
 
-workspace_normalizer_buffer=0.05
-quaternion_format=xyzw
-relative_action=false
+workspace_normalizer_buffer=0.01
+quaternion_format=wxyz
+relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
+
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 ngpus=1
 

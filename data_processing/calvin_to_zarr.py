@@ -1,3 +1,6 @@
+import json
+import os
+
 from numcodecs import Blosc
 import zarr
 import numpy as np
@@ -113,6 +116,24 @@ def all_tasks_main(split):
             zarr_file['action'].append(actions16[:-1][::SUBSAMPLE])
 
 
+def store_instructions(split):
+    # All CALVIN episodes
+    suffix = 'training' if split == 'train' else 'validation'
+    annos = np.load(
+        f'{ROOT}/{suffix}/lang_annotations/auto_lang_ann.npy',
+        allow_pickle=True
+    ).item()
+    return annos['language']['ann']
+
+
 if __name__ == "__main__":
     all_tasks_main('train')
     all_tasks_main('val')
+    # Store instructions as json (can be run independently)
+    os.makedirs('instructions/calvin', exist_ok=True)
+    instr = store_instructions('train')
+    with open('instructions/calvin/train_instructions.json', 'w') as fid:
+        json.dump(instr, fid)
+    instr = store_instructions('val')
+    with open('instructions/calvin/val_instructions.json', 'w') as fid:
+        json.dump(instr, fid)

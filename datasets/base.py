@@ -67,7 +67,7 @@ class BaseDataset(Dataset):
         }
         In addition self.annos may contain fields for task/instruction ids
         """
-        idx = idx % len(self.annos['rgb'])
+        idx = idx % len(self.annos['action'])
         if self._actions_only:
             return {"action": self._get_action(idx)}
         return {
@@ -80,4 +80,4 @@ class BaseDataset(Dataset):
         }
 
     def __len__(self):
-        return self.copies * len(self.annos['rgb'])
+        return self.copies * len(self.annos['action'])

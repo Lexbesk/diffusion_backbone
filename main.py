@@ -54,7 +54,7 @@ def parse_arguments():
         ('embedding_dim', int, 144),
         ('num_attn_heads', int, 9),
         ('num_vis_instr_attn_layers', int, 2),
-        ('num_history', int, 0),
+        ('num_history', int, 1),
         # Model arguments: head
         ('workspace_normalizer_buffer', float, 0.04),
         ('relative_action', str2bool, False),

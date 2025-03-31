@@ -30,5 +30,5 @@ class CALVINTrainTester(BaseTrainTester):
 
     def _run_depth2cloud(self, sample):
         return self.depth2cloud(
-            sample['depth'].cuda(non_blocking=True).float()
-        )
+            sample['depth'].cuda(non_blocking=True).float()[:, 0]  # one camera
+        )[:, None]  # B 1 3 H W

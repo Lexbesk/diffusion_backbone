@@ -95,7 +95,7 @@ class RLBenchDataset(BaseDataset):
             intrinsics: (N, n_cam, 3, 3) float
         }
         """
-        idx = idx % len(self.annos['rgb'])
+        idx = idx % len(self.annos['action'])
         if self._actions_only:
             return {"action": self._get_action(idx)}
         return {

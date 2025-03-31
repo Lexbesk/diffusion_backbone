@@ -100,7 +100,7 @@ def evaluate_policy(model, env, task_config_file, ann_config_file,
         # Run the model on the sequence, querying one instruction at a time
         result, videos = evaluate_sequence(
             env, model, task_oracle, initial_state,
-            eval_sequence, instr_dict, save_video
+            eval_sequence, instr_dict
         )
         # Store results on the logging file
         write_results(eval_log_dir, seq_ind, result)
@@ -253,6 +253,7 @@ def main(args):
 if __name__ == "__main__":
     args = parse_arguments()
     args.local_rank = int(os.environ["LOCAL_RANK"])
+    args.device = torch.device('cuda')
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)

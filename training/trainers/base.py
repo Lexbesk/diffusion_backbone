@@ -297,6 +297,12 @@ class BaseTrainTester:
         if rgb2d is not None:
             rgb2d = sample['rgb2d'].cuda(non_blocking=True).float() / 255
 
+        # Check for history requirements
+        proprio = sample["proprioception"].cuda(non_blocking=True)
+        nhist_ = proprio.size(1)  # proprio is B nhist nhand 7+X
+        assert nhist_ >= self.args.num_history, "not enough proprio timesteps"
+        proprio = proprio[:, :max(self.args.num_history, 1)]
+
         return (
             sample["action"].cuda(non_blocking=True),
             sample["action_mask"].cuda(non_blocking=True),

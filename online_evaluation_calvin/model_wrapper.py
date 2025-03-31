@@ -79,7 +79,7 @@ class Model:
         rgb2d = torch.from_numpy(rgb2d).to(device).float()
 
         pcds = obs["pcd_obs"]["pcd_static"].transpose(2, 0, 1)[None, None]
-        pcds = torch.from_numpy(pcds).to(device).unsqueeze(0).float()
+        pcds = torch.from_numpy(pcds).to(device).float()
         pcds = pcds[..., 20:180, 20:180]
 
         proprio = torch.from_numpy(obs["proprio"]).to(device).float()

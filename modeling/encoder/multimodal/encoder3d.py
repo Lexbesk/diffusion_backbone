@@ -39,7 +39,7 @@ class Encoder(BaseEncoder):
                 [64, 256, 512, 1024, 2048],
                 embedding_dim, output_level="res3"
             )
-            # self.rgb2d_proj = nn.Conv2d(2048, embedding_dim, 1)
+            self.rgb2d_proj = nn.Conv2d(2048, embedding_dim, 1)
         else:
             self.inner_block = Conv2dNormActivation(
                 768, embedding_dim, kernel_size=1, padding=0,

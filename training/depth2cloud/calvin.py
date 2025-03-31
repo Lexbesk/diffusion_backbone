@@ -10,7 +10,7 @@ class CALVINDepth2Cloud:
             0.5141233801841736, 0.6906105875968933, -0.5086592435836792, 0.0,
             -0.46107974648475647, 0.7225935459136963, 0.5150379538536072, 0.0,
             0.21526622772216797, -0.26317155361175537, -4.399168968200684, 1.0
-        ]).reshape((4, 4)).T)).float()
+        ]).reshape((4, 4)).T)).float().cuda()
         self.width, self.height, self.fov = 200, 200, 10
         self.foc = self.height / (2 * np.tan(np.deg2rad(self.fov) / 2))
 
@@ -25,8 +25,8 @@ class CALVINDepth2Cloud:
         v, u = torch.meshgrid(torch.arange(200), torch.arange(200))
         h_offset = (200 - h) // 2
         w_offset = (200 - w) // 2
-        v = v[h_offset:h+h_offset, w_offset:w+w_offset]
-        u = u[h_offset:h+h_offset, w_offset:w+w_offset]
+        v = v[h_offset:h+h_offset, w_offset:w+w_offset].to(depth.device)
+        u = u[h_offset:h+h_offset, w_offset:w+w_offset].to(depth.device)
 
         # Camera XYZ
         x = (u - self.width // 2)[None] * depth / self.foc
