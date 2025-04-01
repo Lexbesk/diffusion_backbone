@@ -1,11 +1,11 @@
-main_dir=CALVIN
+main_dir=RH20T
 
-train_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/CALVIN_zarr/train.zarr
-eval_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/CALVIN_zarr/val.zarr
-train_instructions=instructions/calvin/train_instructions.json
-val_instructions=instructions/calvin/val_instructions.json
+train_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/RH20T_zarr/train.zarr
+eval_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/RH20T_zarr/eval.zarr
+train_instructions=instructions/rh20t/train_instructions.json
+val_instructions=instructions/rh20t/val_instructions.json
 
-dataset=Calvin
+dataset=RH20T
 num_workers=4
 B=64
 B_val=64
@@ -26,7 +26,7 @@ keypose_only=false
 backbone=clip
 finetune_backbone=false
 finetune_text_encoder=false
-fps_subsampling_factor=3
+fps_subsampling_factor=4
 
 C=192
 num_attn_heads=8

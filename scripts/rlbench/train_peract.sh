@@ -1,7 +1,7 @@
 main_dir=Peract
 
-train_data_dir=/data/user_data/ngkanats/Peract_zarr/train.zarr
-eval_data_dir=/data/user_data/ngkanats/Peract_zarr/val.zarr
+train_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/train.zarr
+eval_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/val.zarr
 train_instructions=instructions/peract/instructions.json
 val_instructions=instructions/peract/instructions.json
 

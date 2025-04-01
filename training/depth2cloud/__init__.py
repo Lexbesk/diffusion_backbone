@@ -11,5 +11,5 @@ def fetch_depth2cloud(dataset_name):
     if 'calvin' in dataset_name:
         return CALVINDepth2Cloud()
     if 'rh20t' in dataset_name:
-        return RH20TDepth2Cloud((256, 256))
+        return RH20TDepth2Cloud()
     return None
