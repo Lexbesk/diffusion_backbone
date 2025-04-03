@@ -45,19 +45,23 @@ def _is_stopped(demo, i, obs, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
     gripper_state_no_change = i < (len(demo) - 2) and (
         obs.gripper_open == demo[i + 1].gripper_open
-        and obs.gripper_open == demo[i - 1].gripper_open
-        and demo[i - 2].gripper_open == demo[i - 1].gripper_open
+        and obs.gripper_open == demo[max(0, i - 1)].gripper_open
+        and demo[max(0, i - 2)].gripper_open == demo[max(0, i - 1)].gripper_open
     )
     small_delta = np.allclose(obs.joint_velocities, 0, atol=delta)
-    return small_delta and (not next_is_not_final) and gripper_state_no_change
+    return (
+        small_delta
+        and (not next_is_not_final)
+        and gripper_state_no_change
+    )
 
 
 def _is_stopped_right(demo, i, obs, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
     gripper_state_no_change = i < (len(demo) - 2) and (
         obs.gripper_open == demo[i + 1].right.gripper_open
-        and obs.gripper_open == demo[i - 1].right.gripper_open
-        and demo[i - 2].right.gripper_open == demo[i - 1].right.gripper_open
+        and obs.gripper_open == demo[max(0, i - 1)].right.gripper_open
+        and demo[max(0, i - 2)].right.gripper_open == demo[max(0, i - 1)].right.gripper_open
     )
     small_delta = np.allclose(obs.joint_velocities, 0, atol=delta)
     return small_delta and (not next_is_not_final) and gripper_state_no_change
@@ -67,8 +71,8 @@ def _is_stopped_left(demo, i, obs, delta=0.1):
     next_is_not_final = i == (len(demo) - 2)
     gripper_state_no_change = i < (len(demo) - 2) and (
         obs.gripper_open == demo[i + 1].left.gripper_open
-        and obs.gripper_open == demo[i - 1].left.gripper_open
-        and demo[i - 2].left.gripper_open == demo[i - 1].left.gripper_open
+        and obs.gripper_open == demo[max(0, i - 1)].left.gripper_open
+        and demo[max(0, i - 2)].left.gripper_open == demo[max(0, i - 1)].left.gripper_open
     )
     small_delta = np.allclose(obs.joint_velocities, 0, atol=delta)
     return small_delta and (not next_is_not_final) and gripper_state_no_change
