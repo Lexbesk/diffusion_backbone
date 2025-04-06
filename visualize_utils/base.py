@@ -11,6 +11,7 @@ import zarr
 from zarr.storage import DirectoryStore
 from zarr import LRUStoreCache
 
+from utils.pytorch3d_transforms import quaternion_to_matrix
 from utils.visualize_keypose_frames import (
     get_three_points_from_curr_action,
     compute_rectangle_polygons
@@ -129,20 +130,23 @@ class Visualizer:
         self.annos = read_zarr_with_cache(zarr_path, 0.1)
         self.d2c = depth2cloud
         if use_meshcat:
-            self.mesh_vis = create_visualizer()
+            self.mesh_vis = create_visualizer(clear=False)
         self.aug = K.AugmentationSequential(
             K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
+                translate=0.01,
                 scale=(0.75, 1.25),
                 padding_mode="reflection",
                 p=1.0
             ),
+            K.RandomRotation((-5, 5), p=0.3),
             K.RandomResizedCrop(
                 size=(im_size, im_size),
-                scale=(0.7, 1.0)
+                scale=(0.95, 1.05),
+                p=0.1
             )
-        )
+        ).cuda()
 
     def plot_images_depths(self, t, cams=None, img='rgb', depth='depth',
                            save_path=''):
@@ -157,8 +161,9 @@ class Visualizer:
         imgs = imgs.astype(float) / 255.0
         # Concatenate depths across width and repeat
         depths = np.concatenate(depths, -1)
-        depths = np.stack([depths] * 3)  # 3 h Nc*
+        depths = np.stack([depths] * 3)  # 3 h Nc*w
         # Top images, bottom depths
+        print(imgs.shape, depths.shape)
         _cat = np.concatenate([imgs, depths], 1).transpose(1, 2, 0)
         # Plot
         plt.imshow(_cat)
@@ -185,7 +190,7 @@ class Visualizer:
         else:
             imgs = self.annos[img][t][cams]  # Nc 3 h w
         # Augment
-        aug = self.aug(torch.from_numpy(imgs)[None].float() / 255).numpy()
+        aug = self.aug(torch.from_numpy(imgs).cuda().float() / 255).cpu().numpy()
         # Concatenate imgs across width
         imgs = np.concatenate(imgs, -1)  # 3 h Nc*w
         imgs = imgs.astype(float) / 255.0
@@ -202,13 +207,21 @@ class Visualizer:
     def plot_point_cloud_grippers(self, t, cams=None, img='rgb', depth='depth',
                                   curr=True, action=True, save_path='',
                                   dataset_name='rlbench'):
-        imgs = self.annos[img][t][cams]  # Nc 3 h w
-        depths = self.annos[depth][t][cams]  # Nc h w
+        if cams is None:
+            imgs = self.annos[img][t]  # Nc 3 h w
+            depths = self.annos[depth][t]  # Nc h w
+            extrinsics = self.annos['extrinsics'][t]
+            intrinsics = self.annos['intrinsics'][t]
+        else:
+            imgs = self.annos[img][t][cams]  # Nc 3 h w
+            depths = self.annos[depth][t][cams]  # Nc h w
+            extrinsics = self.annos['extrinsics'][t][cams]
+            intrinsics = self.annos['intrinsics'][t][cams]
         # Get point cloud
         pc = self.d2c(
             torch.from_numpy(depths)[None].float(),
-            torch.from_numpy(self.annos['extrinsics'][t][cams])[None].float(),
-            torch.from_numpy(self.annos['intrinsics'][t][cams])[None].float()
+            torch.from_numpy(extrinsics)[None].float(),
+            torch.from_numpy(intrinsics)[None].float()
         )[0]  # Nc 3 h w
         # Grippers
         grippers = []
@@ -235,30 +248,41 @@ class Visualizer:
         )
 
     def meshcat_pcd(self, t, cams=None, img='rgb', depth='depth'):
-        imgs = self.annos[img][t][cams]  # Nc 3 h w
-        depths = self.annos[depth][t][cams]  # Nc h w
+        imgs = self.annos[img][t]  # Nc 3 h w
+        depths = self.annos[depth][t]  # Nc h w
         # Get point cloud
         pc = self.d2c(
             torch.from_numpy(depths)[None].float(),
-            torch.from_numpy(self.annos['extrinsics'][t][cams])[None].float(),
-            torch.from_numpy(self.annos['intrinsics'][t][cams])[None].float()
+            torch.from_numpy(self.annos['extrinsics'][t])[None].float(),
+            torch.from_numpy(self.annos['intrinsics'][t])[None].float()
         )[0].numpy()  # Nc 3 h w
         # Visualize point cloud
+        ncam, _, H, W = pc.shape
+        pc2 = pc.reshape(ncam, 3, H // 8, 8, W // 8, 8).mean(-1).mean(-2)
+        imgs = imgs.reshape(ncam, 3, H // 8, 8, W // 8, 8).mean(-1).mean(-2)
         visualize_pointcloud(
             self.mesh_vis,
             f"pc", 
-            pc.transpose(0, 2, 3, 1).reshape(-1, 3),
-            imgs.transpose(0, 2, 3, 1).reshape(-1, 3)
+            pc2.transpose(0, 2, 3, 1).reshape(-1, 3),
+            imgs.transpose(0, 2, 3, 1).reshape(-1, 3),
+            size=0.01
         )
         # Visualize trajectories
-        traj = torch.from_numpy(self.annos['action'][t])  # (N, 2, 8) or (N, 8)
+        traj = torch.from_numpy(self.annos['action'][t])  # (N, 2, 8) or (N, 1, 8)
         if len(traj.shape) > 2:
-            traj = torch.cat((traj[:, 0], traj[:, 1]))
+            if  traj.size(1) == 2:
+                traj = torch.cat((traj[:, 0], traj[:, 1]))
+            else:
+                traj = traj[:, 0]
+        mat_ = torch.stack([torch.eye(4)] * len(traj))
+        # import ipdb; ipdb.set_trace()
+        mat_[:, :3, :3] = quaternion_to_matrix(traj[:, 3:7])
+        mat_[:, :3, 3] = traj[:, :3]
         for t_ in range(len(traj)):
             visualize_triad(
                 self.mesh_vis,
                 f"end_effector{t_}",
-                T=traj[t_],
+                T=mat_[t_].numpy(),
                 radius=0.01
             )
 

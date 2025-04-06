@@ -50,3 +50,17 @@ May need to install pyhash2
 ```
 
 Remember to modify the success condition of `close_jar` task in RLBench, as the original condition is incorrect.  See this [pull request](https://github.com/MohitShridhar/RLBench/pull/1) for more detail.  
+
+
+### Install LeRobot (not in this repo)
+```
+> git clone https://github.com/huggingface/lerobot.git
+> conda create -y -n lerobot python=3.10
+> conda activate lerobot
+> module load cuda-12.4
+> conda install -c conda-forge av ffmpeg
+> pip install --no-binary=av -e .
+> pip install -e ".[pi0]"
+> pip install pytest
+> create a huggingface token and login
+```

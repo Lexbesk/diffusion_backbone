@@ -99,7 +99,8 @@ def create_visualizer(clear=True):
     print(
         "Waiting for meshcat server... have you started a server? Run `meshcat-server` to start a server"
     )
-    vis = meshcat.Visualizer(zmq_url="tcp://127.0.0.1:6000")
+    vis = meshcat.Visualizer(zmq_url="tcp://127.0.0.1:6002").open()
+    print(vis.url())
     if clear:
         vis.delete()
     return vis
