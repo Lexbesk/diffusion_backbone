@@ -1,4 +1,4 @@
-main_dir=Peract2
+main_dir=Peract
 
 if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
     DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
@@ -6,12 +6,12 @@ else
     DATA_PATH="/data/group_data/katefgroup/VLA"
 fi
 
-train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
-train_instructions=instructions/peract2/instructions.json
-val_instructions=instructions/peract2/instructions.json
+train_data_dir=$DATA_PATH/zarr_datasets/Peract_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/Peract_zarr/val.zarr
+train_instructions=instructions/peract/instructions.json
+val_instructions=instructions/peract/instructions.json
 
-dataset=Peract2TC
+dataset=PeractTwoCam
 num_workers=4
 B=64
 B_val=64
@@ -25,11 +25,13 @@ wd=5e-3
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3ddf
-bimanual=true
+model_type=denoise3d
+bimanual=false
 keypose_only=true
 
 backbone=clip
+output_level=res2
+upsample=false
 finetune_backbone=false
 finetune_text_encoder=false
 fps_subsampling_factor=5
@@ -45,9 +47,8 @@ relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=re2_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=peract2_front_wrist3d_2.pth
 
 ngpus=4
 

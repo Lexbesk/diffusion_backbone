@@ -1,13 +1,20 @@
 main_dir=CALVIN
 
-train_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/CALVIN_zarr/train.zarr
-eval_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/CALVIN_zarr/val.zarr
+if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
+    DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
+else
+    DATA_PATH="/data/group_data/katefgroup/VLA"
+fi
+
+train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/val.zarr
 train_instructions=instructions/calvin/train_instructions.json
 val_instructions=instructions/calvin/val_instructions.json
 
 dataset=Calvin
 num_workers=4
-B=64
+memory_limit=32
+B=256
 B_val=64
 
 # Training/testing arguments, change these for HPT
@@ -15,7 +22,7 @@ val_freq=4000
 eval_only=false
 lr=3e-4
 lr_scheduler=constant
-wd=5e-3
+wd=5e-10
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
@@ -39,10 +46,10 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
+run_log_dir=large_batch_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-ngpus=1
+ngpus=8
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
@@ -52,6 +59,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --val_instructions $val_instructions \
     --dataset $dataset \
     --num_workers $num_workers \
+    --memory_limit $memory_limit \
     --batch_size $B \
     --batch_size_val $B_val \
     --exp_log_dir $main_dir \

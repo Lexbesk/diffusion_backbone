@@ -1,14 +1,10 @@
 import einops
-import torch
 from torch import nn
 from torch.nn import functional as F
-from torch_cluster import fps
-from torchvision.ops import Conv2dNormActivation
 
 from ...utils.position_encodings import RotaryPositionEncoding3D
 from ...utils.layers import AttentionModule
-from ..vision.fpn import EfficientFeaturePyramidNetwork
-from .base_encoder import Encoder as BaseEncoder
+from .encoder3d import Encoder as BaseEncoder
 
 
 class Encoder(BaseEncoder):
@@ -26,6 +22,8 @@ class Encoder(BaseEncoder):
                  finetune_text_encoder=False):
         super().__init__(
             backbone=backbone,
+            output_level=output_level,
+            upsample=upsample,
             embedding_dim=embedding_dim,
             nhist=nhist,
             num_attn_heads=num_attn_heads,
@@ -34,67 +32,15 @@ class Encoder(BaseEncoder):
             finetune_backbone=finetune_backbone,
             finetune_text_encoder=finetune_text_encoder,
         )
-
-        # Postprocess scene features
-        if self._backbone_name == 'clip':
-            self.output_level = output_level
-            self.upsample = upsample
-            self.feature_pyramid = EfficientFeaturePyramidNetwork(
-                [64, 256, 512, 1024, 2048],
-                embedding_dim, output_level=output_level
-            )
-            self.rgb2d_proj = nn.Conv2d(2048, embedding_dim, 1)
-        else:
-            self.inner_block = Conv2dNormActivation(
-                768, embedding_dim, kernel_size=1, padding=0,
-                norm_layer=None, activation_layer=None
-            )
-
-        # 3D relative positional embeddings
-        self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
-
-        # Proprioception learnable encoding if 3D is used
-        self.curr_gripper_embed = nn.Embedding(nhist, embedding_dim)
-        self.gripper_context_head = AttentionModule(
-            num_layers=3, d_model=embedding_dim, dim_fw=embedding_dim,
-            n_heads=num_attn_heads, rotary_pe=True, use_adaln=False
+        # Cross-view attention layers
+        dim_ = 288  # divisible by 6, 8, 9
+        self.cv_proj = nn.Linear(2048, dim_)
+        self.cv_attention = AttentionModule(
+            num_layers=4, d_model=dim_, pre_norm=True,
+            rotary_pe=True, is_self=True
         )
-
-        # Camera IDs for the 2D cameras
-        self.camera_ids = nn.Embedding(2, embedding_dim)
-
-    def encode_proprio(self, proprio, context_feats, context_pos):
-        """
-        Compute proprioception features and positional embeddings.
-
-        Args:
-            - proprio: (B, nhist, 3+)
-            - context_feats: (B, npt, C)
-            - context_pos: (B, npt, 3)
-
-        Returns:
-            - gripper_feats: (B, nhist, F)
-        """
-        # Learnable embedding for proprioception
-        proprio_feats = self.curr_gripper_embed.weight.unsqueeze(0).repeat(
-            len(proprio), 1, 1
-        )
-
-        # # Project rotation features
-        # gripper_rot_feats = self.curr_gripper_rot_proj(gripper_feats[..., 3:9])
-        # gripper_feats = gripper_feats + gripper_rot_feats
-
-        # Rotary positional encoding
-        proprio_pos = self.relative_pe_layer(proprio[..., :3])
-        context_pos = self.relative_pe_layer(context_pos)
-
-        # Attention to scene tokens
-        proprio_feats = self.gripper_context_head(
-            proprio_feats, context_feats,
-            seq1_pos=proprio_pos, seq2_pos=context_pos
-        )[-1]
-
-        return proprio_feats
+        self.cv_unproj = nn.Linear(dim_, 2048)
+        self.cv_relative_pe_layer = RotaryPositionEncoding3D(dim_)
 
     def encode_clip(self, rgb3d, rgb2d, pcd, text):
         """
@@ -125,6 +71,8 @@ class Encoder(BaseEncoder):
             rgb3d = F.interpolate(rgb3d, (256, 256), mode='bilinear')
         rgb3d = self.normalize(rgb3d)
         rgb3d_feats = self.backbone(rgb3d)
+        # Attention across views
+        rgb3d_feats["res5"] = self._cross_view_attn3d(rgb3d_feats["res5"], pcd)
         # Pass visual features through feature pyramid network
         rgb3d_feats = self.feature_pyramid(rgb3d_feats)[self.output_level]
         feat_h, feat_w = rgb3d_feats.shape[-2:]
@@ -171,34 +119,35 @@ class Encoder(BaseEncoder):
 
         return rgb3d_feats, rgb2d_feats, pcd, instr_feats
 
-    def run_fps(self, features, pos):
-        # features (B, Np, F)
-        # context_pos (B, Np, 3)
-        # outputs of analogous shape, with smaller Np
-        if self.fps_subsampling_factor == 1:
-            return features, pos
-
-        bs, npts, ch = features.shape
-
-        batch_indices = torch.arange(
-            bs, device=features.device
-        ).long()
-        batch_indices = batch_indices[:, None].repeat(1, npts)  # B Np
-        batch_indices = batch_indices.flatten(0, 1)
-        sampled_inds = fps(
-            einops.rearrange(features, "b npts c -> (b npts) c").half(),
-            batch_indices,
-            1. / self.fps_subsampling_factor,
-            random_start=True
+    def _cross_view_attn3d(self, feats3d, pcd):
+        num_cameras = pcd.shape[1]
+        # Interpolate point cloud
+        pcd = F.interpolate(
+            einops.rearrange(pcd, "bt ncam c h w -> (bt ncam) c h w"),
+            (feats3d.size(-2), feats3d.size(-1)),
+            mode='bilinear'
         )
-        sampled_inds = sampled_inds.reshape(bs, -1)
-        sampled_inds = sampled_inds % npts  # B Np
-
-        # Sample features
-        expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, ch)  # B Np F
-        sampled_features = torch.gather(features, 1, expanded_inds)
-
-        # Sample positions
-        expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, 3)  # B Np 3
-        sampled_pos = torch.gather(pos, 1, expanded_inds)
-        return sampled_features, sampled_pos
+        pcd = einops.rearrange(
+            pcd,
+            "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
+        )
+        # 3D attention
+        _, c, h, w = feats3d.shape
+        feats3d = einops.rearrange(
+            feats3d,
+            "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
+        )
+        feats3d = self.cv_proj(feats3d)
+        rel_pos = self.cv_relative_pe_layer(pcd)
+        feats3d = self.cv_attention(
+            seq1=feats3d,
+            seq2=feats3d,
+            seq1_pos=rel_pos,
+            seq2_pos=rel_pos
+        )[-1]
+        feats3d = self.cv_unproj(feats3d)
+        # Return original shape
+        return einops.rearrange(
+            feats3d,
+            "bt (ncam h w) c-> (bt ncam) c h w", c=c, h=h, w=w
+        ).contiguous()

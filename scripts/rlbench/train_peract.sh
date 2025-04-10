@@ -1,7 +1,13 @@
 main_dir=Peract
 
-train_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/train.zarr
-eval_data_dir=/data/group_data/katefgroup/VLA/zarr_datasets/val.zarr
+if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
+    DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
+else
+    DATA_PATH="/data/group_data/katefgroup/VLA"
+fi
+
+train_data_dir=$DATA_PATH/zarr_datasets/Peract_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/Peract_zarr/val.zarr
 train_instructions=instructions/peract/instructions.json
 val_instructions=instructions/peract/instructions.json
 
@@ -42,7 +48,7 @@ denoise_model=rectified_flow
 run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-ngpus=1
+ngpus=4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \

@@ -10,13 +10,13 @@ do
        -p polar,polar3,polar4,grizzly \
        -N 1 \
        --ntasks=1 \
-       --gpus 4 \
-       --cpus-per-task 24 \
-       --mem=96G \
+       --gpus 8 \
+       --cpus-per-task 40 \
+       --mem=256G \
        --unbuffered \
        --exclusive \
        -t 04:00:00 \
-       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/rlbench/train_peract2_cross.sh"
+       /bin/bash -c "cd /lustre/fsw/portfolios/nvr/users/ngkanatsios/lbs/analogical_manipulation && bash scripts/calvin/train.sh"
 
     sleep 1m
 
