@@ -10,6 +10,8 @@ class Encoder(BaseEncoder):
 
     def __init__(self,
                  backbone="clip",
+                 output_level="res3",
+                 upsample=False,
                  embedding_dim=60,
                  nhist=1,
                  num_attn_heads=9,

@@ -25,7 +25,7 @@ wd=5e-3
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3ddf
+model_type=denoise3dca
 bimanual=true
 keypose_only=true
 

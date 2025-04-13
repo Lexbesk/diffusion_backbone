@@ -18,12 +18,6 @@ from ..utils.utils import (
 class DenoiseActor(nn.Module):
 
     def __init__(self,
-                 # Encoder arguments
-                 backbone="clip",
-                 finetune_backbone=False,
-                 finetune_text_encoder=False,
-                 num_vis_instr_attn_layers=2,
-                 fps_subsampling_factor=5,
                  # Encoder and decoder arguments
                  embedding_dim=60,
                  num_attn_heads=9,

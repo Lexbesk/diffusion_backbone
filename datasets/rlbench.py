@@ -140,13 +140,9 @@ class PeractTwoCamDataset(RLBenchDataset):
     tasks = PERACT_TASKS
     variations = range(0, 199)
     cameras = ("wrist", "front")
-    train_copies = 10  # how many copies of the dataset to load
-
-    def _get_rgb(self, idx):
-        return to_tensor(self.annos['rgb'][idx])[-2:]
-
-    def _get_pcd(self, idx):
-        return to_tensor(self.annos['depth'][idx])[-2:]
+    camera_inds = [2, 3]
+    train_copies = 10
+    camera_inds2d = None
 
 
 class PeractSingleCamDataset(RLBenchDataset):
@@ -154,13 +150,9 @@ class PeractSingleCamDataset(RLBenchDataset):
     tasks = PERACT_TASKS
     variations = range(0, 199)
     cameras = ("front",)
-    train_copies = 10  # how many copies of the dataset to load
-
-    def _get_rgb(self, idx):
-        return to_tensor(self.annos['rgb'][idx])[-1:]
-
-    def _get_pcd(self, idx):
-        return to_tensor(self.annos['depth'][idx])[-1:]
+    camera_inds = [3]
+    train_copies = 10
+    camera_inds2d = None
 
 
 class Peract2Dataset(RLBenchDataset):
@@ -195,6 +187,7 @@ class Peract2Dataset3cam(RLBenchDataset):
     train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
 
+<<<<<<< HEAD
 class Mobaloha3cam(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = MOBALOHA_TASKS
@@ -203,3 +196,14 @@ class Mobaloha3cam(RLBenchDataset):
     camera_inds = (0, 1, 2)  # use only front, wrist_left and wrist_right
     train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
+=======
+
+class Peract2Dataset3cam2Dwrist(RLBenchDataset):
+    """RLBench dataset under Peract2 setup."""
+    tasks = PERACT2_TASKS
+    variations = range(0, 199)
+    cameras = ("front", "wrist_left", "wrist_right")
+    camera_inds = (0,)  # use only front, wrist_left and wrist_right
+    train_copies = 10  # how many copies of the dataset to load
+    camera_inds2d = (3, 4)
+>>>>>>> fba03b992aa11f50c8afdff88a7c132ac724fb88

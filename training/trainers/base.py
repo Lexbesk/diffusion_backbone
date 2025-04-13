@@ -103,6 +103,8 @@ class BaseTrainTester:
         # Initialize model with arguments
         _model = self.model_cls(
             backbone=self.args.backbone,
+            output_level=self.args.output_level,
+            upsample=self.args.upsample,
             finetune_backbone=self.args.finetune_backbone,
             finetune_text_encoder=self.args.finetune_text_encoder,
             num_vis_instr_attn_layers=self.args.num_vis_instr_attn_layers,

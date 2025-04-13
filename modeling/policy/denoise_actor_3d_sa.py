@@ -9,6 +9,8 @@ class DenoiseActor(BaseDenoiseActor):
     def __init__(self,
                  # Encoder arguments
                  backbone="clip",
+                 output_level="res3",
+                 upsample=False,
                  finetune_backbone=False,
                  finetune_text_encoder=False,
                  num_vis_instr_attn_layers=2,
@@ -26,6 +28,8 @@ class DenoiseActor(BaseDenoiseActor):
                  denoise_model="ddpm"):
         super().__init__(
             backbone=backbone,
+            output_level=output_level,
+            upsample=upsample,
             finetune_backbone=finetune_backbone,
             finetune_text_encoder=finetune_text_encoder,
             num_vis_instr_attn_layers=num_vis_instr_attn_layers,

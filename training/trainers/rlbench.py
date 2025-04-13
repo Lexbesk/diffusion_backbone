@@ -18,13 +18,16 @@ class RLBenchTrainTester(BaseTrainTester):
             K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
+                translate=0.05,
                 scale=(0.75, 1.25),
                 padding_mode="reflection",
                 p=1.0
             ),
+            K.RandomRotation((-5, 5), p=0.3),
             K.RandomResizedCrop(
                 size=(im_size, im_size),
-                scale=(0.7, 1.0)
+                scale=(0.95, 1.05),
+                p=0.1
             )
         ).cuda()
 

@@ -47,6 +47,8 @@ def parse_arguments():
         ('keypose_only', str2bool, True),
         # Model arguments: encoder
         ('backbone', str, "clip"),
+        ('output_level', str, "res3"),
+        ('upsample', str2bool, False),
         ('finetune_backbone', str2bool, False),
         ('finetune_text_encoder', str2bool, False),
         ('fps_subsampling_factor', int, 5),
@@ -98,6 +100,7 @@ if __name__ == '__main__':
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)

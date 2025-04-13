@@ -12,6 +12,8 @@ class DenoiseActor(BaseDenoiseActor):
     def __init__(self,
                  # Encoder arguments
                  backbone="clip",
+                 output_level="res3",
+                 upsample=False,
                  finetune_backbone=False,
                  finetune_text_encoder=False,
                  num_vis_instr_attn_layers=2,
@@ -28,11 +30,6 @@ class DenoiseActor(BaseDenoiseActor):
                  denoise_timesteps=100,
                  denoise_model="ddpm"):
         super().__init__(
-            backbone=backbone,
-            finetune_backbone=finetune_backbone,
-            finetune_text_encoder=finetune_text_encoder,
-            num_vis_instr_attn_layers=num_vis_instr_attn_layers,
-            fps_subsampling_factor=fps_subsampling_factor,
             embedding_dim=embedding_dim,
             num_attn_heads=num_attn_heads,
             nhist=nhist,
@@ -46,6 +43,8 @@ class DenoiseActor(BaseDenoiseActor):
         # Vision-language encoder, runs only once
         self.encoder = Encoder(
             backbone=backbone,
+            output_level=output_level,
+            upsample=upsample,
             embedding_dim=embedding_dim,
             nhist=nhist * nhand,
             num_attn_heads=num_attn_heads,

@@ -12,6 +12,8 @@ import utils.pytorch3d_transforms as pytorch3d_transforms
 
 ROOT = '/data/group_data/katefgroup/VLA/calvin_dataset/task_ABC_D'
 STORE_PATH = '/data/group_data/katefgroup/VLA/CALVIN_zarr'
+ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/task_ABC_D'
+STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/zarr_datasets/CALVIN_zarr'
 STORE_EVERY = 1  # in keyposes
 SUBSAMPLE = 3
 IM_SIZE = 160
