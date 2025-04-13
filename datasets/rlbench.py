@@ -187,7 +187,6 @@ class Peract2Dataset3cam(RLBenchDataset):
     train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
 
-<<<<<<< HEAD
 class Mobaloha3cam(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = MOBALOHA_TASKS
@@ -196,7 +195,7 @@ class Mobaloha3cam(RLBenchDataset):
     camera_inds = (0, 1, 2)  # use only front, wrist_left and wrist_right
     train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
-=======
+
 
 class Peract2Dataset3cam2Dwrist(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
@@ -206,4 +205,4 @@ class Peract2Dataset3cam2Dwrist(RLBenchDataset):
     camera_inds = (0,)  # use only front, wrist_left and wrist_right
     train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = (3, 4)
->>>>>>> fba03b992aa11f50c8afdff88a7c132ac724fb88
+

@@ -1,22 +1,26 @@
 main_dir=Mobaloha
 
+#train_data_dir=/data/user_data/jiahex/train_data/3cams_keypose_zarr/train.zarr
+#eval_data_dir=/data/user_data/jiahex/train_data/3cams_keypose_zarr/val.zarr
+
 train_data_dir=/ws/train_data/3cams_keypose_zarr/train.zarr
 eval_data_dir=/ws/train_data/3cams_keypose_zarr/val.zarr
+
 train_instructions=instructions/mobaloha/instructions.json
 val_instructions=instructions/mobaloha/instructions.json
 
 dataset=Mobaloha
 num_workers=4
-B=2
-B_val=4
+B=32
+B_val=50
 
 # Training/testing arguments, change these for HPT
-val_freq=100
+val_freq=10000
 eval_only=false
 lr=1e-4
 lr_scheduler=constant
 wd=5e-3
-train_iters=600000
+train_iters=200000
 
 # Model arguments, change (some of) these for new architectures
 model_type=denoise3d

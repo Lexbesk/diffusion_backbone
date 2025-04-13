@@ -2,7 +2,7 @@ from .calvin import CALVINDataset
 from .rlbench import (
     Peract2SingleCamDataset,
     Peract2Dataset3cam,
-    Mobaloha3cam
+    Mobaloha3cam,
     Peract2Dataset3cam2Dwrist,
     PeractDataset,
     PeractTwoCamDataset
@@ -20,7 +20,7 @@ def fetch_dataset_class(dataset_name):
         "Peract": PeractDataset,
         "PeractTwoCam": PeractTwoCamDataset,
         'Calvin': CALVINDataset,
-        'RH20T': RH20TDataset
+        'RH20T': RH20TDataset,
         "Mobaloha": Mobaloha3cam,
     }
     
