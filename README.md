@@ -1,5 +1,15 @@
 
 # Installation
+NEW:
+```
+> conda create -y --name robot_26 python=3.10
+> conda activate robot_26
+> pip install torch torchvision torchaudio
+> pip install einops tqdm transformers zarr diffusers peft kornia tensorboard
+> pip install torch-cluster -f https://data.pyg.org/whl/torch-2.6.0%2Bcu124.html
+```
+
+OLD:
 Create a conda environment with the following command:
 ```
 > conda create --name 3dda-pt24 python=3.10
@@ -11,6 +21,8 @@ Create a conda environment with the following command:
 > pip install --upgrade https://download.pytorch.org/whl/cu124/xformers-0.0.28.post1-cp310-cp310-manylinux_2_28_x86_64.whl#sha256=cf3f05bb71be32c96c587975798abd2e0886e921bd268f5ecb653ceef402ace3
 > pip install torch-cluster -f https://data.pyg.org/whl/torch-2.4.1%2Bcu124.html
 ```
+
+open_clip_torch
 
 ### Install CALVIN locally
 
