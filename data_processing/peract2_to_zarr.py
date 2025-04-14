@@ -16,18 +16,15 @@ from data_processing.rlbench_utils import (
 
 
 ROOT = '/data/group_data/katefgroup/VLA/peract2_raw_squash/'
-STORE_PATH = '/data/user_data/ngkanats/Peract2_zarr/'
+STORE_PATH = '/data/group_data/katefgroup/VLA/zarr_datasets/Peract2_zarr/'
 STORE_EVERY = 1  # in keyposes
-NCAM = 5
+NCAM = 3
 IM_SIZE = 256
 DEPTH_SCALE = 2**24 - 1
 
 
 def all_tasks_main(split, tasks):
-    cameras = [
-        "front", "over_shoulder_left", "over_shoulder_right",
-        "wrist_left", "wrist_right"
-    ]
+    cameras = ["front", "wrist_left", "wrist_right"]
     task2id = {task: t for t, task in enumerate(tasks)}
 
     # Initialize zarr
@@ -56,6 +53,20 @@ def all_tasks_main(split, tasks):
         )
         zarr_file.create_dataset(
             "action",
+            shape=(0, 1, 2, 8),
+            chunks=(STORE_EVERY, 1, 2, 8),
+            compressor=compressor,
+            dtype="float32"
+        )
+        zarr_file.create_dataset(
+            "proprioception_joints",
+            shape=(0, 1, 2, 8),
+            chunks=(STORE_EVERY, 1, 2, 8),
+            compressor=compressor,
+            dtype="float32"
+        )
+        zarr_file.create_dataset(
+            "action_joints",
             shape=(0, 1, 2, 8),
             chunks=(STORE_EVERY, 1, 2, 8),
             compressor=compressor,
@@ -143,8 +154,21 @@ def all_tasks_main(split, tasks):
                 prop = np.concatenate([prop_2, prop_1, prop], 1)
                 prop = prop.reshape(len(prop), 3, 2, 8)
 
-                # Action (keyframes, 3, 2, 8)
+                # Action (keyframes, 1, 2, 8)
                 actions = states[1:].reshape(len(states[1:]), 1, 2, 8)
+
+                # Proprioception in joints (keyframes, 3, 2, 8)
+                states = np.stack([np.concatenate([
+                    demo[k].left.joint_positions,
+                    [demo[k].left.gripper_open],
+                    demo[k].right.joint_positions,
+                    [demo[k].right.gripper_open]
+                ]) for k in key_frames]).astype(np.float32)
+                # Store current eef pose as well as two previous ones
+                prop_joints = states[:-1].reshape(len(states[:-1]), 1, 2, 8)
+
+                # Action in joints (keyframes, 1, 2, 8)
+                actions_joints = states[1:].reshape(len(states[1:]), 1, 2, 8)
 
                 # Extrinsics (keyframes, cameras, 4, 4)
                 extrinsics = np.stack([
@@ -179,6 +203,8 @@ def all_tasks_main(split, tasks):
                 zarr_file['depth'].append(depth)
                 zarr_file['proprioception'].append(prop)
                 zarr_file['action'].append(actions)
+                zarr_file['proprioception_joints'].append(prop_joints)
+                zarr_file['action_joints'].append(actions_joints)
                 zarr_file['extrinsics'].append(extrinsics)
                 zarr_file['intrinsics'].append(intrinsics)
                 zarr_file['task_id'].append(task_id)
