@@ -24,14 +24,12 @@ class BaseDataset(Dataset):
         self._instructions = self._load_instructions(instructions)
 
         # Load all annotations lazily
-        print("root: ", root)
         self.annos = read_zarr_with_cache(root, mem_gb=mem_limit)
         # Sanity check
-        for key in self.annos:
-            print(key, len(self.annos[key]))
         len_ = len(self.annos['action'])
         for key in self.annos:
             assert len(self.annos[key]) == len_, f'length mismatch in {key}'
+        print(f"Found {len(self.annos['action'])} samples")
 
     def _load_instructions(self, instruction_file):
         return None

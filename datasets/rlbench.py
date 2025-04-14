@@ -1,6 +1,8 @@
 import json
 import random
 
+import numpy as np
+
 from .base import BaseDataset
 from .utils import to_tensor
 
@@ -111,20 +113,49 @@ class RLBenchDataset(BaseDataset):
         }
 
 
+class TaskRLBenchDataset(RLBenchDataset):
+    quat_format= 'xyzw'
+
+    def __init__(
+        self,
+        root,
+        instructions,
+        copies=None,
+        relative_action=False,
+        mem_limit=8,
+        actions_only=False
+    ):
+        super().__init__(
+            root=root,
+            instructions=instructions,
+            copies=copies,
+            relative_action=relative_action,
+            mem_limit=mem_limit,
+            actions_only=actions_only
+        )
+        tids = np.where(self.annos['task_id'][:] == 4)[0]
+        self._min = tids.min()
+        self._max = tids.max()
+
+    def __getitem__(self, idx):
+        idx = idx % (self._max - self._min + 1)
+        idx = idx + self._min
+        assert self.annos['task_id'][idx] == 4
+        return super().__getitem__(idx)
+
+
 class PeractDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
     tasks = PERACT_TASKS
-    variations = range(0, 199)
     cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
     camera_inds = None
-    train_copies = 10  # how many copies of the dataset to load
+    train_copies = 10
     camera_inds2d = None
 
 
 class PeractTwoCamDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
     tasks = PERACT_TASKS
-    variations = range(0, 199)
     cameras = ("wrist", "front")
     camera_inds = [2, 3]
     train_copies = 10
@@ -134,7 +165,6 @@ class PeractTwoCamDataset(RLBenchDataset):
 class PeractSingleCamDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
     tasks = PERACT_TASKS
-    variations = range(0, 199)
     cameras = ("front",)
     camera_inds = [3]
     train_copies = 10
@@ -144,41 +174,34 @@ class PeractSingleCamDataset(RLBenchDataset):
 class Peract2Dataset(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = PERACT2_TASKS
-    variations = range(0, 199)
-    cameras = (
-        "front", "over_shoulder_left", "over_shoulder_right",
-        "wrist_left", "wrist_right"
-    )
+    cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = None
-    train_copies = 10  # how many copies of the dataset to load
+    train_copies = 10
     camera_inds2d = None
 
 
 class Peract2SingleCamDataset(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = PERACT2_TASKS
-    variations = range(0, 199)
     cameras = ("front",)
     camera_inds = (0,)  # use only front camera
-    train_copies = 10  # how many copies of the dataset to load
+    train_copies = 10
     camera_inds2d = None
 
 
-class Peract2Dataset3cam(RLBenchDataset):
+class SinglePeract2Dataset(TaskRLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = PERACT2_TASKS
-    variations = range(0, 199)
     cameras = ("front", "wrist_left", "wrist_right")
-    camera_inds = (0, 3, 4)  # use only front, wrist_left and wrist_right
-    train_copies = 10  # how many copies of the dataset to load
+    camera_inds = None
+    train_copies = 10
     camera_inds2d = None
 
 
 class Peract2Dataset3cam2Dwrist(RLBenchDataset):
     """RLBench dataset under Peract2 setup."""
     tasks = PERACT2_TASKS
-    variations = range(0, 199)
     cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = (0,)  # use only front, wrist_left and wrist_right
-    train_copies = 10  # how many copies of the dataset to load
+    train_copies = 10
     camera_inds2d = (3, 4)

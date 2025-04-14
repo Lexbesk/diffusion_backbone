@@ -1,10 +1,11 @@
 from .calvin import CALVINDataset
 from .rlbench import (
+    Peract2Dataset,
     Peract2SingleCamDataset,
-    Peract2Dataset3cam,
     Peract2Dataset3cam2Dwrist,
     PeractDataset,
-    PeractTwoCamDataset
+    PeractTwoCamDataset,
+    SinglePeract2Dataset
 )
 from .rh20t import RH20TDataset
 
@@ -12,13 +13,14 @@ from .rh20t import RH20TDataset
 def fetch_dataset_class(dataset_name):
     """Fetch the dataset class based on the dataset name."""
     dataset_classes = {
-        "Peract2": Peract2SingleCamDataset,
-        "Peract2TC": Peract2Dataset3cam,
+        "Peract2_3dfront_3dwrist": Peract2Dataset,
+        "Peract2_3dfront": Peract2SingleCamDataset,
         "Peract2_3dfront_2dwrist": Peract2Dataset3cam2Dwrist,
         "Peract": PeractDataset,
         "PeractTwoCam": PeractTwoCamDataset,
         'Calvin': CALVINDataset,
-        'RH20T': RH20TDataset
+        'RH20T': RH20TDataset,
+        "Peract2TCSingle": SinglePeract2Dataset
     }
     
     if dataset_name not in dataset_classes:
