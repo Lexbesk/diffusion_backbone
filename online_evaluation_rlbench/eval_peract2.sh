@@ -1,4 +1,4 @@
-exp=flow_bimanual_3dda_train_q
+exp=flow_bimanual
 tasks=(
     bimanual_push_box
     bimanual_lift_ball
@@ -16,7 +16,8 @@ tasks=(
 )
 
 # Testing arguments
-checkpoint=peract2_front_wrist3d_2.pth
+checkpoint=train_logs/Peract2/denoise3d-Peract2TCSingle-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10/best.pth
+checkpoint_alias=denoise3d-Peract2TCSingle-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10
 num_episodes=100
 max_tries=2
 max_steps=25
@@ -25,11 +26,8 @@ collision_checking=false
 seed=0
 # Dataset arguments
 data_dir=/data/group_data/katefgroup/VLA/peract2_raw_squash/test/
-instructions=instructions/peract2/instructions.json
-dataset=Peract2TC
+dataset=Peract2_3dfront_3dwrist
 image_size=256,256
-# Logging arguments
-verbose=false
 # Model arguments
 model_type=denoise3d
 bimanual=true
@@ -56,11 +54,9 @@ for ((i=0; i<$num_ckpts; i++)); do
         --collision_checking $collision_checking \
         --seed $seed \
         --data_dir $data_dir \
-        --test_instructions $instructions \
         --dataset $dataset \
         --image_size $image_size \
-        --output_file eval_logs/$exp/$checkpoint/seed$seed/${tasks[$i]}/eval.json  \
-        --verbose $verbose \
+        --output_file eval_logs/$exp/$checkpoint_alias/seed$seed/${tasks[$i]}/eval.json  \
         --model_type $model_type \
         --bimanual $bimanual \
         --prediction_len $prediction_len \
@@ -76,4 +72,4 @@ for ((i=0; i<$num_ckpts; i++)); do
 done
 
 python online_evaluation_rlbench/collect_results.py \
-    --folder eval_logs/$exp/$checkpoint/seed$seed/
+    --folder eval_logs/$exp/$checkpoint_alias/seed$seed/

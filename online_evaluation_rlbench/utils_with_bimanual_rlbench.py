@@ -11,7 +11,6 @@ import einops
 
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
-from rlbench.task_environment import TaskEnvironment
 from rlbench.action_modes.action_mode import BimanualMoveArmThenGripper
 from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
 from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning
@@ -121,30 +120,15 @@ class Mover:
 
 class Actioner:
 
-    def __init__(
-        self,
-        policy=None,
-        instructions=None,
-        apply_cameras=("over_shoulder_left", "over_shoulder_right", "wrist_left", "wrist_right" "front")
-    ):
+    def __init__(self, policy=None):
         self._policy = policy
-        self._instructions = instructions
-        self._apply_cameras = apply_cameras
-
-        self._actions = {}
-        self._instr = None
-        self._task_str = None
-
         self._policy.eval()
+        self._instr = None
 
-    def load_episode(self, task_str, variation):
-        self._task_str = task_str
-        self._instr = [random.choice(self._instructions[task_str][str(variation)])]
-        self._task_id = torch.tensor(TASK_TO_ID[task_str]).unsqueeze(0)
-        self._actions = {}
+    def load_episode(self, descriptions):
+        self._instr = [random.choice(descriptions)]
 
-    def predict(self, rgbs, pcds, gripper,
-                prediction_len=None):
+    def predict(self, rgbs, pcds, gripper, prediction_len=1):
         """
         Args:
             rgbs: (bs, num_hist, num_cameras, 3, H, W)
@@ -156,11 +140,6 @@ class Actioner:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
         """
         output = {"action": None}
-
-        rgbs = rgbs / 2 + 0.5  # in [0, 1]
-
-        if self._instr is None:
-            raise ValueError()
 
         gripper = gripper.unflatten(-1, (2, -1))  # (1, nhist, nhand=2, 7)
 
@@ -175,7 +154,6 @@ class Actioner:
             gripper[..., :7],
             run_inference=True
         )
-
         return output
 
     @property
@@ -209,17 +187,10 @@ class RLBenchEnv:
             image_size, apply_rgb, apply_depth, apply_pc, apply_cameras
         )
 
-        # ??? Change this to BiManual
-        # 1. Select a control mode for the arm (arm_action_mode) - right now it is running a planner to reach a pose
-        # 2. Select a control mode for the gripper (gripper_action_mode) - it is discrete open or close here
-        # These are given to an overall action mode that only moves the gripper after moving the arm.
         self.action_mode = BimanualMoveArmThenGripper(
             arm_action_mode=BimanualEndEffectorPoseViaPlanning(collision_checking=collision_checking),
             gripper_action_mode=BimanualDiscrete()
         )
-        # The right and left actions are appended together like from :7 and 7:
-
-        # Define a headless environment (this creates the rl bench scene) with the given action mode.
         self.env = Environment(
             self.action_mode, str(data_path), self.obs_config,
             headless=headless, robot_setup="dual_panda"
@@ -253,8 +224,7 @@ class RLBenchEnv:
                                  [obs.left.gripper_open],
                                  obs.right.gripper_pose,
                                  [obs.right.gripper_open]])
-
-        # action is an array of length 16 = (7+1)*2; 7 is pose and 1 is open flag, 2 is for 2 arms
+        # action is an array of length 16 = (7+1)*2
 
         return state_dict, torch.from_numpy(action).float()
 
@@ -265,7 +235,16 @@ class RLBenchEnv:
         :return: rgb, pcd, gripper
         """
         state_dict, gripper = self.get_obs_action(obs)
-        state = transform(state_dict)
+        obs_rgb = [
+            torch.tensor(state_dict["rgb"][i]).float().permute(2, 0, 1) / 255.0
+            for i in range(len(state_dict["rgb"]))
+        ]
+        obs_pc = [
+            torch.tensor(state_dict["pc"][i]).float().permute(2, 0, 1)
+            if len(state_dict["pc"]) > 0 else None
+            for i in range(len(state_dict["rgb"]))
+        ]
+        state = torch.cat(obs_rgb + obs_pc, dim=0)
         state = einops.rearrange(
             state,
             "(m n ch) h w -> n m ch h w",
@@ -281,27 +260,23 @@ class RLBenchEnv:
 
     def evaluate_task_on_multiple_variations(
         self,
-        task_str: str,
-        max_steps: int,
-        num_variations: int,  # -1 means all variations
-        num_demos: int,
-        actioner: Actioner,
-        max_tries: int = 1,
-        verbose: bool = False,
-        prediction_len=100,
+        task_str,
+        max_steps,
+        actioner,
+        max_tries=1,
+        prediction_len=1,
         num_history=1
     ):
         self.env.launch()
         task_type = task_file_to_task_class(task_str)
         task = self.env.get_task(task_type)
-        task_variations = task.variation_count()
-
-        if num_variations > 0:
-            task_variations = np.minimum(num_variations, task_variations)
-            task_variations = range(task_variations)
-        else:
-            task_variations = glob.glob(os.path.join(self.data_path, task_str, "variation*"))
-            task_variations = [int(n.split('/')[-1].replace('variation', '')) for n in task_variations]
+        task_variations = glob.glob(
+            os.path.join(self.data_path, task_str, "variation*")
+        )
+        task_variations = [
+            int(n.split('/')[-1].replace('variation', ''))
+            for n in task_variations
+        ]
 
         var_success_rates = {}
         var_num_valid_demos = {}
@@ -314,10 +289,8 @@ class RLBenchEnv:
                     task=task,
                     max_steps=max_steps,
                     variation=variation,
-                    num_demos=num_demos // len(task_variations) + 1,
                     actioner=actioner,
                     max_tries=max_tries,
-                    verbose=verbose,
                     prediction_len=prediction_len,
                     num_history=num_history
                 )
@@ -338,49 +311,33 @@ class RLBenchEnv:
     @torch.no_grad()
     def _evaluate_task_on_one_variation(
         self,
-        task_str: str,
-        task: TaskEnvironment,
-        max_steps: int,
-        variation: int,
-        num_demos: int,
-        actioner: Actioner,
-        max_tries: int = 1,
-        verbose: bool = False,
+        task_str,  # this is str
+        task,  # this instance of TaskEnvironment
+        max_steps,
+        variation,
+        actioner,
+        max_tries=1,
         prediction_len=50,
-        num_history=0
+        num_history=1
     ):
         device = actioner.device
 
         success_rate = 0
-        num_valid_demos = 0
         total_reward = 0
+        var_demos = get_stored_demos(
+            amount=-1,
+            dataset_root=self.data_path,
+            variation_number=variation,
+            task_name=task_str,
+            random_selection=False,
+            from_episode_number=0
+        )
 
-        for demo_id in range(num_demos):
-            if verbose:
-                print()
-                print(f"Starting demo {demo_id}")
-
-            try:
-                demo = get_stored_demos(
-                    amount=1,
-                    image_paths=False,
-                    dataset_root=self.data_path,
-                    variation_number=variation,
-                    task_name=task_str,
-                    obs_config=self.obs_config,
-                    random_selection=False,
-                    from_episode_number=demo_id
-                )[0]
-                num_valid_demos += 1
-            except:
-                continue
+        for demo_id, demo in enumerate(var_demos):
 
             grippers = torch.Tensor([]).to(device)
-
-            # descriptions, obs = task.reset()
             descriptions, obs = task.reset_to_demo(demo)
-
-            actioner.load_episode(task_str, variation)
+            actioner.load_episode(descriptions)
 
             move = Mover(task, max_tries=max_tries)
             reward = 0.0
@@ -388,7 +345,7 @@ class RLBenchEnv:
 
             for step_id in range(max_steps):
 
-                # Fetch the current observation, and predict one action
+                # Fetch the current observation and predict one action
                 rgb, pcd, gripper = self.get_rgb_pcd_gripper_from_obs(obs)
                 rgbs_input = rgb.to(device)
                 pcds_input = pcd.to(device)
@@ -412,9 +369,6 @@ class RLBenchEnv:
                     gripper_input,
                     prediction_len=prediction_len
                 )
-
-                if verbose:
-                    print(f"Step {step_id}")
 
                 terminate = True
 
@@ -457,17 +411,13 @@ class RLBenchEnv:
                 f"{max_reward:.2f}",
                 f"SR: {success_rate}/{demo_id+1}",
                 f"SR: {total_reward:.2f}/{demo_id+1}",
-                "# valid demos", num_valid_demos,
+                "# valid demos", demo_id + 1
             )
 
         # Compensate for failed demos
-        if num_valid_demos == 0:
-            assert success_rate == 0
-            valid = False
-        else:
-            valid = True
+        valid = len(var_demos) > 0
 
-        return success_rate, valid, num_valid_demos
+        return success_rate, valid, len(var_demos)
 
     def create_obs_config(
         self, image_size, apply_rgb, apply_depth, apply_pc, apply_cameras, **kwargs
@@ -481,11 +431,10 @@ class RLBenchEnv:
             :param apply_cameras: Desired cameras.
             :return: observation config
         """
-        
-        # Define a config for an unused camera with all rgb, depth and point cloud applications as False.
+        # Define a config for an unused camera with all applications as False.
         unused_cams = CameraConfig()
         unused_cams.set_all(False)
-        
+
         # Define a config for a used camera with the given image size and flags
         used_cams = CameraConfig(
             rgb=apply_rgb,
@@ -493,19 +442,18 @@ class RLBenchEnv:
             depth=apply_depth,
             mask=False,
             image_size=image_size,
-            render_mode=RenderMode.OPENGL3,
-            **kwargs,
+            render_mode=RenderMode.OPENGL3,  # note OPENGL3 for Peract2!
+            **kwargs
         )
 
         # apply_cameras is a tuple with the names(str) of all the cameras
         camera_names = apply_cameras
-        # For each camera name(str), assign the used camera config class to it (defined above)
         cameras = {}
         for name in camera_names:
             cameras[name] = used_cams
 
         obs_config = ObservationConfig(
-            camera_configs = cameras,
+            camera_configs=cameras,
             joint_forces=False,
             joint_positions=False,
             joint_velocities=True,
@@ -514,39 +462,7 @@ class RLBenchEnv:
             gripper_pose=True,
             gripper_open=True,
             gripper_matrix=True,
-            gripper_joint_positions=True,
+            gripper_joint_positions=True
         )
 
         return obs_config
-
-
-def transform(obs_dict):
-    apply_depth = len(obs_dict.get("depth", [])) > 0
-    apply_pc = len(obs_dict["pc"]) > 0
-    num_cams = len(obs_dict["rgb"])
-
-    obs_rgb = []
-    obs_depth = []
-    obs_pc = []
-    for i in range(num_cams):
-        rgb = torch.tensor(obs_dict["rgb"][i]).float().permute(2, 0, 1)
-        depth = (
-            torch.tensor(obs_dict["depth"][i]).float().permute(2, 0, 1)
-            if apply_depth
-            else None
-        )
-        pc = (
-            torch.tensor(obs_dict["pc"][i]).float().permute(2, 0, 1) if apply_pc else None
-        )
-
-        # normalise to [-1, 1]
-        rgb = rgb / 255.0
-        rgb = 2 * (rgb - 0.5)
-
-        obs_rgb += [rgb.float()]
-        if depth is not None:
-            obs_depth += [depth.float()]
-        if pc is not None:
-            obs_pc += [pc.float()]
-    obs = obs_rgb + obs_depth + obs_pc
-    return torch.cat(obs, dim=0)

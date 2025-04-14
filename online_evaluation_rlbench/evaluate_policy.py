@@ -29,12 +29,10 @@ def parse_arguments():
         ('seed', int, 0),
         # Dataset arguments
         ('data_dir', Path, Path(__file__).parent / "demos"),
-        ('test_instructions', str, "instructions/peract/instructions.json"),
         ('dataset', str, "Peract"),
         ('image_size', str, "256,256"),
         # Logging arguments
         ('output_file', Path, Path(__file__).parent / "eval.json"),
-        ('verbose', str2bool, False),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
@@ -132,27 +130,16 @@ if __name__ == "__main__":
             collision_checking=bool(args.collision_checking)
         )
 
-        # Load instructions
-        with open(args.test_instructions, "r") as fid:
-            instruction = json.load(fid)
-
         # Actioner (runs the policy online)
-        actioner = Actioner(
-            policy=model,
-            instructions=instruction,
-            apply_cameras=dataset_class.cameras
-        )
+        actioner = Actioner(model)
 
         # Evaluate
         var_success_rates = env.evaluate_task_on_multiple_variations(
             task_str,
             max_steps=args.max_steps,
-            num_variations=dataset_class.variations[-1] + 1,
-            num_demos=args.num_episodes,
             actioner=actioner,
             max_tries=args.max_tries,
             prediction_len=args.prediction_len,
-            verbose=bool(args.verbose),
             num_history=args.num_history
         )
         print()

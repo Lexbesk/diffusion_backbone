@@ -8,10 +8,10 @@ from natsort import natsorted
 from rlbench.backend.const import *
 
 
-def get_stored_demos(amount=1, image_paths=False,
+def get_stored_demos(amount=1,
                      dataset_root='/data/group_data/katefgroup/VLA/peract_test/',
-                     variation_number=0, task_name='close_jar',
-                     obs_config=None,
+                     variation_number=0,
+                     task_name='close_jar',
                      random_selection=False,
                      from_episode_number=0):
 
