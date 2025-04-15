@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from open_clip import create_model_from_pretrained, get_tokenizer
+# from open_clip import create_model_from_pretrained, get_tokenizer
 
 
 def _expand_token(token, batch_size: int):

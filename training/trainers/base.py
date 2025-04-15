@@ -2,7 +2,6 @@ import os
 import random
 
 import numpy as np
-from omegaconf import OmegaConf
 import torch
 from torch import optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
@@ -14,9 +13,22 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange, tqdm
 
+from modeling.encoder.text import fetch_tokenizers
 from utils.common_utils import count_parameters
 from ..schedulers import TriStageLRScheduler
-from ..utils import compute_metrics, generate_visualizations
+from ..utils import compute_metrics
+
+
+def register_stride_check_hooks(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            def make_hook(nm, p):
+                def hook(grad):
+                    if grad is not None and grad.stride() != p.stride():
+                        print(f"[Hook Mismatch] {nm}")
+                        print(f" - Param stride: {p.stride()}, Grad stride: {grad.stride()}")
+                return hook
+            param.register_hook(make_hook(name, param))
 
 
 class BaseTrainTester:
@@ -24,12 +36,6 @@ class BaseTrainTester:
 
     def __init__(self, args, dataset_cls, model_cls, depth2cloud):
         """Initialize."""
-        if dist.get_rank() == 0:
-            args_dict = vars(args)
-            conf = OmegaConf.create(args_dict)
-            output_file = str(args.log_dir / "config.yaml")
-            OmegaConf.save(conf, output_file)
-
         self.args = args
         self.dataset_cls = dataset_cls
         self.model_cls = model_cls
@@ -171,7 +177,10 @@ class BaseTrainTester:
                 optimizer_grouped_parameters[0]["params"].append(param)
             else:
                 optimizer_grouped_parameters[1]["params"].append(param)
-        optimizer = optim.AdamW(optimizer_grouped_parameters)
+        optimizer = optim.AdamW(
+            optimizer_grouped_parameters,
+            betas=(0.9, 0.95)
+        )
         return optimizer
 
     def get_lr_scheduler(self, optimizer):
@@ -196,10 +205,11 @@ class BaseTrainTester:
 
         # Get model
         model = self.get_model()
+        self.tokenizer = fetch_tokenizers(self.args.backbone)
         if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
             normalizer = self.get_workspace_normalizer()
             model.workspace_normalizer.copy_(normalizer)
-            dist.barrier()
+            dist.barrier(device_ids=[torch.cuda.current_device()])
 
         # Get optimizer
         optimizer = self.get_optimizer(model)
@@ -209,6 +219,9 @@ class BaseTrainTester:
         # Move model to devices
         if torch.cuda.is_available():
             model = model.cuda()
+        model.encoder.feature_pyramid = model.encoder.feature_pyramid.to(memory_format=torch.channels_last)
+        # make sure to compile before DDP!
+        # model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
         model = DistributedDataParallel(
             model, device_ids=[self.args.local_rank],
             broadcast_buffers=False, find_unused_parameters=True
@@ -229,7 +242,7 @@ class BaseTrainTester:
                     model, val_loader, step_id=-1,
                     val_iters=-1
                 )
-            dist.barrier()
+            dist.barrier(device_ids=[torch.cuda.current_device()])
             return model
 
         # Step the lr scheduler to the current step
@@ -267,7 +280,7 @@ class BaseTrainTester:
                     new_loss, best_loss
                 )
                 model.train()
-            dist.barrier()
+            dist.barrier(device_ids=[torch.cuda.current_device()])
 
         return model
 
@@ -315,16 +328,24 @@ class BaseTrainTester:
             sample["proprioception"].cuda(non_blocking=True)
         )
 
+    def _model_forward(self, model, sample, training=True):
+        action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
+            sample, augment=training
+        )
+        instr = self.tokenizer(instr).cuda(non_blocking=True)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out = model(
+                action, action_mask, rgbs, rgb2d, pcds, instr, prop,
+                run_inference=not training
+            )
+        return out  # loss if training, else action
+
     def train_one_step(self, model, optimizer, scaler, lr_scheduler, sample):
         """Run a single training step."""
         optimizer.zero_grad()
 
         # Forward pass
-        action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
-            sample, augment=True
-        )
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            loss = model(action, action_mask, rgbs, rgb2d, pcds, instr, prop)
+        loss = self._model_forward(model, sample)
 
         # Backward pass
         scaler.scale(loss).backward()
@@ -347,16 +368,12 @@ class BaseTrainTester:
             if i == val_iters:
                 break
 
-            action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
-                sample, augment=False
-            )
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                pred_action = model(
-                    action, action_mask, rgbs, rgb2d, pcds, instr, prop,
-                    run_inference=True
-                )
+            pred_action = self._model_forward(model, sample, training=False)
 
-            losses, losses_B = compute_metrics(pred_action, action)
+            losses, losses_B = compute_metrics(
+                pred_action,
+                sample["action"].cuda(non_blocking=True)
+            )
 
             # Gather global statistics
             for n, l in losses.items():
@@ -374,12 +391,6 @@ class BaseTrainTester:
                     if key not in values:
                         values[key] = torch.Tensor([]).to(device)
                     values[key] = torch.cat([values[key], l_task.unsqueeze(0)])
-
-            # Generate visualizations
-            if i == 0 and dist.get_rank() == 0 and step_id > -1:
-                viz_key = f'{split}-viz/viz'
-                viz = generate_visualizations(pred_action, action)
-                self.writer.add_image(viz_key, viz, step_id)
 
         # Log all statistics
         values = {k: v.mean().item() for k, v in values.items()}

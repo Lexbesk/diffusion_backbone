@@ -57,7 +57,8 @@ class Encoder(BaseEncoder):
         self.curr_gripper_embed = nn.Embedding(nhist, embedding_dim)
         self.gripper_context_head = AttentionModule(
             num_layers=3, d_model=embedding_dim, dim_fw=embedding_dim,
-            n_heads=num_attn_heads, rotary_pe=True, use_adaln=False
+            n_heads=num_attn_heads, rotary_pe=True, use_adaln=False,
+            pre_norm=True
         )
 
         # Camera IDs for the 2D cameras
@@ -113,8 +114,7 @@ class Encoder(BaseEncoder):
             - instr_feats: (B, L, F)
         """
         # Encode language
-        device = rgb3d.device
-        instruction = self.text_encoder(text, device)
+        instruction = self.text_encoder(text)
         instr_feats = self.instruction_encoder(instruction)
 
         # 3D camera features
@@ -171,6 +171,7 @@ class Encoder(BaseEncoder):
 
         return rgb3d_feats, rgb2d_feats, pcd, instr_feats
 
+    @torch._dynamo.disable
     def run_fps(self, features, pos):
         # features (B, Np, F)
         # context_pos (B, Np, 3)
@@ -193,6 +194,17 @@ class Encoder(BaseEncoder):
         )
         sampled_inds = sampled_inds.reshape(bs, -1)
         sampled_inds = sampled_inds % npts  # B Np
+        # x = torch.arange(bs * npts).reshape(bs, npts).to(features.device)
+
+        # # Sample indices
+        # idx = torch.multinomial(
+        #     torch.ones_like(x, dtype=torch.float),
+        #     int(npts // self.fps_subsampling_factor),
+        #     replacement=False
+        # ) % npts
+
+        # # Get values
+        # sampled_inds = torch.gather(x, dim=1, index=idx) % npts
 
         # Sample features
         expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, ch)  # B Np F

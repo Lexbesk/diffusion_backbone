@@ -1,7 +1,6 @@
 from torch import nn
 
-from .multihead_custom_attention import MultiheadCustomAttention as MHA
-from .multihead_memeff_attention import MultiheadCustomAttention as EffMHA
+from .multihead_custom_attention import MultiheadCustomAttention
 
 
 class AdaLN(nn.Module):
@@ -22,6 +21,7 @@ class AdaLN(nn.Module):
         Args:
             x: tensor (B, S, C)
             t: tensor (B, C)
+
         Returns:
             tensor (B, S, C)
         """
@@ -88,15 +88,16 @@ class FFWLayer(DummyLayer):
         Args:
             x: tensor (B, S, C)
             ada_sgnl: tensor (B, C)
+
         Returns:
             tensor (B, S, C)
         """
         # Normalize if pre-norm
-        x = self._norm(x, self.norm, self.pre_norm)
+        x_add = self._norm(x, self.norm, self.pre_norm)
         # Adaptive normalization if applicable
-        x = self._adaln(x, self.adaln, ada_sgnl)
+        x_add = self._adaln(x_add, self.adaln, ada_sgnl)
         # Main FFW
-        x = x + self.ffn(x)
+        x = x + self.ffn(x_add)
         # Normalize if post-norm
         x = self._norm(x, self.norm, not self.pre_norm)
         return x
@@ -106,7 +107,7 @@ class AttentionLayer(DummyLayer):
     """Attention layer, for self-/cross-attention."""
 
     def __init__(self, d_model=256, dropout=0.1, n_heads=8, pre_norm=False,
-                 rotary_pe=False, use_adaln=False, is_self=False, eff=False):
+                 rotary_pe=False, use_adaln=False, is_self=False):
         """Initialize layers, d_model is the encoder dimension."""
         super().__init__(pre_norm=pre_norm)
         self.rotary_pe = rotary_pe
@@ -116,8 +117,9 @@ class AttentionLayer(DummyLayer):
         self.adaln = None
         if use_adaln:
             self.adaln = AdaLN(d_model)
-        attn_cls = EffMHA if eff else MHA
-        self.attention = attn_cls(d_model, n_heads, dropout=dropout)
+        self.attention = MultiheadCustomAttention(
+            d_model, n_heads, dropout=dropout
+        )
         self.dropout = nn.Dropout(dropout)
         self.norm_q = nn.LayerNorm(d_model)
         self.norm_kv = self.norm_q if is_self else nn.LayerNorm(d_model)
@@ -137,12 +139,16 @@ class AttentionLayer(DummyLayer):
             seq2_pos: (B, S2, C) if not rotary, else (B, S2, C, 2)
             seq2_sem_pos: (B, S2, C), semantic embedding
             ada_sgnl: tensor (B, C)
+
         Returns:
             tensor (B, S, C)
         """
         # Normalize if pre-norm
         q1 = self._norm(seq1, self.norm_q, self.pre_norm)
-        k2 = v2 = self._norm(seq2, self.norm_kv, self.pre_norm)
+        if self.is_self:
+            k2 = v2 = self._norm(seq2, self.norm_q, self.pre_norm)
+        else:
+            k2 = v2 = self._norm(seq2, self.norm_kv, self.pre_norm)
         # Add positional embeddings if not rotary - rotary are handled later
         if not self.rotary_pe:
             q1 = self.with_pos_embed(seq1, seq1_pos)
@@ -170,11 +176,11 @@ class AttentionLayer(DummyLayer):
 
 
 class AttentionModule(nn.Module):
-    """Stacking of attention and feed-forwards layers."""
+    """Stacking of attention and feed-forward layers."""
 
     def __init__(self, num_layers, d_model=256, dim_fw=None,
                  dropout=0.1, n_heads=8, pre_norm=False,
-                 rotary_pe=False, use_adaln=False, is_self=False, eff=False):
+                 rotary_pe=False, use_adaln=False, is_self=False):
         super().__init__()
         self.num_layers = num_layers
         self.is_self = is_self
@@ -183,7 +189,7 @@ class AttentionModule(nn.Module):
         for _ in range(num_layers):
             self.attn_layers.append(AttentionLayer(
                 d_model, dropout, n_heads, pre_norm,
-                rotary_pe, use_adaln, is_self, eff
+                rotary_pe, use_adaln, is_self
             ))
             self.ffw_layers.append(FFWLayer(
                 d_model, dim_fw, dropout, use_adaln, pre_norm=False
@@ -197,13 +203,14 @@ class AttentionModule(nn.Module):
         """
         Args:
             seq1: tensor (B, S1, C)
-            seq1_pos: (B, S1, C) if not rotary, else (B, S1, C, 2)
-            seq1_sem_pos: (B, S1, C), semantic embedding
             seq2: tensor (B, S2, C)
             seq2_key_padding_mask: tensor (B, S2)
+            seq1_pos: (B, S1, C) if not rotary, else (B, S1, C, 2)
             seq2_pos: (B, S2, C) if not rotary, else (B, S2, C, 2)
+            seq1_sem_pos: (B, S1, C), semantic embedding
             seq2_sem_pos: (B, S2, C), semantic embedding
             ada_sgnl: tensor (B, C)
+
         Returns:
             tensor (B, S1, C)
         """
@@ -220,4 +227,78 @@ class AttentionModule(nn.Module):
             )
             seq1 = self.ffw_layers[i](seq1, ada_sgnl)
             output.append(seq1)
+        return output
+
+
+class DoubleCrossAttentionModule(nn.Module):
+    """Stacking of two attention and one feed-forward layers."""
+
+    def __init__(self, num_layers, d_model=256, dim_fw=None,
+                 dropout=0.1, n_heads=8, pre_norm=False,
+                 rotary_pe_0=False, rotary_pe_1=False,
+                 use_adaln=False):
+        super().__init__()
+        self.num_layers = num_layers
+        self.attn_layers_0 = nn.ModuleList()
+        self.attn_layers_1 = nn.ModuleList()
+        self.ffw_layers = nn.ModuleList()
+        for _ in range(num_layers):
+            self.attn_layers_0.append(AttentionLayer(
+                d_model, dropout, n_heads, pre_norm,
+                rotary_pe_0, use_adaln, False
+            ))
+            self.attn_layers_1.append(AttentionLayer(
+                d_model, dropout, n_heads, pre_norm,
+                rotary_pe_1, use_adaln, False
+            ))
+            self.ffw_layers.append(FFWLayer(
+                d_model, dim_fw, dropout, use_adaln, pre_norm=False
+            ))
+
+    def forward(self, seq, seq0, seq1,
+                seq0_key_padding_mask=None, seq1_key_padding_mask=None,
+                seq_pos_0=None, seq0_pos=None, seq_pos_1=None, seq1_pos=None,
+                seq_sem_pos_0=None, seq0_sem_pos=None,
+                seq_sem_pos_1=None, seq1_sem_pos=None,
+                ada_sgnl=None):
+        """
+        Here seq attends to seq0 first, seq1 next, with different pos embed.
+
+        Args:
+            seq: tensor (B, S, C)
+            seq0: tensor (B, S0, C)
+            seq1: tensor (B, S1, C)
+            seq0_key_padding_mask: tensor (B, S0)
+            seq1_key_padding_mask: tensor (B, S1)
+            seq_pos_0: (B, S, C) if not rotary, else (B, S, C, 2), first att
+            seq0_pos: (B, S0, C) if not rotary, else (B, S0, C, 2)
+            seq_pos_1: (B, S, C) if not rotary, else (B, S, C, 2), second att
+            seq1_pos: (B, S1, C) if not rotary, else (B, S1, C, 2)
+            seq_sem_pos0: (B, S, C), semantic embedding, first att
+            seq0_sem_pos: (B, S0, C), semantic embedding
+            seq_sem_pos1: (B, S, C), semantic embedding, second att
+            seq1_sem_pos: (B, S1, C), semantic embedding
+            ada_sgnl: tensor (B, C)
+
+        Returns:
+            tensor (B, S1, C)
+        """
+        output = []
+        for i in range(self.num_layers):
+            seq = self.attn_layers_0[i](
+                seq, seq0,
+                seq0_key_padding_mask,
+                seq_pos_0, seq0_pos,
+                seq_sem_pos_0, seq0_sem_pos,
+                ada_sgnl
+            )
+            seq = self.attn_layers_1[i](
+                seq, seq1,
+                seq1_key_padding_mask,
+                seq_pos_1, seq1_pos,
+                seq_sem_pos_1, seq1_sem_pos,
+                ada_sgnl
+            )
+            seq = self.ffw_layers[i](seq, ada_sgnl)
+            output.append(seq)
         return output

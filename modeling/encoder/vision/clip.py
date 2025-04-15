@@ -1,13 +1,27 @@
 # Adapted from https://github.com/openai/CLIP/blob/main/clip/model.py
 
 import torch
+from torch import nn
 
 import clip
 from clip.model import ModifiedResNet
 
 
+class CLIPTransform(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        _mean = [0.48145466, 0.4578275, 0.40821073]
+        _std = [0.26862954, 0.26130258, 0.27577711]
+        self.register_buffer("mean", torch.tensor(_mean).reshape(1, -1, 1, 1))
+        self.register_buffer("std", torch.tensor(_std).reshape(1, -1, 1, 1))
+
+    def forward(self, img):
+        return (img - self.mean) / self.std
+
+
 def load_clip():
-    clip_model, clip_transforms = clip.load("RN50")
+    clip_model, _ = clip.load("RN50")
     state_dict = clip_model.state_dict()
     layers = tuple([len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}")))
                     for b in [1, 2, 3, 4]])
@@ -15,8 +29,8 @@ def load_clip():
     heads = state_dict["visual.layer1.0.conv1.weight"].shape[0] * 32 // 64
     backbone = ModifiedResNetFeatures(layers, output_dim, heads)
     backbone.load_state_dict(clip_model.visual.state_dict())
-    normalize = clip_transforms.transforms[-1]
-    return backbone, normalize
+    # normalize = clip_transforms.transforms[-1]
+    return backbone, CLIPTransform()
 
 
 class ModifiedResNetFeatures(ModifiedResNet):

@@ -11,7 +11,7 @@ eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
 train_instructions=instructions/peract2/instructions.json
 val_instructions=instructions/peract2/instructions.json
 
-dataset=Peract2_3dfront_3dwrist
+dataset=Peract2_3dfront_2dwrist
 num_workers=4
 B=64
 B_val=64
@@ -25,7 +25,7 @@ wd=1e-10
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3d  # denoise3ddf
+model_type=denoise3d_2dwrist  # denoise3ddf
 bimanual=true
 keypose_only=true
 
@@ -45,11 +45,10 @@ relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=test_fastest_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=peract2_front_wrist3d_2.pth
 
-ngpus=1
+ngpus=4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \

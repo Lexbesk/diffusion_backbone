@@ -80,8 +80,7 @@ class Encoder(BaseEncoder):
             - instr_feats: (B, L, F)
         """
         # Encode language
-        device = rgb2d.device if rgb3d is None else rgb3d.device
-        instruction = self.text_encoder(text, device)
+        instruction = self.text_encoder(text)
         instr_feats = self.instruction_encoder(instruction)
 
         # 3D camera features

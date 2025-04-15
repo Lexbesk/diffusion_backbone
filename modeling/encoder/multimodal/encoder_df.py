@@ -1,8 +1,9 @@
 import einops
+import torch
 from torch import nn
 from torch.nn import functional as F
 
-from ...utils.position_encodings import RotaryPositionEncoding3D
+from ...utils.position_encodings import RotaryPositionEncoding3D, SinusoidalPosEmb
 from ...utils.layers import AttentionModule
 from .encoder3d import Encoder as BaseEncoder
 
@@ -41,6 +42,8 @@ class Encoder(BaseEncoder):
         )
         self.cv_unproj = nn.Linear(dim_, 2048)
         self.cv_relative_pe_layer = RotaryPositionEncoding3D(dim_)
+        self.pos_embed_2d = SinusoidalPosEmb(embedding_dim)
+        self.rgb2d_proj = nn.Linear(2048, embedding_dim)
 
     def encode_clip(self, rgb3d, rgb2d, pcd, text):
         """
@@ -59,8 +62,7 @@ class Encoder(BaseEncoder):
             - instr_feats: (B, L, F)
         """
         # Encode language
-        device = rgb3d.device
-        instruction = self.text_encoder(text, device)
+        instruction = self.text_encoder(text)
         instr_feats = self.instruction_encoder(instruction)
 
         # 3D camera features
@@ -106,16 +108,32 @@ class Encoder(BaseEncoder):
             rgb2d = einops.rearrange(rgb2d, "bt ncam c h w -> (bt ncam) c h w")
             rgb2d = self.normalize(rgb2d)
             rgb2d_feats = self.backbone(rgb2d)["res5"]
-            rgb2d_feats = F.adaptive_avg_pool2d(rgb2d_feats, 1)
-            rgb2d_feats = self.rgb2d_proj(rgb2d_feats).squeeze(-1).squeeze(-1)
+            _, _, h, w = rgb2d_feats.shape
             rgb2d_feats = einops.rearrange(
                 rgb2d_feats,
-                "(bt ncam) c -> bt ncam c", ncam=num_cameras
+                "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
             )
+            rgb2d_feats = self.rgb2d_proj(rgb2d_feats)
             # Attention from vision to language
             rgb2d_feats = self.vl_attention(seq1=rgb2d_feats, seq2=instr_feats)[-1]
+            # Unsqueeze to add embeddings
+            rgb2d_feats = einops.rearrange(
+                rgb2d_feats,
+                "bt (ncam h w) c -> bt ncam c h w", ncam=num_cameras, h=h, w=w
+            )
             # Add camera embeddings
-            rgb2d_feats = rgb2d_feats + self.camera_ids.weight[None, :num_cameras]
+            rgb2d_feats = (
+                rgb2d_feats
+                + self.camera_ids.weight[None, :num_cameras, :, None, None]
+            )
+            # Add 2D pos embs
+            b, nc, _, h, w = rgb2d_feats.shape
+            _2d_pos = self.pos_embed_2d(
+                torch.arange(0, h * w, device=rgb2d_feats.device)
+            ).reshape(h, w, -1)
+            _2d_pos = einops.rearrange(_2d_pos, "h w c -> c h w")
+            rgb2d_feats = rgb2d_feats + _2d_pos[None, None]
+            rgb2d_feats = einops.rearrange(rgb2d_feats, "b n c h w -> b (n h w) c")
 
         return rgb3d_feats, rgb2d_feats, pcd, instr_feats
 

@@ -111,3 +111,7 @@ if __name__ == '__main__':
     TrainTester = fetch_train_tester(args.dataset)
     train_tester = TrainTester(args, dataset_class, model_class, depth2cloud)
     train_tester.main()
+
+    # Safe program termination
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()

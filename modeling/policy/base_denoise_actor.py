@@ -341,11 +341,10 @@ class TransformerHead(nn.Module):
             dim_fw=4 * embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=False,
             use_adaln=False,
-            is_self=False,
-            eff=False
+            is_self=False
         )
 
         # Estimate attends to context (no subsampling)
@@ -355,11 +354,10 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=False,
-            eff=False
+            is_self=False
         )
 
         # Shared attention layers
@@ -369,11 +367,10 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=True,
-            eff=False
+            is_self=True
         )
 
         # Specific (non-shared) Output layers:
@@ -385,17 +382,17 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=True,
-            eff=False
+            is_self=True
         )
         self.rotation_predictor = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 6)
         )
+        self.rotation_norm = nn.LayerNorm(embedding_dim)
 
         # 2. Position
         self.position_proj = nn.Linear(embedding_dim, embedding_dim)
@@ -405,17 +402,17 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=True,
-            eff=False
+            is_self=True
         )
         self.position_predictor = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
             nn.Linear(embedding_dim, 3)
         )
+        self.position_norm = nn.LayerNorm(embedding_dim)
 
         # 3. Openess
         self.openess_predictor = nn.Sequential(
@@ -562,6 +559,7 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         position_features = position_features[:, :traj_len]
+        position_features = self.position_norm(position_features)
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
@@ -575,6 +573,7 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         rotation_features = rotation_features[:, :traj_len]
+        rotation_features = self.rotation_norm(rotation_features)
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation

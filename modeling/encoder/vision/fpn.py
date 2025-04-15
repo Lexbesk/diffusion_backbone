@@ -1,5 +1,6 @@
 from typing import OrderedDict
 
+import torch
 import torch.nn.functional as F
 from torchvision.ops import FeaturePyramidNetwork
 
@@ -36,8 +37,13 @@ class EfficientFeaturePyramidNetwork(FeaturePyramidNetwork):
                 They are ordered from the highest resolution first.
         """
         # unpack OrderedDict into two lists for easier handling
+        # x_new = OrderedDict()
+        # for k, v in x.items():
+        #     x_new[k] = v.to(memory_format=torch.channels_last)
+        # x = x_new
+        # x = OrderedDict((k, v.to(memory_format=torch.channels_last)) for k, v in x.items())
         names = list(x.keys())
-        x = list(x.values())
+        x = [v.contiguous(memory_format=torch.channels_last) for v in x.values()]
 
         last_inner = self.get_result_from_inner_blocks(x[-1], -1)
         results = []
@@ -48,7 +54,7 @@ class EfficientFeaturePyramidNetwork(FeaturePyramidNetwork):
                 inner_lateral = self.get_result_from_inner_blocks(x[idx], idx)
                 feat_shape = inner_lateral.shape[-2:]
                 inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
-                last_inner = inner_lateral + inner_top_down
+                last_inner = (inner_lateral + inner_top_down).contiguous()
                 results.insert(0, self.get_result_from_layer_blocks(last_inner, idx))
 
                 # Don't go over all levels to save compute
@@ -62,6 +68,9 @@ class EfficientFeaturePyramidNetwork(FeaturePyramidNetwork):
             results, names = self.extra_blocks(results, x, names)
 
         # make it back an OrderedDict
-        out = OrderedDict([(k, v) for k, v in zip(names, results)])
+        out = {
+            k: v.contiguous(memory_format=torch.contiguous_format)
+            for k, v in zip(names, results)
+        }
 
         return out

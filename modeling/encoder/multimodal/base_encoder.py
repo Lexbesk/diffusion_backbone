@@ -35,7 +35,7 @@ class Encoder(nn.Module):
         # Attention from vision to language
         self.vl_attention = AttentionModule(
             num_layers=num_vis_instr_attn_layers, d_model=embedding_dim,
-            dim_fw=4 * embedding_dim, n_heads=num_attn_heads
+            dim_fw=4 * embedding_dim, n_heads=num_attn_heads, pre_norm=True
         )
 
     def forward(self, rgb3d, rgb2d, pcd, instruction, proprio):
@@ -73,7 +73,7 @@ class Encoder(nn.Module):
         # Use the current end-effector position as rgb2d position
         rgb2d_pos = None
         if rgb2d_feats is not None:
-            _prop = proprio.reshape(len(proprio), -1, rgb2d_feats.size(1), 9)
+            _prop = proprio.reshape(len(proprio), -1, rgb2d.size(1), 9)
             rgb2d_pos = _prop[:, -1, :, :3]
 
         # Use the current end-effector position as language 'position'

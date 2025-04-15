@@ -1,23 +1,31 @@
 import transformers
 import torch
-import torch.nn as nn
+from torch import nn
 
 
-class ClipTextEncoder(nn.Module):
+class ClipTokenizer:
 
     def __init__(self):
         super().__init__()
         self.tokenizer = transformers.CLIPTokenizer.from_pretrained(
             "openai/clip-vit-base-patch32"
         )
+
+    @torch.inference_mode()
+    def __call__(self, instructions):
+        return self.tokenizer(
+            instructions,
+            padding="longest", return_tensors="pt"
+        )["input_ids"]
+
+
+class ClipTextEncoder(nn.Module):
+
+    def __init__(self):
+        super().__init__()
         self.model = transformers.CLIPTextModel.from_pretrained(
             "openai/clip-vit-base-patch32"
         )
 
-    @torch.inference_mode()
-    def forward(self, instructions, device):
-        tokens = self.tokenizer(instructions, padding="longest")["input_ids"]
-        tokens = torch.tensor(tokens).to(device)
-        encodings = self.model(tokens).last_hidden_state
-
-        return encodings
+    def forward(self, tokens):
+        return self.model(tokens).last_hidden_state

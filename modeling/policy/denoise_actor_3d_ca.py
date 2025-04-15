@@ -85,11 +85,10 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=False,
-            eff=False
+            is_self=False
         )
 
         # Specific (non-shared) Output layers:
@@ -100,11 +99,10 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=False,
-            eff=False
+            is_self=False
         )
 
         # 2. Position
@@ -114,11 +112,10 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=False,
+            pre_norm=True,
             rotary_pe=rotary_pe,
             use_adaln=True,
-            is_self=False,
-            eff=False
+            is_self=False
         )
 
         # Relative positional embeddings

@@ -1,8 +1,3 @@
-import io
-
-import cv2
-from matplotlib import pyplot as plt
-import numpy as np
 from torch.nn import functional as F
 
 
@@ -34,67 +29,3 @@ def compute_metrics(pred, gt):
     }
 
     return ret_1, ret_2
-
-
-def fig_to_numpy(fig, dpi=60):
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi)
-    buf.seek(0)
-    img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
-    buf.close()
-    img = cv2.imdecode(img_arr, 1)
-    return img
-
-
-def generate_visualizations(pred, gt, box_size=0.3):
-    batch_idx = 0
-    pred = pred[batch_idx].detach().cpu().numpy()
-    gt = gt[batch_idx].detach().cpu().numpy()
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = plt.axes(projection='3d')
-    if pred.ndim == 2 and gt.ndim == 2:
-        ax.scatter3D(
-            pred[:, 0], pred[:, 1], pred[:, 2],
-            color='red', label='pred'
-        )
-        ax.scatter3D(
-            gt[:, 0], gt[:, 1], gt[:, 2],
-            color='blue', label='gt'
-        )
-        center = gt.mean(0)
-    elif pred.ndim == 3 and gt.ndim == 3:
-        ax.scatter3D(
-            pred[:, 0, 0], pred[:, 0, 1], pred[:, 0, 2],
-            color='red', label='pred-left'
-        )
-        if(pred.shape[1]>1):
-            ax.scatter3D(
-                pred[:, 1, 0], pred[:, 1, 1], pred[:, 1, 2],
-                color='magenta', label='pred-right'
-            )
-        ax.scatter3D(
-            gt[:, 0, 0], gt[:, 0, 1], gt[:, 0, 2],
-            color='blue', label='gt-left'
-        )
-        if(pred.shape[1]>1):
-            ax.scatter3D(
-                gt[:, 1, 0], gt[:, 1, 1], gt[:, 1, 2],
-                color='cyan', label='gt-right'
-            )
-        center = np.reshape(gt, (-1, gt.shape[-1])).mean(0)
-    else:
-        raise ValueError("Invalid dimensions")
-
-    ax.set_xlim(center[0] - box_size, center[0] + box_size)
-    ax.set_ylim(center[1] - box_size, center[1] + box_size)
-    ax.set_zlim(center[2] - box_size, center[2] + box_size)
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.set_zticklabels([])
-    plt.legend()
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-
-    img = fig_to_numpy(fig, dpi=120)
-    plt.close()
-    return img.transpose(2, 0, 1)

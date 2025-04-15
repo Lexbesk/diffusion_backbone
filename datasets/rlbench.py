@@ -204,4 +204,4 @@ class Peract2Dataset3cam2Dwrist(RLBenchDataset):
     cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = (0,)  # use only front, wrist_left and wrist_right
     train_copies = 10
-    camera_inds2d = (3, 4)
+    camera_inds2d = (1, 2)
