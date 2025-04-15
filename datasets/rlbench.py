@@ -33,6 +33,20 @@ PERACT2_TASKS = [
 ]
 
 
+MOBALOHA_TASKS = [
+    'open_marker',
+    'handover_block',
+    'insert_battery',
+    'insert_marker_into_cup',
+    'lift_ball',
+
+    'pickup_plate',
+    'stack_blocks',
+    'stack_bowls',
+    'straighten_rope',
+    'ziploc'
+]
+
 class RLBenchDataset(BaseDataset):
     """RLBench dataset."""
     quat_format= 'xyzw'
@@ -195,6 +209,15 @@ class SinglePeract2Dataset(TaskRLBenchDataset):
     cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = None
     train_copies = 10
+    camera_inds2d = None
+
+class Mobaloha3cam(RLBenchDataset):
+    """RLBench dataset under Peract2 setup."""
+    tasks = MOBALOHA_TASKS
+    variations = [0]
+    cameras = ("front", "wrist_left", "wrist_right")
+    camera_inds = (0, 1, 2)  # use only front, wrist_left and wrist_right
+    train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
 
 

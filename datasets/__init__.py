@@ -5,7 +5,8 @@ from .rlbench import (
     Peract2Dataset3cam2Dwrist,
     PeractDataset,
     PeractTwoCamDataset,
-    SinglePeract2Dataset
+    SinglePeract2Dataset,
+    Mobaloha3cam,
 )
 from .rh20t import RH20TDataset
 
@@ -20,7 +21,8 @@ def fetch_dataset_class(dataset_name):
         "PeractTwoCam": PeractTwoCamDataset,
         'Calvin': CALVINDataset,
         'RH20T': RH20TDataset,
-        "Peract2TCSingle": SinglePeract2Dataset
+        "Peract2TCSingle": SinglePeract2Dataset,
+        "Mobaloha": Mobaloha3cam
     }
     
     if dataset_name not in dataset_classes:

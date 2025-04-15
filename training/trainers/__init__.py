@@ -6,6 +6,8 @@ from .rh20t import RH20TTrainTester
 
 def fetch_train_tester(dataset_name):
     dataset_name = dataset_name.lower()
+    if 'mobaloha' in dataset_name:
+        return partial(RLBenchTrainTester, im_size=256)
     if 'peract2' in dataset_name:
         return partial(RLBenchTrainTester, im_size=256)
     if 'rlbench' in dataset_name or 'peract' in dataset_name:
