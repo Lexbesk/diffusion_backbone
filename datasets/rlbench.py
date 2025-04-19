@@ -1,10 +1,8 @@
-import json
 import random
 
 import numpy as np
 
 from .base import BaseDataset
-from .utils import to_tensor
 
 
 PERACT_TASKS = [
@@ -69,9 +67,6 @@ class RLBenchDataset(BaseDataset):
             actions_only=actions_only
         )
 
-    def _load_instructions(self, instruction_file):
-        return json.load(open(instruction_file))
-
     def _get_task(self, idx):
         return [self.tasks[int(self.annos['task_id'][idx])]]
 
@@ -83,17 +78,17 @@ class RLBenchDataset(BaseDataset):
 
     def _get_rgb2d(self, idx):
         if self.camera_inds2d is not None:
-            return to_tensor(self.annos['rgb'][idx])[self.camera_inds2d,]
+            return self._get_attr_by_idx(idx, 'rgb')[self.camera_inds2d,]
         return None
 
     def _get_extrinsics(self, idx):
-        t = to_tensor(self.annos['extrinsics'][idx])
+        t = self._get_attr_by_idx(idx, 'extrinsics')
         if self.camera_inds is not None:
             t = t[self.camera_inds,]
         return t
 
     def _get_intrinsics(self, idx):
-        t = to_tensor(self.annos['intrinsics'][idx])
+        t = self._get_attr_by_idx(idx, 'intrinsics')
         if self.camera_inds is not None:
             t = t[self.camera_inds,]
         return t

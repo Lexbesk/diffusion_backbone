@@ -28,21 +28,24 @@ def read_zarr_with_cache(fname, mem_gb=16):
 
 
 def to_relative_action(actions, anchor_actions, qform='xyzw'):
+    # deltas wrt previous time step
+    # actions: (..., N, 8), anchor_actions: (..., 1, 8)
     assert actions.shape[-1] == 8
 
-    rel_pos = actions[..., :3] - anchor_actions[..., :3]
+    prev = torch.cat([anchor_actions, actions], dim=-2)[..., :-1, :]
+    rel_pos = actions[..., :3] - prev[..., :3]  # (..., N, 3)
 
     if qform == 'xyzw':
         # pytorch3d takes wxyz quaternion, the input is xyzw
         rel_orn = pytorch3d_transforms.quaternion_multiply(
             actions[..., [6, 3, 4, 5]],
-            pytorch3d_transforms.quaternion_invert(anchor_actions[..., [6,3,4,5]])
+            pytorch3d_transforms.quaternion_invert(prev[..., [6,3,4,5]])
         )[..., [1, 2, 3, 0]]
     elif qform == 'wxyz':
         # pytorch3d takes wxyz quaternion, the input is xyzw
         rel_orn = pytorch3d_transforms.quaternion_multiply(
             actions[..., 3:7],
-            pytorch3d_transforms.quaternion_invert(anchor_actions[..., 3:7])
+            pytorch3d_transforms.quaternion_invert(prev[..., 3:7])
         )
     else:
         assert False

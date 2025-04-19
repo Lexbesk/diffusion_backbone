@@ -1,3 +1,5 @@
+import json
+
 from torch.utils.data import Dataset
 
 from .utils import to_tensor, read_zarr_with_cache, to_relative_action
@@ -32,7 +34,10 @@ class BaseDataset(Dataset):
         print(f"Found {len(self.annos['action'])} samples")
 
     def _load_instructions(self, instruction_file):
-        return None
+        return json.load(open(instruction_file))
+
+    def _get_attr_by_idx(self, idx, attr):
+        return to_tensor(self.annos[attr][idx])
 
     def _get_task(self, idx):
         return ["task"]
@@ -40,25 +45,31 @@ class BaseDataset(Dataset):
     def _get_instr(self, idx):
         return ["instruction"]
 
-    def _get_rgb(self, idx):
-        t = to_tensor(self.annos['rgb'][idx])
+    def _get_rgb(self, idx, key='rgb'):
+        t = self._get_attr_by_idx(idx, key)
         if self.camera_inds is not None:
             t = t[self.camera_inds,]
         return t
 
-    def _get_depth(self, idx):
-        t = to_tensor(self.annos['depth'][idx])
+    def _get_depth(self, idx, key='depth'):
+        t = self._get_attr_by_idx(idx, key)
         if self.camera_inds is not None:
             t = t[self.camera_inds,]
         return t
 
     def _get_proprioception(self, idx):
-        return to_tensor(self.annos['proprioception'][idx])
+        return self._get_attr_by_idx(idx, 'proprioception')
 
     def _get_action(self, idx):
-        action = to_tensor(self.annos['action'][idx])
         if self._relative_action:
-            action = to_relative_action(action, action[:1], self.quat_format)
+            if 'rel_action' in self.annos:
+                return self._get_attr_by_idx(idx, 'rel_action')
+            else:
+                action = self._get_attr_by_idx(idx, 'action')
+                prop = self._get_proprioception(idx)[[-1]]
+                action = to_relative_action(action, prop, self.quat_format)
+        else:
+            action = self._get_attr_by_idx(idx, 'action')
         return action
 
     def __getitem__(self, idx):
