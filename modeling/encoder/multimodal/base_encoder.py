@@ -35,7 +35,7 @@ class Encoder(nn.Module):
         # Attention from vision to language
         self.vl_attention = AttentionModule(
             num_layers=num_vis_instr_attn_layers, d_model=embedding_dim,
-            dim_fw=4 * embedding_dim, n_heads=num_attn_heads, pre_norm=True
+            dim_fw=4 * embedding_dim, n_heads=num_attn_heads, pre_norm=False
         )
 
     def forward(self, rgb3d, rgb2d, pcd, instruction, proprio):

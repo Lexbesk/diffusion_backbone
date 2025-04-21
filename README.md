@@ -6,7 +6,6 @@ NEW:
 > conda activate robot_26
 > pip install torch torchvision torchaudio
 > pip install einops tqdm transformers zarr diffusers peft kornia tensorboard
-> pip install torch-cluster -f https://data.pyg.org/whl/torch-2.6.0%2Bcu124.html
 ```
 
 OLD:

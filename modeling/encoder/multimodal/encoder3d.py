@@ -2,7 +2,6 @@ import einops
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch_cluster import fps
 from torchvision.ops import Conv2dNormActivation
 
 from ...utils.position_encodings import RotaryPositionEncoding3D
@@ -32,7 +31,7 @@ class Encoder(BaseEncoder):
             num_vis_instr_attn_layers=num_vis_instr_attn_layers,
             fps_subsampling_factor=fps_subsampling_factor,
             finetune_backbone=finetune_backbone,
-            finetune_text_encoder=finetune_text_encoder,
+            finetune_text_encoder=finetune_text_encoder
         )
 
         # Postprocess scene features
@@ -58,7 +57,7 @@ class Encoder(BaseEncoder):
         self.gripper_context_head = AttentionModule(
             num_layers=3, d_model=embedding_dim, dim_fw=embedding_dim,
             n_heads=num_attn_heads, rotary_pe=True, use_adaln=False,
-            pre_norm=True
+            pre_norm=False
         )
 
         # Camera IDs for the 2D cameras
@@ -171,7 +170,6 @@ class Encoder(BaseEncoder):
 
         return rgb3d_feats, rgb2d_feats, pcd, instr_feats
 
-    @torch._dynamo.disable
     def run_fps(self, features, pos):
         # features (B, Np, F)
         # context_pos (B, Np, 3)
@@ -180,31 +178,7 @@ class Encoder(BaseEncoder):
             return features, pos
 
         bs, npts, ch = features.shape
-
-        batch_indices = torch.arange(
-            bs, device=features.device
-        ).long()
-        batch_indices = batch_indices[:, None].repeat(1, npts)  # B Np
-        batch_indices = batch_indices.flatten(0, 1)
-        sampled_inds = fps(
-            einops.rearrange(features, "b npts c -> (b npts) c").half(),
-            batch_indices,
-            1. / self.fps_subsampling_factor,
-            random_start=True
-        )
-        sampled_inds = sampled_inds.reshape(bs, -1)
-        sampled_inds = sampled_inds % npts  # B Np
-        # x = torch.arange(bs * npts).reshape(bs, npts).to(features.device)
-
-        # # Sample indices
-        # idx = torch.multinomial(
-        #     torch.ones_like(x, dtype=torch.float),
-        #     int(npts // self.fps_subsampling_factor),
-        #     replacement=False
-        # ) % npts
-
-        # # Get values
-        # sampled_inds = torch.gather(x, dim=1, index=idx) % npts
+        sampled_inds = density_based_sampler(features, self.fps_subsampling_factor)
 
         # Sample features
         expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, ch)  # B Np F
@@ -214,3 +188,29 @@ class Encoder(BaseEncoder):
         expanded_inds = sampled_inds.unsqueeze(-1).expand(-1, -1, 3)  # B Np 3
         sampled_pos = torch.gather(pos, 1, expanded_inds)
         return sampled_features, sampled_pos
+
+
+@torch.no_grad()
+def density_based_sampler(features, subsample_factor, k=8):
+    """
+    Args:
+        features: Tensor of shape (B, N, C)
+        subsample_factor: downsampling factor, e.g., 4 keeps 25% of the points
+        k: number of neighbors to compute local density (default: 8)
+
+    Returns:
+        sampled_inds: LongTensor (B, N//factor) with sampled point indices
+    """
+    B, N, C = features.shape
+    # (B, N, N) pairwise distances in feature space
+    dists = torch.cdist(features, features, p=2)  # L2 distance
+
+    # Get average distance to k nearest neighbors (as inverse density estimate)
+    knn_dists, _ = dists.topk(k=k, dim=-1, largest=False)
+    density = knn_dists.mean(dim=-1)  # (B, N), higher = more sparse
+
+    # Choose top M points with highest avg distance (i.e. lowest density)
+    M = N // subsample_factor
+    sampled_inds = density.topk(M, dim=-1, largest=True).indices  # (B, M)
+
+    return sampled_inds
