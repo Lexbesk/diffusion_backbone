@@ -17,7 +17,7 @@ B=64
 B_val=64
 
 # Training/testing arguments, change these for HPT
-val_freq=1000
+val_freq=4000
 eval_only=false
 lr=1e-4
 lr_scheduler=constant
@@ -45,11 +45,11 @@ relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=test_fastest_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=test_fastest_old_dbgd_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=peract2_front_wrist3d_2.pth
 
-ngpus=1
+ngpus=4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \

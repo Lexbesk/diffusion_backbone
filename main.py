@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import random
+import sys
 
 import numpy as np
 import torch
@@ -25,9 +26,9 @@ def parse_arguments():
         ('train_instructions', Path, ''),
         ('val_instructions', Path, ''),
         ('dataset', str, "Peract"),
-        ('num_workers', int, 1),
-        ('batch_size', int, 16),
-        ('batch_size_val', int, 4),
+        ('num_workers', int, 4),
+        ('batch_size', int, 64),
+        ('batch_size_val', int, 64),
         ('memory_limit', float, 8),  # cache limit in GB
         # Logging arguments
         ('base_log_dir', Path, Path(__file__).parent / "train_logs"),
@@ -35,12 +36,12 @@ def parse_arguments():
         ('run_log_dir', Path, "run"),
         # Training and testing arguments
         ('checkpoint', str_none, None),
-        ('val_freq', int, 500),
+        ('val_freq', int, 4000),
         ('eval_only', str2bool, False),
         ('lr', float, 1e-4),
         ('lr_scheduler', str, "constant"),
         ('wd', float, 5e-3),
-        ('train_iters', int, 200000),
+        ('train_iters', int, 600000),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
@@ -53,9 +54,9 @@ def parse_arguments():
         ('finetune_text_encoder', str2bool, False),
         ('fps_subsampling_factor', int, 5),
         # Model arguments: encoder and head
-        ('embedding_dim', int, 144),
-        ('num_attn_heads', int, 9),
-        ('num_vis_instr_attn_layers', int, 2),
+        ('embedding_dim', int, 120),  # must be divisible by 6
+        ('num_attn_heads', int, 8),
+        ('num_vis_instr_attn_layers', int, 3),
         ('num_history', int, 1),
         # Model arguments: head
         ('workspace_normalizer_buffer', float, 0.04),
@@ -68,6 +69,12 @@ def parse_arguments():
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
 
     return parser.parse_args()
+
+
+def suppress_output_on_non_main():
+    if int(os.environ.get("RANK", 0)) != 0:
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
 
 
 if __name__ == '__main__':
@@ -86,21 +93,18 @@ if __name__ == '__main__':
         "Available devices (CUDA_VISIBLE_DEVICES):",
         os.environ.get("CUDA_VISIBLE_DEVICES")
     )
-    print("Device count", torch.cuda.device_count())
+    print("Device count:", torch.cuda.device_count())
     args.local_rank = int(os.environ["LOCAL_RANK"])
-
-    # Seeds
-    torch.manual_seed(args.local_rank)
-    np.random.seed(args.local_rank)
-    random.seed(args.local_rank)
+    suppress_output_on_non_main()
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)
     torch.distributed.init_process_group(backend='nccl', init_method='env://')
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = False
     torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)
@@ -114,4 +118,5 @@ if __name__ == '__main__':
 
     # Safe program termination
     if torch.distributed.is_initialized():
+        torch.cuda.empty_cache()
         torch.distributed.destroy_process_group()

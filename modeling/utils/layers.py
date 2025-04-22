@@ -93,11 +93,11 @@ class FFWLayer(DummyLayer):
             tensor (B, S, C)
         """
         # Normalize if pre-norm
-        x_add = self._norm(x, self.norm, self.pre_norm)
+        x = self._norm(x, self.norm, self.pre_norm)
         # Adaptive normalization if applicable
-        x_add = self._adaln(x_add, self.adaln, ada_sgnl)
+        x = self._adaln(x, self.adaln, ada_sgnl)
         # Main FFW
-        x = x + self.ffn(x_add)
+        x = x + self.ffn(x)
         # Normalize if post-norm
         x = self._norm(x, self.norm, not self.pre_norm)
         return x

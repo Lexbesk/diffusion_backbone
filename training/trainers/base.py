@@ -16,6 +16,7 @@ from tqdm import trange, tqdm
 
 from modeling.encoder.text import fetch_tokenizers
 from utils.common_utils import count_parameters
+import utils.pytorch3d_transforms as pytorch3d_transforms
 from ..schedulers import TriStageLRScheduler
 from ..utils import compute_metrics
 
@@ -218,6 +219,9 @@ class BaseTrainTester:
         """Run main training/testing pipeline."""
         # Get loaders
         train_loader, val_loader, train_sampler = self.get_loaders()
+        # # Warmup
+        # for sample in tqdm(train_loader):
+        #     pass
 
         # Get model
         model = self.get_model()
@@ -236,7 +240,7 @@ class BaseTrainTester:
         if torch.cuda.is_available():
             model = model.cuda()
         # make sure to compile before DDP!
-        model = torch.compile(model, mode="default", fullgraph=True)
+        # model = torch.compile(model, mode="default", fullgraph=True)
         model = DistributedDataParallel(
             model, device_ids=[self.args.local_rank],
             broadcast_buffers=False, find_unused_parameters=True
@@ -394,11 +398,20 @@ class BaseTrainTester:
                 break
 
             pred_action = self._model_forward(model, sample, training=False)
+            gt_action = sample["action"].cuda(non_blocking=True)
+            if self.args.relative_action:
+                pred_action = relative_to_absolute(
+                    pred_action[:, :, 0],
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
+                    qform=self.args.quaternion_format
+                )
+                gt_action = relative_to_absolute(
+                    gt_action[:, :, 0],
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
+                    qform=self.args.quaternion_format
+                )
 
-            losses, losses_B = compute_metrics(
-                pred_action,
-                sample["action"].cuda(non_blocking=True)
-            )
+            losses, losses_B = compute_metrics(pred_action, gt_action)
 
             # Gather global statistics
             for n, l in losses.items():
@@ -514,3 +527,27 @@ def base_collate_fn(batch):
 
 def actions_collate_fn(batch):
     return {"action": torch.stack([item["action"] for item in batch])}
+
+
+def relative_to_absolute(action, proprio, qform='wxyz'):
+    # action (B, T, 8), proprio (B, 1, 7)
+    pos = proprio[..., :3] + action[..., :3].cumsum(1)
+
+    orn = torch.zeros_like(action[..., 3:7])
+    for i in range(action.shape[1]):
+        prev = orn[:, i - 1] if i > 0 else proprio[:, 0, 3:7]
+        if qform == 'xyzw':
+            # pytorch3d takes wxyz quaternion, the input is xyzw
+            orn[:, i] = pytorch3d_transforms.quaternion_multiply(
+                action[:, i][..., [6, 3, 4, 5]],
+                prev[..., [3, 0, 1, 2]]
+            )[..., [1, 2, 3, 0]]
+        elif qform == 'wxyz':
+            orn[:, i] = pytorch3d_transforms.quaternion_multiply(
+                action[:, i][..., 3:7],
+                prev
+            )
+        else:
+            assert False
+
+    return torch.cat([pos, orn, action[..., 7:]], -1)

@@ -1,5 +1,6 @@
 """All datasets can use this class."""
 
+import json
 import os
 
 from kornia import augmentation as K
@@ -128,7 +129,8 @@ def read_zarr_with_cache(fname, mem_gb=16):
 
 class Visualizer:
 
-    def __init__(self, zarr_path, depth2cloud, use_meshcat=False, im_size=256):
+    def __init__(self, zarr_path, depth2cloud, use_meshcat=False, im_size=256,
+                 instruction_file=None):
         self.annos = read_zarr_with_cache(zarr_path, 0.1)
         self.d2c = depth2cloud
         if use_meshcat:
@@ -149,6 +151,8 @@ class Visualizer:
                 p=0.1
             )
         ).cuda()
+        if instruction_file is not None:
+            self._instructions = json.load(open(instruction_file))
 
     def plot_images_depths(self, t, cams=None, img='rgb', depth='depth',
                            save_path=''):

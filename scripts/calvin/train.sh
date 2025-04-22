@@ -3,7 +3,7 @@ main_dir=CALVIN
 if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
     DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
 else
-    DATA_PATH="/data/group_data/katefgroup/VLA"
+    DATA_PATH="/data/user_data/ngkanats"
 fi
 
 train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/train.zarr
@@ -13,8 +13,8 @@ val_instructions=instructions/calvin/val_instructions.json
 
 dataset=Calvin
 num_workers=4
-memory_limit=32
-B=256
+memory_limit=8
+B=128
 B_val=64
 
 # Training/testing arguments, change these for HPT
@@ -46,10 +46,10 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=large_batch_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
+run_log_dir=test$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-ngpus=8
+ngpus=4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \

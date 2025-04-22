@@ -11,7 +11,7 @@ eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
 train_instructions=instructions/peract2/instructions.json
 val_instructions=instructions/peract2/instructions.json
 
-dataset=Peract2TC
+dataset=Peract2_3dfront_3dwrist
 num_workers=4
 B=64
 B_val=64
@@ -21,11 +21,11 @@ val_freq=4000
 eval_only=false
 lr=1e-4
 lr_scheduler=constant
-wd=5e-3
+wd=1e-10
 train_iters=600000
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3dca
+model_type=denoise3ddf
 bimanual=true
 keypose_only=true
 

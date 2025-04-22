@@ -85,7 +85,7 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=False
@@ -99,7 +99,7 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=False
@@ -112,7 +112,7 @@ class TransformerHead(BaseTransformerHead):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=False

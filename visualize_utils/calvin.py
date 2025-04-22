@@ -3,7 +3,29 @@ import os
 import torch
 
 from training.depth2cloud import fetch_depth2cloud
+import utils.pytorch3d_transforms as pytorch3d_transforms
 from visualize_utils.base import Visualizer as BaseVisualizer, visualize_actions_and_point_clouds
+
+
+def relative_to_absolute(action, proprio, qform='wxyz'):
+    # action (B, T, 8), proprio (B, 1, 7)
+    pos = proprio[..., :3] + action[..., :3].cumsum(1)
+
+    if qform == 'xyzw':
+        # pytorch3d takes wxyz quaternion, the input is xyzw
+        orn = pytorch3d_transforms.quaternion_multiply(
+            action[..., [6, 3, 4, 5]],
+            proprio[..., [6,3,4,5]]
+        )[..., [1, 2, 3, 0]]
+    elif qform == 'wxyz':
+        orn = pytorch3d_transforms.quaternion_multiply(
+            action[..., 3:7],
+            proprio[..., 3:7]
+        )
+    else:
+        assert False
+
+    return torch.cat([pos, orn, action[..., 7:]], -1)
 
 
 class Visualizer(BaseVisualizer):
@@ -68,7 +90,7 @@ class Visualizer(BaseVisualizer):
         pc = self.d2c(
             None,
             torch.from_numpy(depths).cuda().float(),
-            torch.from_numpy(self.annos['extrinsics_wrist'][t]).cuda().float()
+            torch.from_numpy(self.annos['extrinsics_wrist'][t]).cuda().float()[None]
         )[1][0]  # Nc 3 h w
         # Grippers
         grippers = []
@@ -79,7 +101,9 @@ class Visualizer(BaseVisualizer):
             else:
                 grippers.append(prop)
         if action:
-            traj = torch.from_numpy(self.annos['action'][t])  # (N, 2, 8) or (N, 8)
+            traj = torch.from_numpy(self.annos['rel_action'][t])  # (N, 2, 8) or (N, 8)
+            prop = torch.from_numpy(self.annos['proprioception'][t][-1])
+            traj = relative_to_absolute(traj, prop[None])
             if len(traj.shape) > 2:
                 for i in range(traj.shape[1]):
                     grippers.extend([t_ for t_ in traj[:, i]])
@@ -95,14 +119,22 @@ class Visualizer(BaseVisualizer):
             savename=save_path + f'wrist_pcd_{t}.jpg'
         )
 
+    def show_language(self, t):
+        t_ = int(self.annos['instr_id'][t])
+        print(self._instructions[t_])
+
 
 if __name__ == '__main__':
-    zarr_path = '/data/group_data/katefgroup/VLA/zarr_datasets/CALVIN_zarr/val.zarr'
+    zarr_path = '/data/user_data/ngkanats/zarr_datasets/CALVIN_zarr/val.zarr'
     depth2cloud = fetch_depth2cloud('calvin')
     use_meshcat = False
     im_size = 160
-    vis = Visualizer(zarr_path, depth2cloud, use_meshcat, im_size)
+    vis = Visualizer(
+        zarr_path, depth2cloud, use_meshcat, im_size,
+        instruction_file='instructions/calvin/val_instructions.json'
+    )
     for t in range(100):
         # vis.plot_images_depths(t)
-        vis.plot_aug_images(t)
+        # vis.plot_aug_images(t)
         # vis.plot_point_cloud_grippers(t)
+        vis.show_language(t)

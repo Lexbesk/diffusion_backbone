@@ -45,7 +45,6 @@ def to_relative_action(actions, anchor_actions, qform='xyzw'):
             pytorch3d_transforms.quaternion_invert(prev[..., [6,3,4,5]])
         )[..., [1, 2, 3, 0]]
     elif qform == 'wxyz':
-        # pytorch3d takes wxyz quaternion, the input is xyzw
         rel_orn = pytorch3d_transforms.quaternion_multiply(
             actions[..., 3:7],
             pytorch3d_transforms.quaternion_invert(prev[..., 3:7])

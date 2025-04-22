@@ -86,7 +86,7 @@ class DenoiseActor(nn.Module):
         if self._relative:  # relative to absolute
             trajectory[..., :3] = (
                 query_trajectory[..., :3]
-                + torch.cumsum(trajectory[..., :3], dim=-1)
+                + torch.cumsum(trajectory[..., :3], dim=1)
             )
 
         return self.prediction_head(

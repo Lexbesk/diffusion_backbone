@@ -21,7 +21,7 @@ class CLIPTransform(nn.Module):
 
 
 def load_clip():
-    clip_model, _ = clip.load("RN50")
+    clip_model, clip_transforms = clip.load("RN50")
     state_dict = clip_model.state_dict()
     layers = tuple([len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}")))
                     for b in [1, 2, 3, 4]])
@@ -30,7 +30,8 @@ def load_clip():
     backbone = ModifiedResNetFeatures(layers, output_dim, heads)
     backbone.load_state_dict(clip_model.visual.state_dict())
     # normalize = clip_transforms.transforms[-1]
-    return backbone, CLIPTransform()
+    normalize = CLIPTransform()
+    return backbone, normalize
 
 
 class ModifiedResNetFeatures(ModifiedResNet):

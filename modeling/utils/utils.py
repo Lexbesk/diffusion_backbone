@@ -19,10 +19,9 @@ https://github.com/papagina/RotationContinuity/blob/master/sanity_test/code/tool
 
 
 def normalize_vector(v, return_mag=False):
-    device = v.device
     batch = v.shape[0]
     v_mag = torch.sqrt(v.pow(2).sum(1))
-    v_mag = torch.max(v_mag, torch.autograd.Variable(torch.FloatTensor([1e-8]).to(device)))
+    v_mag = torch.clamp(v_mag, 1e-8)
     v_mag = v_mag.view(batch, 1).expand(batch, v.shape[1])
     v = v / v_mag
     if return_mag:
@@ -125,7 +124,8 @@ def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
     """
     ret = torch.zeros_like(x)
     positive_mask = x > 0
-    ret[positive_mask] = torch.sqrt(x[positive_mask])
+    # ret[positive_mask] = torch.sqrt(x[positive_mask])
+    ret = torch.where(positive_mask, torch.sqrt(x), ret)
     return ret
 
 
@@ -180,12 +180,18 @@ def matrix_to_quaternion(matrix: torch.Tensor) -> torch.Tensor:
 
     # We floor here at 0.1 but the exact level is not important; if q_abs is small,
     # the candidate won't be picked.
-    flr = torch.tensor(0.1).to(dtype=q_abs.dtype, device=q_abs.device)
-    quat_candidates = quat_by_rijk / (2.0 * q_abs[..., None].max(flr))
+    flr = 0.1
+    q_abs_safe = torch.clamp(q_abs, min=flr)  # ensures stability
 
-    # if not for numerical problems, quat_candidates[i] should be same (up to a sign),
-    # forall i; we pick the best-conditioned one (with the largest denominator)
+    # shape: [..., 4, 4]
+    quat_candidates = quat_by_rijk / (2.0 * q_abs_safe[..., None])
 
-    return quat_candidates[
-        F.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :
-    ].reshape(batch_dim + (4,))
+    # Get best-conditioned candidate per batch using argmax
+    best_idx = q_abs.argmax(dim=-1)  # shape: [...], values in [0, 3]
+
+    # Use gather to extract the best candidate along the quaternion axis
+    # First, expand index shape to match quat_candidates
+    index = best_idx.unsqueeze(-1).unsqueeze(-1)  # [..., 1, 1]
+    index = index.expand(*quat_candidates.shape[:-2], 1, 4)  # [..., 1, 4]
+    best_quat = torch.gather(quat_candidates, dim=-2, index=index).squeeze(-2)
+    return best_quat.reshape(batch_dim + (4,))  # shape: [..., 4]
