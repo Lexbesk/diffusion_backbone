@@ -13,7 +13,7 @@ def fetch_train_tester(dataset_name):
     if 'rlbench' in dataset_name or 'peract' in dataset_name:
         return partial(RLBenchTrainTester, im_size=128)
     if 'calvin' in dataset_name:
-        return CALVINTrainTester
+        return partial(CALVINTrainTester, im_size=160)
     if 'rh20t' in dataset_name:
-        return RH20TTrainTester
+        return partial(RH20TTrainTester, im_size=256)
     return None

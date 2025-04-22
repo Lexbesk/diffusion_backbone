@@ -15,7 +15,6 @@ def compute_metrics(pred, gt):
 
     # Trajectory metrics
     ret_1, ret_2 = {
-        tr + 'action_mse': F.mse_loss(pred, gt),
         tr + 'pos_l2': pos_l2.mean(),
         tr + 'pos_acc_001': (pos_l2 < 0.01).float().mean(),
         tr + 'rot_l1': quat_l1.mean(),

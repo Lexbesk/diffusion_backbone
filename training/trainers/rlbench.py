@@ -1,39 +1,13 @@
-from kornia import augmentation as K
+import torch
 
 from .base import BaseTrainTester
 
 
 class RLBenchTrainTester(BaseTrainTester):
 
-    def __init__(self, args, dataset_cls, model_cls, depth2cloud, im_size=256):
-        """Initialize."""
-        super().__init__(
-            args=args,
-            dataset_cls=dataset_cls,
-            model_cls=model_cls,
-            depth2cloud=depth2cloud
-        )
-
-        self.aug = K.AugmentationSequential(
-            K.RandomHorizontalFlip(p=0.5),
-            K.RandomAffine(
-                degrees=0,
-                translate=0.05,
-                scale=(0.75, 1.25),
-                padding_mode="reflection",
-                p=1.0
-            ),
-            K.RandomRotation((-5, 5), p=0.3),
-            K.RandomResizedCrop(
-                size=(im_size, im_size),
-                scale=(0.95, 1.05),
-                p=0.1
-            )
-        ).cuda()
-
     def _run_depth2cloud(self, sample):
         return self.depth2cloud(
-            sample['depth'].cuda(non_blocking=True).float(),
-            sample['extrinsics'].cuda(non_blocking=True).float(),
-            sample['intrinsics'].cuda(non_blocking=True).float()
+            sample['depth'].cuda(non_blocking=True).to(torch.bfloat16),
+            sample['extrinsics'].cuda(non_blocking=True).to(torch.bfloat16),
+            sample['intrinsics'].cuda(non_blocking=True).to(torch.bfloat16)
         )

@@ -1,6 +1,7 @@
 import os
 import random
 
+from kornia import augmentation as K
 import numpy as np
 import torch
 from torch import optim
@@ -19,28 +20,31 @@ from ..schedulers import TriStageLRScheduler
 from ..utils import compute_metrics
 
 
-def register_stride_check_hooks(model):
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            def make_hook(nm, p):
-                def hook(grad):
-                    if grad is not None and grad.stride() != p.stride():
-                        print(f"[Hook Mismatch] {nm}")
-                        print(f" - Param stride: {p.stride()}, Grad stride: {grad.stride()}")
-                return hook
-            param.register_hook(make_hook(name, param))
-
-
 class BaseTrainTester:
     """Train/test a trajectory optimization algorithm."""
 
-    def __init__(self, args, dataset_cls, model_cls, depth2cloud):
+    def __init__(self, args, dataset_cls, model_cls, depth2cloud, im_size):
         """Initialize."""
         self.args = args
         self.dataset_cls = dataset_cls
         self.model_cls = model_cls
         self.depth2cloud = depth2cloud
-        self.aug = None
+        self.aug = K.AugmentationSequential(
+            K.RandomHorizontalFlip(p=0.5),
+            K.RandomAffine(
+                degrees=0,
+                translate=0.05,
+                scale=(0.75, 1.25),
+                padding_mode="reflection",
+                p=0.8
+            ),
+            K.RandomRotation((-5, 5), p=0.3),
+            K.RandomResizedCrop(
+                size=(im_size, im_size),
+                scale=(0.95, 1.05),
+                p=0.1
+            )
+        ).cuda()
 
         if dist.get_rank() == 0:
             self.writer = SummaryWriter(log_dir=args.log_dir)
@@ -69,24 +73,26 @@ class BaseTrainTester:
             worker_seed = torch.initial_seed() % 2**32
             np.random.seed(worker_seed)
             random.seed(worker_seed)
-            np.random.seed(np.random.get_state()[1][0] + worker_id)
+            # np.random.seed(np.random.get_state()[1][0] + worker_id)
         # Datasets
         train_dataset, val_dataset = self.get_datasets()
         # Samplers and loaders
         g = torch.Generator()
         g.manual_seed(0)
-        train_sampler = DistributedSampler(train_dataset)
+        train_sampler = DistributedSampler(train_dataset, drop_last=True)
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.args.batch_size,
             shuffle=False,
             num_workers=self.args.num_workers,
             worker_init_fn=seed_worker,
-            collate_fn=traj_collate_fn,
+            collate_fn=base_collate_fn,
             pin_memory=True,
             sampler=train_sampler,
             drop_last=True,
-            generator=g
+            generator=g,
+            prefetch_factor=4,
+            persistent_workers=True
         )
         # No sampler for val!
         if dist.get_rank() == 0:
@@ -95,14 +101,16 @@ class BaseTrainTester:
                 batch_size=self.args.batch_size_val,
                 shuffle=False,
                 num_workers=self.args.num_workers,
-                collate_fn=traj_collate_fn,
+                collate_fn=base_collate_fn,
                 pin_memory=True,
                 sampler=None,
-                drop_last=False
+                drop_last=False,
+                prefetch_factor=4,
+                persistent_workers=True
             )
         else:
             val_loader = None
-        return train_loader, val_loader
+        return train_loader, val_loader, train_sampler
 
     def get_model(self):
         """Initialize the model."""
@@ -125,9 +133,15 @@ class BaseTrainTester:
             denoise_model=self.args.denoise_model
         )
         print("Model parameters:", count_parameters(_model))
+        # Somehow necessary for torch.compile to work without DDP complaining:
+        if hasattr(_model, 'encoder') and hasattr(_model.encoder, 'feature_pyramid'):
+            _model.encoder.feature_pyramid = _model.encoder.feature_pyramid.to(
+                memory_format=torch.channels_last
+            )
 
         return _model
 
+    @torch.no_grad()
     def get_workspace_normalizer(self):
         print("Computing workspace normalizer...")
 
@@ -143,20 +157,22 @@ class BaseTrainTester:
 
         data_loader = DataLoader(
             train_dataset,
-            batch_size=self.args.batch_size,
+            batch_size=max(self.args.batch_size, 64),
             collate_fn=actions_collate_fn,
             shuffle=False,
             num_workers=self.args.num_workers
         )
 
         # Loop and compute action min-max
-        bounds = []
+        min_, max_ = torch.ones(3) * 10000, -torch.ones(3) * 10000
         for sample in tqdm(data_loader):
-            bounds.append(sample["action"][..., :3].reshape([-1, 3]))
+            action = sample["action"][..., :3].reshape([-1, 3])
+            min_ = torch.min(min_, action.min(0).values)
+            max_ = torch.max(max_, action.max(0).values)
 
-        bounds = torch.cat(bounds, dim=0)
-        min_ = bounds.min(dim=0).values - self.args.workspace_normalizer_buffer
-        max_ = bounds.max(dim=0).values + self.args.workspace_normalizer_buffer
+        min_ = min_ - self.args.workspace_normalizer_buffer
+        max_ = max_ + self.args.workspace_normalizer_buffer
+
         return nn.Parameter(torch.stack([min_, max_]), requires_grad=False)
 
     def get_optimizer(self, model):
@@ -201,7 +217,7 @@ class BaseTrainTester:
     def main(self):
         """Run main training/testing pipeline."""
         # Get loaders
-        train_loader, val_loader = self.get_loaders()
+        train_loader, val_loader, train_sampler = self.get_loaders()
 
         # Get model
         model = self.get_model()
@@ -219,9 +235,8 @@ class BaseTrainTester:
         # Move model to devices
         if torch.cuda.is_available():
             model = model.cuda()
-        model.encoder.feature_pyramid = model.encoder.feature_pyramid.to(memory_format=torch.channels_last)
         # make sure to compile before DDP!
-        # model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
+        model = torch.compile(model, mode="default", fullgraph=True)
         model = DistributedDataParallel(
             model, device_ids=[self.args.local_rank],
             broadcast_buffers=False, find_unused_parameters=True
@@ -250,12 +265,19 @@ class BaseTrainTester:
             lr_scheduler.step()
 
         # Training loop
-        iter_loader = iter(train_loader)
         model.train()
+        samples_per_epoch = len(train_loader)
+        epoch = start_iter // samples_per_epoch + 1
+        train_sampler.set_epoch(epoch)
+        iter_loader = iter(train_loader)
         for step_id in trange(start_iter, self.args.train_iters):
             try:
                 sample = next(iter_loader)
             except StopIteration:
+                # when the iterator is exhausted, we need to reset it
+                # and increment the epoch
+                epoch += 1
+                train_sampler.set_epoch(epoch)
                 iter_loader = iter(train_loader)
                 sample = next(iter_loader)
 
@@ -292,7 +314,6 @@ class BaseTrainTester:
         # Actions
         if self.args.keypose_only:
             sample["action"] = sample["action"][:, [-1]]
-            sample["action_mask"] = sample["action_mask"][:, [-1]]
 
         # Observations
         pcds = self._run_depth2cloud(sample)
@@ -302,10 +323,10 @@ class BaseTrainTester:
                 sample['rgb'].cuda(non_blocking=True).half() / 255,
                 pcds.half()
             ), 2)  # (B, ncam, 6, H, W)
-            obs = obs.reshape(-1, 6, h, w)
+            obs = obs.view(-1, 6, h, w)
             obs = self.aug(obs)
-            rgbs = obs[:, :3].reshape(b, nc, 3, h, w).float()
-            pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
+            rgbs = obs[:, :3].view(b, nc, 3, h, w).float()
+            pcds = obs[:, 3:].view(b, nc, 3, h, w).float()
         else:
             rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
         rgb2d = sample["rgb2d"]
@@ -320,12 +341,12 @@ class BaseTrainTester:
 
         return (
             sample["action"].cuda(non_blocking=True),
-            sample["action_mask"].cuda(non_blocking=True),
+            torch.zeros(sample["action"].shape[:-1], dtype=bool, device='cuda'),
             rgbs,
             rgb2d,
             pcds,
             sample["instr"],
-            sample["proprioception"].cuda(non_blocking=True)
+            proprio
         )
 
     def _model_forward(self, model, sample, training=True):
@@ -349,6 +370,10 @@ class BaseTrainTester:
 
         # Backward pass
         scaler.scale(loss).backward()
+
+        # Clip gradients
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
 
         # Update
         scaler.step(optimizer)
@@ -434,31 +459,40 @@ class BaseTrainTester:
 
     def save_checkpoint(self, model, optimizer, step_id, new_loss, best_loss):
         """Save checkpoint if requested."""
-        if new_loss is None or best_loss is None or new_loss <= best_loss:
+        model_state = model.state_dict()
+        optimizer_state = optimizer.state_dict()
+
+        # Best checkpoint
+        if new_loss is not None and (best_loss is None or new_loss < best_loss):
             best_loss = new_loss
             torch.save({
-                "weight": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
+                "weight": model_state,
+                "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / "best.pth")
+
+        # Last checkpoint (always saved)
         torch.save({
-            "weight": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
+            "weight": model_state,
+            "optimizer": optimizer_state,
             "iter": step_id + 1,
             "best_loss": best_loss
         }, self.args.log_dir / "last.pth")
+
+        # Save intermediate checkpoints
         if (step_id + 1) % 40000 == 0:
             torch.save({
-                "weight": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
+                "weight": model_state,
+                "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / f"interm{step_id + 1}.pth")
+
         return best_loss
 
 
-def traj_collate_fn(batch):
+def base_collate_fn(batch):
     _dict = {}
 
     # Values for these come as lists
@@ -474,8 +508,6 @@ def traj_collate_fn(batch):
         )
         for k_ in batch[0].keys() if k_ not in list_keys
     })
-    # Append action_mask for inference
-    _dict["action_mask"] = torch.zeros(_dict["action"].shape[:-1], dtype=bool)
 
     return _dict
 
