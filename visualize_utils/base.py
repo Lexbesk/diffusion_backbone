@@ -1,5 +1,7 @@
 """All datasets can use this class."""
 
+import os
+
 from kornia import augmentation as K
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -167,6 +169,7 @@ class Visualizer:
         _cat = np.concatenate([imgs, depths], 1).transpose(1, 2, 0)
         # Plot
         plt.imshow(_cat)
+        os.makedirs(save_path, exist_ok=True)
         plt.savefig(save_path + f'img_depth_{t}.jpg')
         plt.close()
 
@@ -181,6 +184,7 @@ class Visualizer:
         imgs = imgs.transpose(1, 2, 0)
         # Plot
         plt.imshow(imgs)
+        os.makedirs(save_path, exist_ok=True)
         plt.savefig(save_path + f'img_{t}.jpg')
         plt.close()
 
@@ -201,6 +205,7 @@ class Visualizer:
         # Plot
         imgs = np.concatenate((imgs, aug))
         plt.imshow(imgs)
+        os.makedirs(save_path, exist_ok=True)
         plt.savefig(save_path + f'img_aug_{t}.jpg')
         plt.close()
 
@@ -239,6 +244,7 @@ class Visualizer:
             else:
                 grippers.extend([t_ for t_ in traj])
         # Visualize
+        os.makedirs(save_path, exist_ok=True)
         visualize_actions_and_point_clouds(
             pc,
             torch.from_numpy(imgs),
