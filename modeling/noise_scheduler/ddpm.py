@@ -14,17 +14,27 @@ class DDPMScheduler(BaseScheduler):
 
         return timesteps
 
-    def get_scalings(self, sigma):
-        return (
-            torch.zeros_like(sigma),
-            torch.ones_like(sigma),
-            torch.ones_like(sigma)
-        )
-
-    def prepare_target(self, noise, gt, noised_input, timesteps):
+    def prepare_target(self, noise, gt):
         if self.config.prediction_type == "epsilon":
             return noise
         elif self.config.prediction_type == "sample":
             return gt
         else:
             raise NotImplementedError
+
+    def step(
+        self,
+        model_output: torch.Tensor,
+        timestep_ind: int,
+        sample: torch.Tensor,
+        generator=None,
+        return_dict: bool = True,
+    ):
+        self.timesteps[timestep_ind].to(model_output.device)
+        return super()().step(
+            model_output=model_output,
+            timestep_ind=timestep_ind,
+            sample=sample,
+            generator=generator,
+            return_dict=return_dict
+        )

@@ -17,6 +17,11 @@ class RFScheduler:
             0, 1, num_inference_steps,
             dtype=np.float32
         )[::-1][:-1].copy()).to(device)
+        # Precompute previous timesteps, where prev_t[0] = 0
+        self.prev_timesteps = torch.cat((
+            self.timesteps[1:],
+            torch.zeros(1, device=device, dtype=self.timesteps.dtype)
+        ))
 
     def sample_noise_step(self, num_noise, device):
         if self.noise_sampler == "uniform":
@@ -33,7 +38,9 @@ class RFScheduler:
             timesteps = torch.sigmoid(samples)
         elif self.noise_sampler == "pi0":
             alpha, beta = 1.5, 1.0
-            timesteps = torch.distributions.Beta(alpha, beta).sample((num_noise,)).to(device).clamp(max=0.999)
+            timesteps = torch.distributions.Beta(
+                alpha, beta
+            ).sample((num_noise,)).to(device).clamp(max=0.999)
         else:
             raise NotImplementedError(f"{self.noise_sampler} not implemented")
 
@@ -50,28 +57,18 @@ class RFScheduler:
         zt = (1 - texp) * x + texp * z1
         return zt.to(x.dtype)
 
-    def get_scalings(self, sigma):
-        return (
-            torch.zeros_like(sigma),
-            torch.ones_like(sigma),
-            torch.ones_like(sigma)
-        )
-
-    def step(self, model_output, timestep, sample):
+    def step(self, model_output, timestep_ind, sample):
         zt = sample
         vc = model_output
 
-        curr_ind = (self.timesteps == timestep).flatten().nonzero()[0]
-        if curr_ind == len(self.timesteps) - 1:
-            prev_t = 0
-        else:
-            prev_t = self.timesteps[curr_ind + 1].to(vc.device)
+        timestep = self.timesteps[timestep_ind].to(vc.device)
+        prev_t = self.prev_timesteps[timestep_ind].to(vc.device)
         dt = timestep - prev_t
-        pred_prev_sample = zt - dt * vc # z_t'
+        pred_prev_sample = zt - dt * vc  # z_t'
 
         return DummyClass(prev_sample=pred_prev_sample)
 
-    def prepare_target(self, noise, gt, noised_input, timesteps):
+    def prepare_target(self, noise, gt):
         return noise - gt
 
 

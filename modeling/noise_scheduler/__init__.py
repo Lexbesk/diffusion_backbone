@@ -1,5 +1,4 @@
 from .ddpm import DDPMScheduler
-from .edm import EDMScheduler
 from .rectified_flow import RFScheduler
 
 
@@ -15,13 +14,13 @@ def fetch_schedulers(denoise_model, denoise_timesteps):
             beta_schedule="squaredcos_cap_v2",
             prediction_type="epsilon"
         )
-    elif denoise_model in ("rectified_flow", "moritz", "pi0", "flow_uniform"):
+    elif denoise_model in ("rectified_flow", "unit", "pi0", "flow_uniform"):
         noise_sampler_config = {"mean": 0, "std": 1.5}
-        if denoise_model == "moritz":
+        if denoise_model == "unit":
             noise_sampler_config = {"mean": 0, "std": 1.0}
         samplers = {
             "rectified_flow": "logit_normal",
-            "moritz": "logit_normal",
+            "unit": "logit_normal",
             "pi0": "pi0",
             "flow_uniform": "uniform"
         }
@@ -32,28 +31,5 @@ def fetch_schedulers(denoise_model, denoise_timesteps):
         rotation_noise_scheduler = RFScheduler(
             noise_sampler=samplers[denoise_model],
             noise_sampler_config=noise_sampler_config
-        )
-    elif denoise_model in ('edm', 'beso'):
-        if denoise_model == 'edm':
-            noise_scheduler = 'exponential'
-            sigma_data = 0.5
-            sigma_min = 0.005
-            sigma_max = 1.0
-        elif denoise_model == 'beso':
-            noise_scheduler = 'exponential'
-            sigma_data = 0.5
-            sigma_min = 0.001
-            sigma_max = 80.0
-        position_noise_scheduler = EDMScheduler(
-            noise_scheduler=noise_scheduler,
-            sigma_data=sigma_data,
-            sigma_min=sigma_min,
-            sigma_max=sigma_max
-        )
-        rotation_noise_scheduler = EDMScheduler(
-            noise_scheduler=noise_scheduler,
-            sigma_data=sigma_data,
-            sigma_min=sigma_min,
-            sigma_max=sigma_max
         )
     return position_noise_scheduler, rotation_noise_scheduler

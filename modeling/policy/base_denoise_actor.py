@@ -84,7 +84,10 @@ class DenoiseActor(nn.Module):
         trajectory = trajectory.clone()
         trajectory[..., :3] = self.unnormalize_pos(trajectory[..., :3])
         if self._relative:  # relative to absolute
-            trajectory[..., :3] = trajectory[..., :3] + query_trajectory[..., :3]
+            trajectory[..., :3] = (
+                query_trajectory[..., :3]
+                + torch.cumsum(trajectory[..., :3], dim=-1)
+            )
 
         return self.prediction_head(
             trajectory_feats,
@@ -108,21 +111,20 @@ class DenoiseActor(nn.Module):
 
         # Iterative denoising
         timesteps = self.position_scheduler.timesteps
-        for t in timesteps:
-            c_skip, c_out, c_in = self.position_scheduler.get_scalings(t)
+        for t_ind, t in enumerate(timesteps):
             out = self.policy_forward_pass(
-                trajectory * c_in,
+                trajectory,
                 t * torch.ones(len(trajectory)).to(device).long(),
                 fixed_inputs
             )
             out = out[-1]  # keep only last layer's output
             pos = self.position_scheduler.step(
-                out[..., :3] * c_out + trajectory[..., :3] * c_skip,
-                t, trajectory[..., :3]
+                out[..., :3],
+                t_ind, trajectory[..., :3]
             ).prev_sample
             rot = self.rotation_scheduler.step(
-                out[..., 3:9] * c_out + trajectory[..., 3:9] * c_skip,
-                t, trajectory[..., 3:9]
+                out[..., 3:9],
+                t_ind, trajectory[..., 3:9]
             ).prev_sample
             trajectory = torch.cat((pos, rot), -1)
 
@@ -186,9 +188,8 @@ class DenoiseActor(nn.Module):
         noisy_trajectory = torch.cat((pos, rot), -1)
 
         # Predict the noise residual
-        _, _, c_in = self.position_scheduler.get_scalings(timesteps)
         pred = self.policy_forward_pass(
-            noisy_trajectory * c_in[:, None, None, None],
+            noisy_trajectory,
             timesteps, fixed_inputs
         )
 
@@ -198,7 +199,7 @@ class DenoiseActor(nn.Module):
             trans = layer_pred[..., :3]
             rot = layer_pred[..., 3:9]
             denoise_target = self.position_scheduler.prepare_target(
-                noise, gt_trajectory, noisy_trajectory, timesteps
+                noise, gt_trajectory
             )
             loss = (
                 30 * F.l1_loss(trans, denoise_target[..., :3], reduction='mean')
@@ -341,7 +342,7 @@ class TransformerHead(nn.Module):
             dim_fw=4 * embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=False,
             use_adaln=False,
             is_self=False
@@ -354,7 +355,7 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=False
@@ -367,7 +368,7 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=True
@@ -382,7 +383,7 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=True
@@ -392,7 +393,7 @@ class TransformerHead(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, 6)
         )
-        self.rotation_norm = nn.LayerNorm(embedding_dim)
+        # self.rotation_norm = nn.LayerNorm(embedding_dim)
 
         # 2. Position
         self.position_proj = nn.Linear(embedding_dim, embedding_dim)
@@ -402,7 +403,7 @@ class TransformerHead(nn.Module):
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
+            pre_norm=False,
             rotary_pe=rotary_pe,
             use_adaln=True,
             is_self=True
@@ -412,7 +413,7 @@ class TransformerHead(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, 3)
         )
-        self.position_norm = nn.LayerNorm(embedding_dim)
+        # self.position_norm = nn.LayerNorm(embedding_dim)
 
         # 3. Openess
         self.openess_predictor = nn.Sequential(
@@ -559,7 +560,7 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         position_features = position_features[:, :traj_len]
-        position_features = self.position_norm(position_features)
+        # position_features = self.position_norm(position_features)
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
@@ -573,7 +574,7 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         rotation_features = rotation_features[:, :traj_len]
-        rotation_features = self.rotation_norm(rotation_features)
+        # rotation_features = self.rotation_norm(rotation_features)
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation
