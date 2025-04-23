@@ -24,7 +24,7 @@ lr=3e-4
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
-use_compile=false
+use_compile=true
 
 # Model arguments, change (some of) these for new architectures
 model_type=denoise3dle
