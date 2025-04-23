@@ -4,6 +4,7 @@ from .denoise_actor_3d_sa import DenoiseActor as DenoiseActor3DSA
 from .denoise_actor_3d_df import DenoiseActor as DenoiseActor3DDF
 from .denoise_actor_3d_ca import DenoiseActor as DenoiseActor3DCA
 from .denoise_actor_3d_2dwrist import DenoiseActor as DenoiseActor2Dwrist
+from .denoise_actor_3d_le import DenoiseActor as DenoiseActor3DLE
 
 
 def fetch_model_class(model_type):
@@ -19,4 +20,6 @@ def fetch_model_class(model_type):
         return DenoiseActor3DCA
     if model_type == 'denoise3d_2dwrist':
         return DenoiseActor2Dwrist
+    if model_type == 'denoise3dle':
+        return DenoiseActor3DLE
     return None

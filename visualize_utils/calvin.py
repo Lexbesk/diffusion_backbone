@@ -125,16 +125,16 @@ class Visualizer(BaseVisualizer):
 
 
 if __name__ == '__main__':
-    zarr_path = '/data/user_data/ngkanats/zarr_datasets/CALVIN_zarr/val.zarr'
+    zarr_path = '/data/user_data/ngkanats/zarr_datasets/CALVIN_keypose_zarr/val.zarr'
     depth2cloud = fetch_depth2cloud('calvin')
     use_meshcat = False
     im_size = 160
     vis = Visualizer(
         zarr_path, depth2cloud, use_meshcat, im_size,
-        instruction_file='instructions/calvin/val_instructions.json'
+        instruction_file='instructions/calvin/val_keypose_instructions.json'
     )
-    for t in range(100):
+    for t in range(20):
         # vis.plot_images_depths(t)
         # vis.plot_aug_images(t)
-        # vis.plot_point_cloud_grippers(t)
+        vis.plot_point_cloud_grippers(t)
         vis.show_language(t)

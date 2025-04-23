@@ -6,15 +6,15 @@ else
     DATA_PATH="/data/user_data/ngkanats"
 fi
 
-train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/val.zarr
-train_instructions=instructions/calvin/train_instructions.json
-val_instructions=instructions/calvin/val_instructions.json
+train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_keypose_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_keypose_zarr/val.zarr
+train_instructions=instructions/calvin/train_keypose_instructions.json
+val_instructions=instructions/calvin/val_keypose_instructions.json
 
 dataset=Calvin
-num_workers=4
-memory_limit=8
-B=128
+num_workers=6
+memory_limit=4
+B=256
 B_val=64
 
 # Training/testing arguments, change these for HPT
@@ -24,9 +24,10 @@ lr=3e-4
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
+use_compile=false
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3dsa
+model_type=denoise3dle
 bimanual=false
 keypose_only=false
 
@@ -46,7 +47,7 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=test$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 ngpus=4
@@ -71,6 +72,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --lr_scheduler $lr_scheduler \
     --wd $wd \
     --train_iters $train_iters \
+    --use_compile $use_compile \
     --model_type $model_type \
     --bimanual $bimanual \
     --keypose_only $keypose_only \
