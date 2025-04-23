@@ -599,6 +599,30 @@ def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
     return matrix[..., :2, :].clone().reshape(batch_dim + (6,))
 
 
+def relative_to_absolute(action, proprio, qform='wxyz'):
+    # action (B, T, 8), proprio (B, 1, 7)
+    pos = proprio[..., :3] + action[..., :3].cumsum(1)
+
+    orn = torch.zeros_like(action[..., 3:7])
+    for i in range(action.shape[1]):
+        prev = orn[:, i - 1] if i > 0 else proprio[:, 0, 3:7]
+        if qform == 'xyzw':
+            # pytorch3d takes wxyz quaternion, the input is xyzw
+            orn[:, i] = quaternion_multiply(
+                action[:, i][..., [6, 3, 4, 5]],
+                prev[..., [3, 0, 1, 2]]
+            )[..., [1, 2, 3, 0]]
+        elif qform == 'wxyz':
+            orn[:, i] = quaternion_multiply(
+                action[:, i][..., 3:7],
+                prev
+            )
+        else:
+            assert False
+
+    return torch.cat([pos, orn, action[..., 7:]], -1)
+
+
 if __name__ == "__main__":
     import torch
     import torch.nn.functional as F

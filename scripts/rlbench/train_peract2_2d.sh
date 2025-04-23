@@ -3,7 +3,7 @@ main_dir=Peract2
 if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
     DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
 else
-    DATA_PATH="/data/group_data/katefgroup/VLA"
+    DATA_PATH="/data/user_data/ngkanats"
 fi
 
 train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
@@ -17,7 +17,7 @@ B=64
 B_val=64
 
 # Training/testing arguments, change these for HPT
-val_freq=1000
+val_freq=4000
 eval_only=false
 lr=1e-4
 lr_scheduler=constant

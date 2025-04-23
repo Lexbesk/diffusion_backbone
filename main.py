@@ -42,6 +42,7 @@ def parse_arguments():
         ('lr_scheduler', str, "constant"),
         ('wd', float, 5e-3),
         ('train_iters', int, 600000),
+        ('use_compile', str2bool, True),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),

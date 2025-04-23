@@ -130,7 +130,13 @@ class DenoiseActor(nn.Module):
 
         return torch.cat((trajectory, out[..., 9:]), -1)
 
-    def compute_trajectory(self, trajectory_mask, fixed_inputs):
+    def compute_trajectory(self, trajectory_mask,
+                           rgb3d, rgb2d, pcd, instruction, proprio):
+        # Encode observations, states, instructions
+        fixed_inputs = self.encode_inputs(
+            rgb3d, rgb2d, pcd, instruction, proprio
+        )
+
         # Sample from learned model starting from noise
         trajectory = torch.randn(
             size=tuple(trajectory_mask.shape) + (9,),
@@ -155,7 +161,13 @@ class DenoiseActor(nn.Module):
 
         return trajectory
 
-    def compute_loss(self, gt_trajectory, fixed_inputs):
+    def compute_loss(self, gt_trajectory,
+                     rgb3d, rgb2d, pcd, instruction, proprio):
+        # Encode observations, states, instructions
+        fixed_inputs = self.encode_inputs(
+            rgb3d, rgb2d, pcd, instruction, proprio
+        )
+
         # Process gt_trajectory
         gt_openess = gt_trajectory[..., 7:]
         gt_trajectory = gt_trajectory[..., :7]
@@ -281,7 +293,7 @@ class DenoiseActor(nn.Module):
             rgb3d: (B, num_3d_cameras, 3, H, W) in [0, 1]
             rgb2d: (B, num_2d_cameras, 3, H, W) in [0, 1]
             pcd: (B, num_3d_cameras, 3, H, W) in world coordinates
-            instruction: list of str
+            instruction: tokenized text instruction
             proprio: (B, nhist, nhand, 3+4+X)
 
         Note:
@@ -298,17 +310,18 @@ class DenoiseActor(nn.Module):
             proprio[..., :7].flatten(1, 2)
         ).unflatten(1, (nhist, nhand))
 
-        # Encode observations, states, instructions
-        fixed_inputs = self.encode_inputs(
-            rgb3d, rgb2d, pcd, instruction, proprio
-        )
-
         # Inference, don't use gt_trajectory
         if run_inference:
-            return self.compute_trajectory(trajectory_mask, fixed_inputs)
+            return self.compute_trajectory(
+                trajectory_mask,
+                rgb3d, rgb2d, pcd, instruction, proprio
+            )
 
         # Training, use gt_trajectory to compute loss
-        return self.compute_loss(gt_trajectory, fixed_inputs)
+        return self.compute_loss(
+            gt_trajectory,
+            rgb3d, rgb2d, pcd, instruction, proprio
+        )
 
 
 class TransformerHead(nn.Module):

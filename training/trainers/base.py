@@ -16,7 +16,7 @@ from tqdm import trange, tqdm
 
 from modeling.encoder.text import fetch_tokenizers
 from utils.common_utils import count_parameters
-import utils.pytorch3d_transforms as pytorch3d_transforms
+from utils.pytorch3d_transforms import relative_to_absolute
 from ..schedulers import TriStageLRScheduler
 from ..utils import compute_metrics
 
@@ -240,7 +240,8 @@ class BaseTrainTester:
         if torch.cuda.is_available():
             model = model.cuda()
         # make sure to compile before DDP!
-        # model = torch.compile(model, mode="default", fullgraph=True)
+        if self.args.use_compile:
+            model.compute_loss = torch.compile(model.compute_loss, fullgraph=True)
         model = DistributedDataParallel(
             model, device_ids=[self.args.local_rank],
             broadcast_buffers=False, find_unused_parameters=True
@@ -527,27 +528,3 @@ def base_collate_fn(batch):
 
 def actions_collate_fn(batch):
     return {"action": torch.stack([item["action"] for item in batch])}
-
-
-def relative_to_absolute(action, proprio, qform='wxyz'):
-    # action (B, T, 8), proprio (B, 1, 7)
-    pos = proprio[..., :3] + action[..., :3].cumsum(1)
-
-    orn = torch.zeros_like(action[..., 3:7])
-    for i in range(action.shape[1]):
-        prev = orn[:, i - 1] if i > 0 else proprio[:, 0, 3:7]
-        if qform == 'xyzw':
-            # pytorch3d takes wxyz quaternion, the input is xyzw
-            orn[:, i] = pytorch3d_transforms.quaternion_multiply(
-                action[:, i][..., [6, 3, 4, 5]],
-                prev[..., [3, 0, 1, 2]]
-            )[..., [1, 2, 3, 0]]
-        elif qform == 'wxyz':
-            orn[:, i] = pytorch3d_transforms.quaternion_multiply(
-                action[:, i][..., 3:7],
-                prev
-            )
-        else:
-            assert False
-
-    return torch.cat([pos, orn, action[..., 7:]], -1)
