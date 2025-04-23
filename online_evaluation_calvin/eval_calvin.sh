@@ -1,23 +1,25 @@
 # You probably don't need to change these
 merged_config_file=online_evaluation_calvin/configs/merged_config_val_abc_d.yaml
+merged_config_file=online_evaluation_calvin/configs/merged_config_train_abc_d.yaml
 task_config_file=online_evaluation_calvin/configs/new_playtable_tasks.yaml
 ann_config_file=online_evaluation_calvin/configs/new_playtable_validation.yaml
+ann_config_file=online_evaluation_calvin/configs/new_playtable.yaml
 
 # Things you may want to change if you train/eval a new model
 seed=0
-checkpoint=train_logs/CALVIN/denoise3dsa-Calvin-C192-B64-lr3e-4-constant-H3-rectified_flow-DT10-clip-finetuned_false/best.pth
-base_log_dir=eval_logs/CALVIN/denoise3dsa-Calvin-C192-B64-lr3e-4-constant-H3-rectified_flow-DT10-clip-finetuned_false/
-save_video=false
+checkpoint=train_logs/CALVIN/denoise3dsa-Calvin-C192-B128-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/last.pth
+base_log_dir=eval_logs/CALVIN/denoise3dsa-Calvin-C192-B128-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/
+save_video=true
 
 # Things you can change if you customize the model architecture
 model_type=denoise3dsa
-pred_len=16
+pred_len=12
 backbone=clip
 fps_subsampling_factor=3
 embedding_dim=192
 num_attn_heads=8
 num_vis_instr_attn_layers=3
-num_history=3
+num_history=1
 relative_action=true
 quaternion_format=wxyz
 denoise_timesteps=10

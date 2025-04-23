@@ -1,7 +1,3 @@
-import os
-import pickle
-import glob
-
 import matplotlib
 matplotlib.use('agg')
 matplotlib.rcParams['figure.dpi'] = 128
@@ -10,7 +6,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 import numpy as np
-import blosc
 import torch
 import torch.nn.functional as F
 import PIL.Image as Image

@@ -1,12 +1,12 @@
 import logging
 
 import torch
+from torch.nn import functional as F
 
 from modeling.policy import fetch_model_class
-from online_evaluation_calvin.utils_with_calvin import (
-    convert_action,
-    relative_to_absolute
-)
+from modeling.encoder.text import fetch_tokenizers
+from utils.pytorch3d_transforms import relative_to_absolute
+from online_evaluation_calvin.utils_with_calvin import convert_action
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ class Model:
 
     def get_policy(self):
         """Initialize the model."""
+        self.tokenizer = fetch_tokenizers(self.args.backbone)
         model_class = fetch_model_class(self.args.model_type)
         return model_class(
             backbone=self.args.backbone,
@@ -71,17 +72,31 @@ class Model:
         trajectory_mask = torch.full([self.args.pred_len], False).to(device)
         trajectory_mask = trajectory_mask[None, :, None]
 
+        # Static camera
         rgb3d = obs["rgb_obs"]["rgb_static"].transpose(2, 0, 1)[None, None]
         rgb3d = torch.from_numpy(rgb3d).to(device).float()
         rgb3d = rgb3d[..., 20:180, 20:180]
 
-        rgb2d = obs["rgb_obs"]["rgb_gripper"].transpose(2, 0, 1)[None, None]
+        # Merge wrist camera
+        h, w = rgb3d.shape[-2:]
+        rgb2d = obs["rgb_obs"]["rgb_gripper"].transpose(2, 0, 1)[None]
         rgb2d = torch.from_numpy(rgb2d).to(device).float()
+        rgb2d = F.interpolate(rgb2d, (h, w), mode='bilinear')[:, None]
+        rgbs = torch.cat((rgb3d, rgb2d), 1)
 
+        # Static camera point cloud
         pcds = obs["pcd_obs"]["pcd_static"].transpose(2, 0, 1)[None, None]
         pcds = torch.from_numpy(pcds).to(device).float()
         pcds = pcds[..., 20:180, 20:180]
 
+        # Merge wrist camera point cloud
+        h, w = pcds.shape[-2:]
+        pcd2d = obs["pcd_obs"]["pcd_gripper"].transpose(2, 0, 1)[None]
+        pcd2d = torch.from_numpy(pcd2d).to(device).float()
+        pcd2d = F.interpolate(pcd2d, (h, w), mode='bilinear')[:, None]
+        pcds = torch.cat((pcds, pcd2d), 1)
+
+        # Proprioception
         proprio = torch.from_numpy(obs["proprio"]).to(device).float()
         proprio = proprio[None, :self.args.num_history, None]
 
@@ -89,24 +104,21 @@ class Model:
         trajectory = self.policy(
             None,
             trajectory_mask,  # (1, T, 1)
-            rgb3d,  # (1, 1, 3, 160, 160)
-            rgb2d,  # (1, 1, 3, 84, 84)
-            pcds,  # (1, 1, 3, 160, 160)
-            [instruction,],  # [str,]
+            rgbs,  # (1, 2, 3, 160, 160)
+            None,  # (1, 1, 3, 84, 84)
+            pcds,  # (1, 2, 3, 160, 160)
+            self.tokenizer([instruction,]).cuda(non_blocking=True),
             proprio[..., :7].float(),  # (1, nhist, 1, 7)
             run_inference=True
         )  # (1, T, 1, 8)
         trajectory = trajectory.view(1, self.args.pred_len, 8)  # (1, T, 8)
 
-        # Convert quaternion to Euler angles
-        trajectory = convert_action(trajectory)
-
         # Back to absolute actions
         if bool(self.args.relative_action):
-            # Convert quaternion to Euler angles
-            curr = convert_action(proprio[:, [-1], 0])
-            # Convert relative action to absolute action
-            trajectory = relative_to_absolute(trajectory, curr)
+            trajectory = relative_to_absolute(trajectory, proprio[:, [-1], 0])
+
+        # Convert quaternion to Euler angles
+        trajectory = convert_action(trajectory)
 
         return trajectory
 

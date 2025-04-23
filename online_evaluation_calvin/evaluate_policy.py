@@ -246,6 +246,7 @@ def main(args):
     print(f'Load {len(results)}/1000 episodes...')
     print(str_results + "\n")
 
+    env.close()
     del env
     gc.collect()
 

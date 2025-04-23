@@ -40,7 +40,12 @@ def deproject(cam, depth_img, homogeneous=False, sanity_check=False):
     u, v = u.ravel(), v.ravel()
 
     # Unproject to world coordinates
-    T_world_cam = np.linalg.inv(np.array(cam.viewMatrix).reshape((4, 4)).T)
+    if hasattr(cam, "viewMatrix"):
+        # For camera in pybullet
+        T_world_cam = np.linalg.inv(np.array(cam.viewMatrix).reshape((4, 4)).T)
+    else:
+        # Some CALVIN decided to use another convention
+        T_world_cam = np.linalg.inv(np.array(cam.view_matrix).reshape((4, 4)).T)
     z = depth_img[v, u]
     foc = cam.height / (2 * np.tan(np.deg2rad(cam.fov) / 2))
     x = (u - cam.width // 2) * z / foc
@@ -76,6 +81,7 @@ def prepare_visual_states(obs, env):
             - robot_obs: a dictionary of proprioceptive states
         env: a PlayTableSimEnv instance which contains camera information
     """
+    obs["pcd_obs"] = {}
     # Compute point cloud for front camera
     depth_static = obs["depth_obs"]["depth_static"]
     static_pcd = deproject(
@@ -85,8 +91,17 @@ def prepare_visual_states(obs, env):
     static_pcd = np.reshape(
         static_pcd, (depth_static.shape[0], depth_static.shape[1], 3)
     )
-    obs["pcd_obs"] = {}
     obs["pcd_obs"]["pcd_static"] = static_pcd
+    # Compute point cloud for wrist camera
+    depth_wrist = obs["depth_obs"]["depth_gripper"]
+    wrist_pcd = deproject(
+        env.cameras[1], depth_wrist,
+        homogeneous=False, sanity_check=False
+    ).transpose(1, 0)
+    wrist_pcd = np.reshape(
+        wrist_pcd, (depth_wrist.shape[0], depth_wrist.shape[1], 3)
+    )
+    obs["pcd_obs"]["pcd_gripper"] = static_pcd
 
     # Map RGB to [0, 1]
     obs["rgb_obs"]["rgb_static"] = obs["rgb_obs"]["rgb_static"] / 255.
@@ -168,22 +183,6 @@ def convert_action(trajectory):
 
     trajectory = np.concatenate([position, rotation, openess], axis=-1)
     return trajectory
-
-
-def relative_to_absolute(action, proprio, max_rel_pos=1.0, max_rel_orn=1.0,
-                         magic_scaling_factor_pos=1, magic_scaling_factor_orn=1):
-    assert action.shape[-1] == 7
-    assert proprio.shape[-1] == 7
-
-    rel_pos, rel_orn, gripper = np.split(action, [3, 6], axis=-1)
-    rel_pos *= max_rel_pos * magic_scaling_factor_pos
-    rel_orn *= max_rel_orn * magic_scaling_factor_orn
-
-    pos_proprio, orn_proprio = proprio[..., :3], proprio[..., 3:6]
-
-    target_pos = pos_proprio + rel_pos
-    target_orn = orn_proprio + rel_orn
-    return np.concatenate([target_pos, target_orn, gripper], axis=-1)
 
 
 ######################################################

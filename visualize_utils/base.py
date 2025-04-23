@@ -15,7 +15,7 @@ from zarr.storage import DirectoryStore
 from zarr import LRUStoreCache
 
 from utils.pytorch3d_transforms import quaternion_to_matrix
-from utils.visualize_keypose_frames import (
+from visualize_utils.visualize_keypose_frames import (
     get_three_points_from_curr_action,
     compute_rectangle_polygons
 )
