@@ -15,12 +15,14 @@ class BaseDataset(Dataset):
         copies=None,  # copy the dataset for less loader restarts
         relative_action=False,  # whether to return relative actions
         mem_limit=8,  # cache limit per dataset class in GigaBytes
-        actions_only=False  # return actions without observations
+        actions_only=False,  # return actions without observations
+        chunk_size=4  # chunk size for zarr
     ):
         super().__init__()
         self.copies = self.train_copies if copies is None else copies
         self._relative_action = relative_action
         self._actions_only = actions_only
+        self.chunk_size = chunk_size
 
         # Load instructions
         self._instructions = self._load_instructions(instructions)
@@ -36,40 +38,37 @@ class BaseDataset(Dataset):
     def _load_instructions(self, instruction_file):
         return json.load(open(instruction_file))
 
-    def _get_attr_by_idx(self, idx, attr):
-        return to_tensor(self.annos[attr][idx])
+    def _get_attr_by_idx(self, idx, attr, filter_cam=False):
+        t = to_tensor(self.annos[attr][idx:idx + self.chunk_size])
+        if filter_cam and self.camera_inds is not None:
+            t = t[:, self.camera_inds]
+        return t
 
     def _get_task(self, idx):
-        return ["task"]
+        return ["task"] * self.chunk_size
 
     def _get_instr(self, idx):
-        return ["instruction"]
+        return ["instruction"] * self.chunk_size
 
     def _get_rgb(self, idx, key='rgb'):
-        t = self._get_attr_by_idx(idx, key)
-        if self.camera_inds is not None:
-            t = t[self.camera_inds,]
-        return t
+        return self._get_attr_by_idx(idx, key, True)
 
     def _get_depth(self, idx, key='depth'):
-        t = self._get_attr_by_idx(idx, key)
-        if self.camera_inds is not None:
-            t = t[self.camera_inds,]
-        return t
+        return self._get_attr_by_idx(idx, key, True)
 
     def _get_proprioception(self, idx):
-        return self._get_attr_by_idx(idx, 'proprioception')
+        return self._get_attr_by_idx(idx, 'proprioception', False)
 
     def _get_action(self, idx):
         if self._relative_action:
             if 'rel_action' in self.annos:
-                return self._get_attr_by_idx(idx, 'rel_action')
+                return self._get_attr_by_idx(idx, 'rel_action', False)
             else:
-                action = self._get_attr_by_idx(idx, 'action')
+                action = self._get_attr_by_idx(idx, 'action', False)
                 prop = self._get_proprioception(idx)[[-1]]
                 action = to_relative_action(action, prop, self.quat_format)
         else:
-            action = self._get_attr_by_idx(idx, 'action')
+            action = self._get_attr_by_idx(idx, 'action', False)
         return action
 
     def __getitem__(self, idx):
@@ -82,7 +81,10 @@ class BaseDataset(Dataset):
         }
         In addition self.annos may contain fields for task/instruction ids
         """
-        idx = idx % len(self.annos['action'])
+        # First detect which copy we fall into
+        idx = idx % (len(self.annos['action']) // self.chunk_size - 1)
+        # and then which chunk
+        idx = idx * self.chunk_size
         if self._actions_only:
             return {"action": self._get_action(idx)}
         return {
@@ -95,4 +97,4 @@ class BaseDataset(Dataset):
         }
 
     def __len__(self):
-        return self.copies * len(self.annos['action'])
+        return self.copies * (len(self.annos['action']) // self.chunk_size - 1)

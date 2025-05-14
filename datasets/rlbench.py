@@ -45,6 +45,7 @@ MOBALOHA_TASKS = [
     'ziploc'
 ]
 
+
 class RLBenchDataset(BaseDataset):
     """RLBench dataset."""
     quat_format= 'xyzw'
@@ -56,7 +57,8 @@ class RLBenchDataset(BaseDataset):
         copies=None,
         relative_action=False,
         mem_limit=8,
-        actions_only=False
+        actions_only=False,
+        chunk_size=4
     ):
         super().__init__(
             root=root,
@@ -64,34 +66,35 @@ class RLBenchDataset(BaseDataset):
             copies=copies,
             relative_action=relative_action,
             mem_limit=mem_limit,
-            actions_only=actions_only
+            actions_only=actions_only,
+            chunk_size=chunk_size
         )
 
     def _get_task(self, idx):
-        return [self.tasks[int(self.annos['task_id'][idx])]]
+        return [
+            self.tasks[int(tid)]
+            for tid in self.annos['task_id'][idx:idx + self.chunk_size]
+        ]
 
     def _get_instr(self, idx):
-        t_ = int(self.annos['task_id'][idx])
-        v_ = int(self.annos['variation'][idx])
-        task = self.tasks[t_]
-        return [random.choice(self._instructions[task][str(v_)])]
+        return [
+            random.choice(self._instructions[self.tasks[int(t)]][str(int(v))])
+            for t, v in zip(
+                self.annos['task_id'][idx:idx + self.chunk_size],
+                self.annos['variation'][idx:idx + self.chunk_size]
+            )
+        ]
 
     def _get_rgb2d(self, idx):
         if self.camera_inds2d is not None:
-            return self._get_attr_by_idx(idx, 'rgb')[self.camera_inds2d,]
+            return self._get_attr_by_idx(idx, 'rgb', False)[:, self.camera_inds2d]
         return None
 
     def _get_extrinsics(self, idx):
-        t = self._get_attr_by_idx(idx, 'extrinsics')
-        if self.camera_inds is not None:
-            t = t[self.camera_inds,]
-        return t
+        return self._get_attr_by_idx(idx, 'extrinsics', True)
 
     def _get_intrinsics(self, idx):
-        t = self._get_attr_by_idx(idx, 'intrinsics')
-        if self.camera_inds is not None:
-            t = t[self.camera_inds,]
-        return t
+        return self._get_attr_by_idx(idx, 'intrinsics', True)
 
     def __getitem__(self, idx):
         """
@@ -106,7 +109,10 @@ class RLBenchDataset(BaseDataset):
             intrinsics: (N, n_cam, 3, 3) float
         }
         """
-        idx = idx % len(self.annos['action'])
+        # First detect which copy we fall into
+        idx = idx % (len(self.annos['action']) // self.chunk_size - 1)
+        # and then which chunk
+        idx = idx * self.chunk_size
         if self._actions_only:
             return {"action": self._get_action(idx)}
         return {
@@ -176,6 +182,15 @@ class PeractSingleCamDataset(RLBenchDataset):
     tasks = PERACT_TASKS
     cameras = ("front",)
     camera_inds = [3]
+    train_copies = 10
+    camera_inds2d = None
+
+
+class Peract2AllDataset(RLBenchDataset):
+    """RLBench dataset under Peract2 setup."""
+    tasks = PERACT2_TASKS
+    cameras = ("front", "wrist_left", "wrist_right", "over_shoulder_left", "over_shoulder_right")
+    camera_inds = None
     train_copies = 10
     camera_inds2d = None
 
