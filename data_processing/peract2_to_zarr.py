@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import pickle
@@ -15,21 +16,39 @@ from data_processing.rlbench_utils import (
 )
 
 
-ROOT = '/data/group_data/katefgroup/VLA/peract2_raw_squash/'
-STORE_PATH = '/data/group_data/katefgroup/VLA/zarr_datasets/Peract2_zarr/'
 STORE_EVERY = 1  # in keyposes
 NCAM = 3
 IM_SIZE = 256
 DEPTH_SCALE = 2**24 - 1
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    # Tuples: (name, type, default)
+    arguments = [
+        # Dataset/loader arguments
+        ('root', str, '/data/group_data/katefgroup/VLA/peract2_raw_squash/'),
+        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/Peract2_zarr/')
+    ]
+    for arg in arguments:
+        parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
+
+    return parser.parse_args()
+
+
 def all_tasks_main(split, tasks):
+    # Check if the zarr already exists
+    filename = f"{STORE_PATH}/{split}.zarr"
+    if os.path.exists(filename):
+        print(f"Zarr file {filename} already exists. Skipping...")
+        return None
+
     cameras = ["front", "wrist_left", "wrist_right"]
     task2id = {task: t for t, task in enumerate(tasks)}
 
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}{split}.zarr", mode="w") as zarr_file:
+    with zarr.open_group(filename, mode="w") as zarr_file:
         zarr_file.create_dataset(
             "rgb",
             shape=(0, NCAM, 3, IM_SIZE, IM_SIZE),
@@ -232,6 +251,9 @@ if __name__ == "__main__":
         'bimanual_handover_item_easy',
         'bimanual_take_tray_out_of_oven'
     ]
+    args = parse_arguments()
+    ROOT = args.root
+    STORE_PATH = args.tgt
     # Create zarr data
     for split in ['train', 'val']:
         all_tasks_main(split, tasks)

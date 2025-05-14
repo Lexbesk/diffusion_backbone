@@ -13,8 +13,6 @@ from online_evaluation_calvin.utils_with_calvin import get_env
 
 ROOT = '/data/group_data/katefgroup/VLA/calvin_dataset/task_ABC_D'
 STORE_PATH = '/data/user_data/ngkanats/zarr_datasets/CALVIN_zarr'
-# ROOT = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/task_ABC_D'
-# STORE_PATH = '/lustre/fsw/portfolios/nvr/users/ngkanatsios/zarr_datasets/CALVIN_zarr'
 STORE_EVERY = 1  # in keyposes
 SUBSAMPLE = 3
 IM_SIZE = 160
@@ -59,6 +57,12 @@ def to_relative_action(actions, anchor_actions, qform='xyzw'):
 
 
 def all_tasks_main(env, split):
+    # Check if the zarr already exists
+    filename = f"{STORE_PATH}/{split}.zarr"
+    if os.path.exists(filename):
+        print(f"Zarr file {filename} already exists. Skipping...")
+        return None
+
     # All CALVIN episodes
     suffix = 'training' if split == 'train' else 'validation'
     annos = np.load(
@@ -68,7 +72,7 @@ def all_tasks_main(env, split):
 
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
-    with zarr.open_group(f"{STORE_PATH}/{split}.zarr", mode="w") as zarr_file:
+    with zarr.open_group(filename, mode="w") as zarr_file:
         zarr_file.create_dataset(
             "rgb_front",
             shape=(0, 1, 3, IM_SIZE, IM_SIZE),

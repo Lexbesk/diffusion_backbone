@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import pickle
@@ -15,12 +16,24 @@ from data_processing.rlbench_utils import (
 )
 
 
-ROOT = '/data/group_data/katefgroup/VLA/peract_raw/'
-STORE_PATH = '/data/user_data/ngkanats/Peract_zarr/'
 STORE_EVERY = 1  # in keyposes
 NCAM = 4
 IM_SIZE = 128
 DEPTH_SCALE = 2**24 - 1
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    # Tuples: (name, type, default)
+    arguments = [
+        # Dataset/loader arguments
+        ('root', str, '/data/group_data/katefgroup/VLA/peract_raw/'),
+        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/Peract_zarr/')
+    ]
+    for arg in arguments:
+        parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
+
+    return parser.parse_args()
 
 
 def all_tasks_main(split, tasks):
@@ -192,6 +205,9 @@ if __name__ == "__main__":
         "slide_block_to_color_target", "stack_blocks", "stack_cups",
         "sweep_to_dustpan_of_size", "turn_tap"
     ]
+    args = parse_arguments()
+    ROOT = args.root
+    STORE_PATH = args.tgt
     # Create zarr data
     for split in ['train', 'val']:
         all_tasks_main(split, tasks)
