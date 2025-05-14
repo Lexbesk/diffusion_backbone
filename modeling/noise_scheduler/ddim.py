@@ -1,9 +1,9 @@
 import torch
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler as BaseScheduler
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler as BaseScheduler
 
 
-class DDPMScheduler(BaseScheduler):
-    """A wrapper class for DDPM which handles sampling noise for training."""
+class DDIMScheduler(BaseScheduler):
+    """A wrapper class for DDIM which handles sampling noise for training."""
 
     def sample_noise_step(self, num_noise, device):
         timesteps = torch.randint(
