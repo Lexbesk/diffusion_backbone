@@ -1,5 +1,6 @@
 import os
 import glob
+from pathlib import Path
 import random
 
 import open3d
@@ -7,7 +8,6 @@ from tqdm import tqdm
 import numpy as np
 import torch
 import torch.nn.functional as F
-import einops
 
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
@@ -17,8 +17,12 @@ from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlan
 from rlbench.backend.exceptions import InvalidActionError
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
+from pyrep.objects.dummy import Dummy
+from pyrep.objects.vision_sensor import VisionSensor
 
+from modeling.encoder.text import fetch_tokenizers
 from online_evaluation_rlbench.get_stored_demos import get_stored_demos
+from data_processing.rlbench_utils import keypoint_discovery
 
 
 ALL_RLBENCH_TASKS = [
@@ -48,6 +52,55 @@ def task_file_to_task_class(task_file):
     mod = importlib.reload(mod)
     task_class = getattr(mod, class_name)
     return task_class
+
+
+class CameraMotion:
+    def __init__(self, cam: VisionSensor):
+        self.cam = cam
+
+    def step(self):
+        raise NotImplementedError()
+
+    def save_pose(self):
+        self._prev_pose = self.cam.get_pose()
+
+    def restore_pose(self):
+        self.cam.set_pose(self._prev_pose)
+
+
+class StaticCameraMotion(CameraMotion):
+
+    def __init__(self, cam: VisionSensor):
+        super().__init__(cam)
+
+    def step(self):
+        pass
+
+
+class TaskRecorder(object):
+
+    def __init__(self, cams_motion, fps=30):
+        self._cams_motion = cams_motion
+        self._fps = fps
+        self._snaps = {cam_name: [] for cam_name in self._cams_motion.keys()}
+
+    def take_snap(self):
+        for cam_name, cam_motion in self._cams_motion.items():
+            cam_motion.step()
+            self._snaps[cam_name].append(
+                (cam_motion.cam.capture_rgb() * 255.).astype(np.uint8))
+
+    def save(self, path):
+        print('Converting to video ...')
+        path = Path(path)
+        path.mkdir(exist_ok=True)
+        from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+
+        # Assume 'frames' is a list of RGB NumPy arrays with shape (H, W, 3)
+        for cam_name, cam_motion in self._cams_motion.items():
+            clip = ImageSequenceClip([image for image in self._snaps[cam_name]], fps=30)  # 30 FPS
+            clip.write_videofile("output_video.mp4", codec="libx264")
+            break
 
 
 class Mover:
@@ -124,9 +177,11 @@ class Actioner:
         self._policy = policy
         self._policy.eval()
         self._instr = None
+        self.tokenizer = fetch_tokenizers('clip')
 
     def load_episode(self, descriptions):
-        self._instr = [random.choice(descriptions)]
+        instr = [random.choice(descriptions)]
+        self._instr = self.tokenizer(instr).cuda(non_blocking=True)
 
     def predict(self, rgbs, pcds, gripper, prediction_len=1):
         """
@@ -166,7 +221,7 @@ class RLBenchEnv:
     def __init__(
         self,
         data_path,
-        image_size=(128, 128),
+        image_size=(256, 256),
         apply_rgb=False,
         apply_depth=False,
         apply_pc=False,
@@ -177,9 +232,6 @@ class RLBenchEnv:
 
         # setup required inputs
         self.data_path = data_path
-        self.apply_rgb = apply_rgb
-        self.apply_depth = apply_depth
-        self.apply_pc = apply_pc
         self.apply_cameras = apply_cameras
 
         # setup RLBench environments
@@ -195,38 +247,6 @@ class RLBenchEnv:
             self.action_mode, str(data_path), self.obs_config,
             headless=headless, robot_setup="dual_panda"
         )
-        self.image_size = image_size
-
-    def get_obs_action(self, obs):
-        """
-        Fetch the desired state and action based on the provided demo.
-            :param obs: incoming obs
-            :return: required observation and action list
-        """
-
-        # fetch state
-        state_dict = {"rgb": [], "depth": [], "pc": []}
-        for cam in self.apply_cameras:
-            if self.apply_rgb:
-                rgb = obs.perception_data["{}_rgb".format(cam)]
-                state_dict["rgb"] += [rgb]
-
-            if self.apply_depth:
-                depth = obs.perception_data["{}_depth".format(cam)]
-                state_dict["depth"] += [depth]
-
-            if self.apply_pc:
-                pc = obs.perception_data["{}_point_cloud".format(cam)]
-                state_dict["pc"] += [pc]
-
-        # fetch action
-        action = np.concatenate([obs.left.gripper_pose,
-                                 [obs.left.gripper_open],
-                                 obs.right.gripper_pose,
-                                 [obs.right.gripper_open]])
-        # action is an array of length 16 = (7+1)*2
-
-        return state_dict, torch.from_numpy(action).float()
 
     def get_rgb_pcd_gripper_from_obs(self, obs):
         """
@@ -234,27 +254,19 @@ class RLBenchEnv:
         :param obs: an Observation from the env
         :return: rgb, pcd, gripper
         """
-        state_dict, gripper = self.get_obs_action(obs)
-        obs_rgb = [
-            torch.tensor(state_dict["rgb"][i]).float().permute(2, 0, 1) / 255.0
-            for i in range(len(state_dict["rgb"]))
-        ]
-        obs_pc = [
-            torch.tensor(state_dict["pc"][i]).float().permute(2, 0, 1)
-            if len(state_dict["pc"]) > 0 else None
-            for i in range(len(state_dict["rgb"]))
-        ]
-        state = torch.cat(obs_rgb + obs_pc, dim=0)
-        state = einops.rearrange(
-            state,
-            "(m n ch) h w -> n m ch h w",
-            ch=3,
-            n=len(self.apply_cameras),
-            m=2
-        )
-        rgb = state[:, 0].unsqueeze(0)  # 1, N, C, H, W
-        pcd = state[:, 1].unsqueeze(0)  # 1, N, C, H, W
-        gripper = gripper.unsqueeze(0)  # 1, D
+        rgb = torch.stack([
+            torch.tensor(obs.perception_data["{}_rgb".format(cam)]).float().permute(2, 0, 1) / 255.0
+            for cam in self.apply_cameras
+        ]).unsqueeze(0)  # 1, N, C, H, W
+        pcd = torch.stack([
+            torch.tensor(obs.perception_data["{}_point_cloud".format(cam)]).float().permute(2, 0, 1)
+            for cam in self.apply_cameras
+        ]).unsqueeze(0)  # 1, N, C, H, W
+        # action is an array of length 16 = (7+1)*2
+        gripper = torch.from_numpy(np.concatenate([
+            obs.left.gripper_pose, [obs.left.gripper_open],
+            obs.right.gripper_pose, [obs.right.gripper_open]
+        ])).float().unsqueeze(0)  # 1, D
 
         return rgb, pcd, gripper
 
@@ -318,9 +330,26 @@ class RLBenchEnv:
         actioner,
         max_tries=1,
         prediction_len=50,
-        num_history=1
+        num_history=1,
+        record_video=False
     ):
         device = actioner.device
+
+        # if record_video:
+        #     # Add a global camera to the scene
+        #     cam_placeholder = Dummy('cam_cinematic_placeholder')
+        #     cam_resolution = [480, 480]
+        #     cam = VisionSensor.create(cam_resolution)
+        #     cam.set_pose(cam_placeholder.get_pose())
+        #     cam.set_parent(cam_placeholder)
+
+        #     # cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), 0.005)
+        #     global_cam_motion = StaticCameraMotion(cam)
+            
+        #     cams_motion = {"global": global_cam_motion}
+
+        #     tr = TaskRecorder(cams_motion, fps=5)
+        #     task._scene.register_step_callback(tr.take_snap)
 
         success_rate = 0
         total_reward = 0
@@ -333,7 +362,9 @@ class RLBenchEnv:
             from_episode_number=0
         )
 
-        for demo_id, demo in enumerate(var_demos):
+        for demo_id, demo in enumerate(var_demos[:20]):
+            if record_video:
+                frames = []
 
             grippers = torch.Tensor([]).to(device)
             descriptions, obs = task.reset_to_demo(demo)
@@ -347,6 +378,8 @@ class RLBenchEnv:
 
                 # Fetch the current observation and predict one action
                 rgb, pcd, gripper = self.get_rgb_pcd_gripper_from_obs(obs)
+                if record_video:
+                    frames.append((rgb[0].cpu().numpy()[0].transpose(1, 2, 0) * 255).astype(np.uint8))
                 rgbs_input = rgb.to(device)
                 pcds_input = pcd.to(device)
                 gripper = gripper.to(device)
@@ -369,8 +402,6 @@ class RLBenchEnv:
                     gripper_input,
                     prediction_len=prediction_len
                 )
-
-                terminate = True
 
                 # Update the observation based on the predicted action
                 try:
@@ -413,6 +444,11 @@ class RLBenchEnv:
                 f"SR: {total_reward:.2f}/{demo_id+1}",
                 "# valid demos", demo_id + 1
             )
+
+            if record_video:
+                from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+                clip = ImageSequenceClip(frames, fps=5)
+                clip.write_videofile(f"{task_str}_{demo_id}.mp4", codec="libx264")
 
         # Compensate for failed demos
         valid = len(var_demos) > 0
@@ -466,3 +502,127 @@ class RLBenchEnv:
         )
 
         return obs_config
+
+
+class ReplayRLBenchEnv(RLBenchEnv):
+
+    @torch.no_grad()
+    def _evaluate_task_on_one_variation(
+        self,
+        task_str,  # this is str
+        task,  # this instance of TaskEnvironment
+        max_steps,
+        variation,
+        actioner,
+        max_tries=1,
+        prediction_len=50,
+        num_history=1,
+        record_video=True
+    ):
+        # if record_video:
+        #     # Add a global camera to the scene
+        #     cam_placeholder = Dummy('cam_cinematic_placeholder')
+        #     cam_resolution = [480, 480]
+        #     cam = VisionSensor.create(cam_resolution)
+        #     cam.set_pose(cam_placeholder.get_pose())
+        #     cam.set_parent(cam_placeholder)
+
+        #     # cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), 0.005)
+        #     global_cam_motion = StaticCameraMotion(cam)
+            
+        #     cams_motion = {"global": global_cam_motion}
+
+        #     tr = TaskRecorder(cams_motion, fps=5)
+        #     task._scene.register_step_callback(tr.take_snap)
+
+        success_rate = 0
+        total_reward = 0
+        var_demos = get_stored_demos(
+            amount=-1,
+            dataset_root=self.data_path,
+            variation_number=variation,
+            task_name=task_str,
+            random_selection=False,
+            from_episode_number=0
+        )
+
+        for demo_id, demo in enumerate(var_demos):
+            if record_video:
+                frames = []
+
+            _, obs = task.reset_to_demo(demo)
+
+            move = Mover(task, max_tries=max_tries)
+            reward = 0.0
+            max_reward = 0.0
+
+            # Find keyposes
+            key_frames = keypoint_discovery(demo, bimanual=True)
+            states = np.stack([np.concatenate([
+                demo[k].left.gripper_pose,
+                [demo[k].left.gripper_open],
+                demo[k].right.gripper_pose,
+                [demo[k].right.gripper_open]
+            ]) for k in key_frames]).astype(np.float32)
+            key_actions = states.reshape(len(states), 1, 2, 8)
+
+            for step_id in range(len(key_actions)):
+
+                # Fetch the current observation and predict one action
+                rgb, _, _ = self.get_rgb_pcd_gripper_from_obs(obs)
+                if record_video:
+                    frames.append((rgb[0].cpu().numpy()[0].transpose(1, 2, 0) * 255).astype(np.uint8))
+
+                # Update the observation based on the predicted action
+                try:
+                    # Execute entire predicted trajectory step by step
+                    actions = key_actions[step_id]
+
+                    # execute
+                    for action in actions:
+                        obs, reward, terminate = move(action, collision_checking=False)
+
+                    max_reward = max(max_reward, reward)
+
+                    if reward == 1:
+                        success_rate += 1
+                        break
+
+                    if terminate:
+                        print("The episode has terminated!")
+
+                except (IKError, ConfigurationPathError, InvalidActionError) as e:
+                    print(task_str, demo, step_id, success_rate, e)
+                    reward = 0
+
+            total_reward += max_reward
+            if reward == 0:
+                step_id += 1
+
+            print(
+                task_str,
+                "Variation",
+                variation,
+                "Demo",
+                demo_id,
+                "Reward",
+                f"{reward:.2f}",
+                "max_reward",
+                f"{max_reward:.2f}",
+                f"SR: {success_rate}/{demo_id+1}",
+                f"SR: {total_reward:.2f}/{demo_id+1}",
+                "# valid demos", demo_id + 1
+            )
+
+            if record_video and reward < 1:
+                try:
+                    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+                    clip = ImageSequenceClip(frames, fps=5)
+                    clip.write_videofile(f"videos/replay_{task_str}_{demo_id}.mp4", codec="libx264")
+                except:
+                    print("Error writing video file")
+
+        # Compensate for failed demos
+        valid = len(var_demos) > 0
+
+        return success_rate, valid, len(var_demos)

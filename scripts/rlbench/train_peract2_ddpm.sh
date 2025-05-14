@@ -44,12 +44,11 @@ num_history=3
 workspace_normalizer_buffer=0.05
 quaternion_format=xyzw
 relative_action=false
-denoise_timesteps=10
-denoise_model=rectified_flow
+denoise_timesteps=100
+denoise_model=ddpm
 
 run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=peract2_front_wrist3d_2.pth
 
 ngpus=4
 

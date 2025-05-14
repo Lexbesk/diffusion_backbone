@@ -3,10 +3,8 @@
 import argparse
 import os
 from pathlib import Path
-import random
 import sys
 
-import numpy as np
 import torch
 
 from datasets import fetch_dataset_class
@@ -29,6 +27,7 @@ def parse_arguments():
         ('num_workers', int, 4),
         ('batch_size', int, 64),
         ('batch_size_val', int, 64),
+        ('chunk_size', int, 1),
         ('memory_limit', float, 8),  # cache limit in GB
         # Logging arguments
         ('base_log_dir', Path, Path(__file__).parent / "train_logs"),
@@ -42,7 +41,7 @@ def parse_arguments():
         ('lr_scheduler', str, "constant"),
         ('wd', float, 5e-3),
         ('train_iters', int, 600000),
-        ('use_compile', str2bool, True),
+        ('use_compile', str2bool, False),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),

@@ -31,15 +31,15 @@ class BaseTrainTester:
         self.model_cls = model_cls
         self.depth2cloud = depth2cloud
         self.aug = K.AugmentationSequential(
-            K.RandomHorizontalFlip(p=0.5),
+            # K.RandomHorizontalFlip(p=0.5),
             K.RandomAffine(
                 degrees=0,
-                translate=0.05,
+                translate=0.0,
                 scale=(0.75, 1.25),
                 padding_mode="reflection",
                 p=0.8
             ),
-            K.RandomRotation((-5, 5), p=0.3),
+            # K.RandomRotation((-5, 5), p=0.3),
             K.RandomResizedCrop(
                 size=(im_size, im_size),
                 scale=(0.95, 1.05),
@@ -57,14 +57,16 @@ class BaseTrainTester:
             root=self.args.train_data_dir,
             instructions=self.args.train_instructions,
             relative_action=self.args.relative_action,
-            mem_limit=self.args.memory_limit
+            mem_limit=self.args.memory_limit,
+            chunk_size=self.args.chunk_size
         )
         val_dataset = self.dataset_cls(
             root=self.args.eval_data_dir,
             instructions=self.args.val_instructions,
             copies=1,
             relative_action=self.args.relative_action,
-            mem_limit=0.1
+            mem_limit=0.1,
+            chunk_size=self.args.chunk_size
         )
         return train_dataset, val_dataset
 
@@ -83,7 +85,7 @@ class BaseTrainTester:
         train_sampler = DistributedSampler(train_dataset, drop_last=True)
         train_loader = DataLoader(
             train_dataset,
-            batch_size=self.args.batch_size,
+            batch_size=self.args.batch_size // self.args.chunk_size,
             shuffle=False,
             num_workers=self.args.num_workers,
             worker_init_fn=seed_worker,
@@ -99,7 +101,7 @@ class BaseTrainTester:
         if dist.get_rank() == 0:
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=self.args.batch_size_val,
+                batch_size=self.args.batch_size_val // self.args.chunk_size,
                 shuffle=False,
                 num_workers=self.args.num_workers,
                 collate_fn=base_collate_fn,
@@ -153,12 +155,13 @@ class BaseTrainTester:
             copies=1,
             relative_action=self.args.relative_action,
             mem_limit=0.1,
-            actions_only=True
+            actions_only=True,
+            chunk_size=self.args.chunk_size
         )
 
         data_loader = DataLoader(
             train_dataset,
-            batch_size=max(self.args.batch_size, 64),
+            batch_size=max(self.args.batch_size, 64) // self.args.chunk_size,
             collate_fn=actions_collate_fn,
             shuffle=False,
             num_workers=self.args.num_workers
@@ -358,12 +361,17 @@ class BaseTrainTester:
         action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
             sample, augment=training
         )
+        # from time import time
+        # torch.cuda.synchronize()
+        # start = time()
         instr = self.tokenizer(instr).cuda(non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = model(
                 action, action_mask, rgbs, rgb2d, pcds, instr, prop,
                 run_inference=not training
             )
+        # torch.cuda.synchronize()
+        # print("Time taken for forward pass: ", time() - start)
         return out  # loss if training, else action
 
     def train_one_step(self, model, optimizer, scaler, lr_scheduler, sample):
@@ -512,12 +520,14 @@ def base_collate_fn(batch):
     # Values for these come as lists
     list_keys = ["task", "instr"]
     for key in list_keys:
-        _dict[key] = [item[key][0] for item in batch]
+        _dict[key] = []
+        for item in batch:
+            _dict[key].extend(item[key])
 
     # Treat rest as tensors
     _dict.update({
         k_: (
-            torch.stack([item[k_] for item in batch])
+            torch.cat([item[k_] for item in batch])
             if batch[0][k_] is not None else None
         )
         for k_ in batch[0].keys() if k_ not in list_keys
@@ -527,4 +537,4 @@ def base_collate_fn(batch):
 
 
 def actions_collate_fn(batch):
-    return {"action": torch.stack([item["action"] for item in batch])}
+    return {"action": torch.cat([item["action"] for item in batch])}

@@ -15,7 +15,6 @@ dataset=Peract2_3dfront_3dwrist
 num_workers=4
 B=64
 B_val=64
-chunk_size=1
 
 # Training/testing arguments, change these for HPT
 val_freq=4000
@@ -24,17 +23,17 @@ lr=1e-4
 lr_scheduler=constant
 wd=1e-10
 train_iters=600000
-use_compile=false
+use_compile=true
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3d  # denoise3ddf
+model_type=denoise3d_2ndstage  # denoise3ddf
 bimanual=true
 keypose_only=true
 
 backbone=clip
 finetune_backbone=false
 finetune_text_encoder=false
-fps_subsampling_factor=4
+fps_subsampling_factor=5
 
 C=120
 num_attn_heads=8
@@ -47,7 +46,7 @@ relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=peract2_front_wrist3d_2.pth
 
@@ -63,7 +62,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --num_workers $num_workers \
     --batch_size $B \
     --batch_size_val $B_val \
-    --chunk_size $chunk_size \
     --exp_log_dir $main_dir \
     --run_log_dir ${run_log_dir} \
     --checkpoint $checkpoint \

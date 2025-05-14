@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from .multihead_custom_attention import MultiheadCustomAttention
@@ -371,4 +372,83 @@ class DoubleCrossSelfAttentionModule(nn.Module):
             )
             seq = self.ffw_layers[i](seq, ada_sgnl)
             output.append(seq)
+        return output
+
+
+class StackCrossSelfAttentionModule(nn.Module):
+    """Stacking of two attention and one feed-forward layers."""
+
+    def __init__(self, num_layers, d_model=256, dim_fw=None,
+                 dropout=0.1, n_heads=8, pre_norm=False,
+                 rotary_pe_0=False, rotary_pe_1=False,
+                 use_adaln=False):
+        super().__init__()
+        self.num_layers = num_layers
+        self.attn_layers_0 = nn.ModuleList()
+        self.attn_layers_1 = nn.ModuleList()
+        self.ffw_layers = nn.ModuleList()
+        for _ in range(num_layers):
+            self.attn_layers_0.append(AttentionLayer(
+                d_model, dropout, n_heads, pre_norm,
+                rotary_pe_0, use_adaln, False
+            ))
+            self.attn_layers_1.append(AttentionLayer(
+                d_model, dropout, n_heads, pre_norm,
+                rotary_pe_1, use_adaln, True
+            ))
+            self.ffw_layers.append(FFWLayer(
+                d_model, dim_fw, dropout, use_adaln, pre_norm=False
+            ))
+
+    def forward(self, seq, seq0, seq1,
+                seq0_key_padding_mask=None, seq1_key_padding_mask=None,
+                seq_pos_0=None, seq0_pos=None, seq_pos_1=None, seq1_pos=None,
+                seq_sem_pos_0=None, seq0_sem_pos=None,
+                seq_sem_pos_1=None, seq1_sem_pos=None,
+                ada_sgnl=None):
+        """
+        Here seq attends to seq0 first, seq1 next, with different pos embed.
+
+        Args:
+            seq: tensor (B, S, C)
+            seq0: tensor (B, S0, C)
+            seq1: tensor (B, S1, C)
+            seq0_key_padding_mask: tensor (B, S0)
+            seq1_key_padding_mask: tensor (B, S1)
+            seq_pos_0: (B, S, C) if not rotary, else (B, S, C, 2), first att
+            seq0_pos: (B, S0, C) if not rotary, else (B, S0, C, 2)
+            seq_pos_1: (B, S, C) if not rotary, else (B, S, C, 2), second att
+            seq1_pos: (B, S1, C) if not rotary, else (B, S1, C, 2)
+            seq_sem_pos0: (B, S, C), semantic embedding, first att
+            seq0_sem_pos: (B, S0, C), semantic embedding
+            seq_sem_pos1: (B, S, C), semantic embedding, second att
+            seq1_sem_pos: (B, S1, C), semantic embedding
+            ada_sgnl: tensor (B, C)
+
+        Returns:
+            tensor (B, S1, C)
+        """
+        output = []
+        for i in range(self.num_layers):
+            seq = self.attn_layers_0[i](
+                seq, seq0,
+                seq0_key_padding_mask,
+                seq_pos_0, seq0_pos,
+                seq_sem_pos_0, seq0_sem_pos,
+                ada_sgnl
+            )
+            len_ = seq.size(1)
+            seq_ = self.attn_layers_1[i](
+                torch.cat([seq, seq1], 1), torch.cat([seq, seq1], 1),
+                None,
+                torch.cat([seq_pos_1, seq1_pos], 1),
+                torch.cat([seq_pos_1, seq1_pos], 1),
+                torch.cat([seq_sem_pos_1, seq1_sem_pos], 1) if seq_sem_pos_1 is not None else None,
+                torch.cat([seq_sem_pos_1, seq1_sem_pos], 1) if seq_sem_pos_1 is not None else None,
+                ada_sgnl
+            )
+            seq_ = self.ffw_layers[i](seq_, ada_sgnl)
+            output.append(seq_)
+            seq = seq_[:, :len_, :]
+            seq1 = seq_[:, len_:, :]
         return output

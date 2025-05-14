@@ -33,7 +33,7 @@ from online_evaluation_calvin.multistep_sequences import get_sequences
 
 logger = logging.getLogger(__name__)
 
-EP_LEN = 5
+EP_LEN = 60
 NUM_SEQUENCES = 1000
 
 

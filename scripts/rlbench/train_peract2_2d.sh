@@ -23,6 +23,7 @@ lr=1e-4
 lr_scheduler=constant
 wd=1e-10
 train_iters=600000
+use_compile=false
 
 # Model arguments, change (some of) these for new architectures
 model_type=denoise2d  # denoise3ddf
@@ -48,7 +49,7 @@ denoise_model=rectified_flow
 run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-ngpus=4
+ngpus=1
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
@@ -69,6 +70,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --lr_scheduler $lr_scheduler \
     --wd $wd \
     --train_iters $train_iters \
+    --use_compile $use_compile \
     --model_type $model_type \
     --bimanual $bimanual \
     --keypose_only $keypose_only \

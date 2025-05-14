@@ -27,6 +27,7 @@ def parse_arguments():
         ('headless', str2bool, False),
         ('collision_checking', str2bool, False),
         ('seed', int, 0),
+        ('replay', str2bool, False),
         # Dataset arguments
         ('data_dir', Path, Path(__file__).parent / "demos"),
         ('dataset', str, "Peract"),
@@ -81,7 +82,7 @@ def load_models(args):
     for key in model_dict["weight"]:
         _key = key[7:]
         model_dict_weight[_key] = model_dict["weight"][key]
-    model.load_state_dict(model_dict_weight)
+    model.load_state_dict(model_dict_weight, strict=False)
     model.eval()
 
     return model.cuda()
@@ -99,7 +100,7 @@ if __name__ == "__main__":
 
     # Bimanual vs single-arm utils
     if args.bimanual:
-        from online_evaluation_rlbench.utils_with_bimanual_rlbench import RLBenchEnv, Actioner
+        from online_evaluation_rlbench.utils_with_bimanual_rlbench import RLBenchEnv, Actioner, ReplayRLBenchEnv
     else:
         from online_evaluation_rlbench.utils_with_rlbench import RLBenchEnv, Actioner
 
@@ -120,7 +121,8 @@ if __name__ == "__main__":
         random.seed(args.seed)
 
         # Load RLBench environment
-        env = RLBenchEnv(
+        env_cls = ReplayRLBenchEnv if args.replay else RLBenchEnv
+        env = env_cls(
             data_path=args.data_dir,
             image_size=[int(x) for x in args.image_size.split(",")],
             apply_rgb=True,
@@ -138,7 +140,7 @@ if __name__ == "__main__":
             task_str,
             max_steps=args.max_steps,
             actioner=actioner,
-            max_tries=args.max_tries,
+            max_tries=args.max_tries if not args.replay else 1,
             prediction_len=args.prediction_len,
             num_history=args.num_history
         )

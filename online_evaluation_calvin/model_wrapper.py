@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import torch
 from torch.nn import functional as F
 
@@ -99,6 +100,8 @@ class Model:
         # Proprioception
         proprio = torch.from_numpy(obs["proprio"]).to(device).float()
         proprio = proprio[None, :self.args.num_history, None]
+        from ipdb import set_trace
+        set_trace()
 
         # Forward pass
         trajectory = self.policy(
@@ -113,12 +116,15 @@ class Model:
         )  # (1, T, 1, 8)
         trajectory = trajectory.view(1, self.args.pred_len, 8)  # (1, T, 8)
 
-        # Back to absolute actions
-        if bool(self.args.relative_action):
-            trajectory = relative_to_absolute(trajectory, proprio[:, [-1], 0])
-
         # Convert quaternion to Euler angles
         trajectory = convert_action(trajectory)
+
+        # Back to absolute actions
+        if bool(self.args.relative_action):
+            trajectory = relative_to_absolute(
+                trajectory,
+                convert_action(proprio[:, [-1], 0])
+            )
 
         return trajectory
 
@@ -127,3 +133,19 @@ def create_model(args):
     model = Model(args)
     model.load_pretrained_weights()
     return model
+
+
+def relative_to_absolute(action, proprio, max_rel_pos=1.0, max_rel_orn=1.0,
+                         magic_scaling_factor_pos=1, magic_scaling_factor_orn=1):
+    assert action.shape[-1] == 7
+    assert proprio.shape[-1] == 7
+
+    rel_pos, rel_orn, gripper = np.split(action, [3, 6], -1)
+    rel_pos *= max_rel_pos * magic_scaling_factor_pos
+    rel_orn *= max_rel_orn * magic_scaling_factor_orn
+
+    pos_proprio, orn_proprio = proprio[..., :3], proprio[..., 3:6]
+
+    target_pos = pos_proprio + rel_pos
+    target_orn = orn_proprio + rel_orn
+    return np.concatenate([target_pos, target_orn, gripper], -1)

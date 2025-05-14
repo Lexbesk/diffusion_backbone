@@ -1,9 +1,9 @@
 import einops
 import torch
 
-from ..encoder.multimodal.encoder_df import Encoder
-from ..utils.layers import DoubleCrossAttentionModule
-from ..utils.position_encodings import RotaryPositionEncoding3D, SinusoidalPosEmb
+from ..encoder.multimodal.encoder3d import Encoder
+from ..utils.layers import StackCrossSelfAttentionModule
+from ..utils.position_encodings import RotaryPositionEncoding3D
 
 from .base_denoise_actor import DenoiseActor as BaseDenoiseActor
 from .base_denoise_actor import TransformerHead as BaseTransformerHead
@@ -79,39 +79,42 @@ class TransformerHead(BaseTransformerHead):
         )
 
         # Shared attention layers
-        self.self_attn = DoubleCrossAttentionModule(
+        self.self_attn = StackCrossSelfAttentionModule(
             num_layers=4,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
-            rotary_pe_0=rotary_pe,
+            pre_norm=False,
+            rotary_pe_0=False,
+            rotary_pe_1=rotary_pe,
             use_adaln=True
         )
 
         # Specific (non-shared) Output layers:
         # 1. Rotation
-        self.rotation_self_attn = DoubleCrossAttentionModule(
+        self.rotation_self_attn = StackCrossSelfAttentionModule(
             num_layers=2,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
-            rotary_pe_0=rotary_pe,
+            pre_norm=False,
+            rotary_pe_0=False,
+            rotary_pe_1=rotary_pe,
             use_adaln=True
         )
 
         # 2. Position
-        self.position_self_attn = DoubleCrossAttentionModule(
+        self.position_self_attn = StackCrossSelfAttentionModule(
             num_layers=2,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
             dropout=0.1,
             n_heads=num_attn_heads,
-            pre_norm=True,
-            rotary_pe_0=rotary_pe,
+            pre_norm=False,
+            rotary_pe_0=False,
+            rotary_pe_1=rotary_pe,
             use_adaln=True
         )
 
@@ -180,15 +183,17 @@ class TransformerHead(BaseTransformerHead):
             ada_sgnl=time_embs
         )[-1]
 
-        # Cross(!) attention among gripper and sampled context
-        traj_feats = self.self_attn(
+        # Self attention among gripper and sampled context
+        features = self.self_attn(
             seq=traj_feats,
-            seq0=fps_scene_feats,
-            seq1=rgb2d_feats,
-            seq_pos_0=rel_traj_pos,
-            seq0_pos=rel_fps_pos,
+            seq0=rgb2d_feats,
+            seq1=fps_scene_feats,
+            seq_pos_1=rel_traj_pos,
+            seq1_pos=rel_fps_pos,
             ada_sgnl=time_embs
         )[-1]
+        traj_feats = features[:, :traj_feats.shape[1]]
+        fps_scene_feats = features[:, traj_feats.shape[1]:]
 
         # Rotation head
         rotation = self.predict_rot(
@@ -214,12 +219,13 @@ class TransformerHead(BaseTransformerHead):
                     rel_traj_pos, rel_fps_pos, time_embs):
         position_features = self.position_self_attn(
             seq=traj_feats,
-            seq0=fps_scene_feats,
-            seq1=rgb2d_feats,
-            seq_pos_0=rel_traj_pos,
-            seq0_pos=rel_fps_pos,
+            seq0=rgb2d_feats,
+            seq1=fps_scene_feats,
+            seq_pos_1=rel_traj_pos,
+            seq1_pos=rel_fps_pos,
             ada_sgnl=time_embs
         )[-1]
+        position_features = position_features[:, :traj_feats.shape[1]]
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
@@ -228,12 +234,13 @@ class TransformerHead(BaseTransformerHead):
                     rel_traj_pos, rel_fps_pos, time_embs):
         rotation_features = self.rotation_self_attn(
             seq=traj_feats,
-            seq0=fps_scene_feats,
-            seq1=rgb2d_feats,
-            seq_pos_0=rel_traj_pos,
-            seq0_pos=rel_fps_pos,
+            seq0=rgb2d_feats,
+            seq1=fps_scene_feats,
+            seq_pos_1=rel_traj_pos,
+            seq1_pos=rel_fps_pos,
             ada_sgnl=time_embs
         )[-1]
+        rotation_features = rotation_features[:, :traj_feats.shape[1]]
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation

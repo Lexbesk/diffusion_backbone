@@ -5,7 +5,7 @@ NEW:
 > conda create -y --name robot_26 python=3.10
 > conda activate robot_26
 > pip install torch torchvision torchaudio
-> pip install einops tqdm transformers zarr diffusers peft kornia tensorboard
+> pip install einops tqdm transformers zarr diffusers kornia tensorboard
 ```
 
 OLD:

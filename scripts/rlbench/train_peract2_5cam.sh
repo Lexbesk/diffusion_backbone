@@ -6,12 +6,12 @@ else
     DATA_PATH="/data/user_data/ngkanats"
 fi
 
-train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
+train_data_dir=$DATA_PATH/zarr_datasets/Peract2_5cam_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_5cam_zarr/val.zarr
 train_instructions=instructions/peract2/instructions.json
 val_instructions=instructions/peract2/instructions.json
 
-dataset=Peract2_3dfront_3dwrist
+dataset=Peract2All
 num_workers=4
 B=64
 B_val=64
@@ -44,12 +44,11 @@ num_history=3
 workspace_normalizer_buffer=0.05
 quaternion_format=xyzw
 relative_action=false
-denoise_timesteps=10
-denoise_model=rectified_flow
+denoise_timesteps=100
+denoise_model=ddpm
 
-run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
+run_log_dir=fivecam_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=peract2_front_wrist3d_2.pth
 
 ngpus=4
 

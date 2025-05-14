@@ -6,16 +6,17 @@ else
     DATA_PATH="/data/user_data/ngkanats"
 fi
 
-train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_keypose_zarr/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_keypose_zarr/val.zarr
+train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_full_keypose_zarr/val_rechunked4.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_full_keypose_zarr/val_rechunked4.zarr
 train_instructions=instructions/calvin/train_keypose_instructions.json
 val_instructions=instructions/calvin/val_keypose_instructions.json
 
 dataset=Calvin
-num_workers=6
-memory_limit=4
+num_workers=4
+memory_limit=6
 B=256
 B_val=64
+chunk_size=4
 
 # Training/testing arguments, change these for HPT
 val_freq=4000
@@ -47,7 +48,7 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
+run_log_dir=overfit_is_good_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps-$backbone-finetuned_$finetune_backbone
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 ngpus=4
@@ -63,6 +64,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --memory_limit $memory_limit \
     --batch_size $B \
     --batch_size_val $B_val \
+    --chunk_size $chunk_size \
     --exp_log_dir $main_dir \
     --run_log_dir ${run_log_dir} \
     --checkpoint $checkpoint \

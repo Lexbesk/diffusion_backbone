@@ -93,8 +93,7 @@ class TransformerHead(BaseTransformerHead):
         _scene_pos = self.pos_embed_2d(
             torch.arange(0, fps_scene_feats.size(1), device=traj_feats.device)
         )[None].repeat(traj_feats.size(0), 1, 1)
-        _instr_pos = torch.zeros_like(instr_feats)
-        _pos = torch.cat([_traj_pos, _scene_pos, _instr_pos], 1)
+        _pos = torch.cat([_traj_pos, _scene_pos], 1)
         if rgb2d_feats is not None:
             _2d_pos = self.pos_embed_2d(
                 torch.arange(0, rgb2d_feats.size(1), device=traj_feats.device)
@@ -107,7 +106,7 @@ class TransformerHead(BaseTransformerHead):
         traj_feats, fps_scene_feats,
         rgb3d_feats, rgb2d_feats, instr_feats
     ):
-        features = torch.cat([traj_feats, fps_scene_feats, instr_feats], 1)
+        features = torch.cat([traj_feats, fps_scene_feats], 1)
         if rgb2d_feats is not None:
             features = torch.cat([features, rgb2d_feats])
         return features

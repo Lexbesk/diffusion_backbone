@@ -1,19 +1,19 @@
 # You probably don't need to change these
 merged_config_file=online_evaluation_calvin/configs/merged_config_val_abc_d.yaml
-merged_config_file=online_evaluation_calvin/configs/merged_config_train_abc_d.yaml
+# merged_config_file=online_evaluation_calvin/configs/merged_config_train_abc_d.yaml
 task_config_file=online_evaluation_calvin/configs/new_playtable_tasks.yaml
 ann_config_file=online_evaluation_calvin/configs/new_playtable_validation.yaml
-ann_config_file=online_evaluation_calvin/configs/new_playtable.yaml
+# ann_config_file=online_evaluation_calvin/configs/new_playtable.yaml
 
 # Things you may want to change if you train/eval a new model
 seed=0
-checkpoint=train_logs/CALVIN/denoise3dsa-Calvin-C192-B128-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/last.pth
-base_log_dir=eval_logs/CALVIN/denoise3dsa-Calvin-C192-B128-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/
+checkpoint=train_logs/CALVIN/overfit_is_good_denoise3dle-Calvin-C192-B256-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/last.pth
+base_log_dir=eval_logs/CALVIN/overfit_is_good_denoise3dle-Calvin-C192-B256-lr3e-4-constant-H1-rectified_flow-DT10-clip-finetuned_false/
 save_video=true
 
 # Things you can change if you customize the model architecture
-model_type=denoise3dsa
-pred_len=12
+model_type=denoise3dle
+pred_len=19
 backbone=clip
 fps_subsampling_factor=3
 embedding_dim=192
