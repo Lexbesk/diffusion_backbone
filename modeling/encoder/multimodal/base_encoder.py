@@ -46,14 +46,14 @@ class Encoder(nn.Module):
             - rgb3d: (B, ncam3d, 3, H, W)
             - rgb2d: (B, ncam2d, 3, H, W)
             - pcd: (B, ncam3d, 3, H, W)
-            - instruction: [str], len=B
+            - instruction: (B, nt), tokens
             - proprio: (B, nhist, 3+6+X)
 
         Returns:
             - rgb3d_feats: (B, N, F)
             - pcd: (B, N, 3)
-            - rgb2d_feats: (B, ncam2d, F)
-            - rgb2d_pos: (B, ncam2d, 3)
+            - rgb2d_feats: (B, N2d, F)
+            - rgb2d_pos: (B, N2d, 3)
             - instr_feats: (B, L, F)
             - instr_pos: (B, L, 3)
             - proprio_feats: (B, nhist, F)
@@ -69,12 +69,7 @@ class Encoder(nn.Module):
         rgb3d_feats, rgb2d_feats, pcd, instr_feats = vl_enc_fn(
             rgb3d, rgb2d, pcd, instruction
         )
-
-        # Use the current end-effector position as rgb2d position
         rgb2d_pos = None
-        if rgb2d_feats is not None:
-            _prop = proprio.reshape(len(proprio), -1, rgb2d.size(1), 9)
-            rgb2d_pos = _prop[:, -1, :, :3]
 
         # Use the current end-effector position as language 'position'
         instr_pos = proprio[:, -1:, :3].repeat(1, instr_feats.size(1), 1)
