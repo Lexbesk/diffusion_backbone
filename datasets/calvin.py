@@ -22,7 +22,7 @@ class CALVINDataset(BaseDataset):
             root=root,
             instructions=instructions,
             copies=copies,
-            relative_action=False,
+            relative_action=relative_action,
             mem_limit=mem_limit,
             actions_only=actions_only,
             chunk_size=chunk_size
@@ -40,7 +40,7 @@ class CALVINDataset(BaseDataset):
         # and then which chunk
         idx = idx * self.chunk_size
         if self._actions_only:
-            return {"action": self._get_action(idx)[:, None]}
+            return {"action": self._get_action(idx)}
         return {
             "task": self._get_task(idx),
             "instr": self._get_instr(idx),  # [str]
@@ -50,6 +50,6 @@ class CALVINDataset(BaseDataset):
             "wrist_depth": self._get_attr_by_idx(idx, 'depth_wrist'),  # n_cam2d H, W
             "extrinsics_wrist": self._get_attr_by_idx(idx, 'extrinsics_wrist'),  # tensor(4, 4)
             # Unsqueeze action and proprio to include an "nhand" dim
-            "proprioception": self._get_attr_by_idx(idx, 'proprioception')[:, :, None],  # 1 1 8
-            "action": self._get_attr_by_idx(idx, 'action')[:, 1:, None]  # tensor(T, 1, 8)
+            "proprioception": self._get_attr_by_idx(idx, 'proprioception'),  # 1 1 8
+            "action": self._get_action(idx)  # tensor(T, 1, 8)
         }

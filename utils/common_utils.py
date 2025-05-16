@@ -25,4 +25,15 @@ def round_floats(o):
 
 
 def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(
+        "Trainable model parameters:",
+        sum(p.numel() for p in model.parameters() if p.requires_grad)
+    )
+    for name, submodule in model.named_modules():
+        if '.' not in name or name.count('.') <= 1:
+            submodule_params = sum(
+                p.numel() for p in submodule.parameters()
+                if p.requires_grad
+            )
+            if submodule_params > 0:
+                print(f"{name} - trainable params: {submodule_params}")

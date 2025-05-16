@@ -6,6 +6,7 @@ from .denoise_actor_3d import DenoiseActor as DenoiseActor3D
 from .denoise_actor_3d_2dwrist import DenoiseActor as DenoiseActor2Dwrist
 from .denoise_actor_3d_le import DenoiseActor as DenoiseActor3DLE
 # from .denoise_actor_3d_2ndstage import DenoiseActor as DenoiseActor3D2ndStage
+from .flower.model import FLOWERVLA
 
 
 def fetch_model_class(model_type):
@@ -17,6 +18,8 @@ def fetch_model_class(model_type):
         return DenoiseActor3DLE
     if model_type == 'denoise3d_2dwrist':  # 3D front + 2D wrist
         return DenoiseActor2Dwrist
+    if model_type == 'flower':
+        return FLOWERVLA
     # if model_type == 'denoise3dsa':
     #     return DenoiseActor3DSA
     # if model_type == 'denoise3ddf':

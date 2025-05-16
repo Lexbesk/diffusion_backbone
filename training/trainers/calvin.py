@@ -1,10 +1,19 @@
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 from .base import BaseTrainTester
 
 
 class CALVINTrainTester(BaseTrainTester):
+
+    @torch.no_grad()
+    def get_workspace_normalizer(self):
+        return nn.Parameter(torch.tensor([
+            [-0.0522, -0.0433, -0.0457, -0.1683, -0.1089, -0.2247],
+            [ 0.0606,  0.0364,  0.0621,  0.1001,  0.1260,  0.1412]
+        ]), requires_grad=False)
+        # return super().get_workspace_normalizer(ndims=6)
 
     def _run_depth2cloud(self, sample):
         pcd, pcd_w = self.depth2cloud(
@@ -34,13 +43,15 @@ class CALVINTrainTester(BaseTrainTester):
             pcds = obs[:, 3:].reshape(b, nc, 3, h, w).float()
         else:
             rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
+        # Upsample to 224x224
+        rgbs = F.interpolate(rgbs[:, 0], (224, 224), mode='bilinear', antialias=True)[:, None]
         # Handle wrist camera
         pcd_w = pcd_w.float()
-        h, w = pcds.shape[-2:]
-        pcd_w = F.interpolate(pcd_w[:, 0], (h, w), mode='bilinear')[:, None]
-        pcds = torch.cat((pcds, pcd_w), 1)
+        h, w = rgbs.shape[-2:]
+        # pcd_w = F.interpolate(pcd_w[:, 0], (h, w), mode='bilinear')[:, None]
+        # pcds = torch.cat((pcds, pcd_w), 1)
         rgb_w = sample["rgb2d"].cuda(non_blocking=True).float() / 255
-        rgb_w = F.interpolate(rgb_w[:, 0], (h, w), mode='bilinear')[:, None]
+        rgb_w = F.interpolate(rgb_w[:, 0], (h, w), mode='bilinear', antialias=True)[:, None]
         rgbs = torch.cat((rgbs, rgb_w), 1)
 
         # Check for history requirements
@@ -58,3 +69,20 @@ class CALVINTrainTester(BaseTrainTester):
             sample["instr"],
             proprio
         )
+
+    def _model_forward(self, model, sample, training=True):
+        action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
+            sample, augment=training
+        )
+        # from time import time
+        # torch.cuda.synchronize()
+        # start = time()
+        # instr = self.tokenizer(instr).cuda(non_blocking=True)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out = model(
+                action, action_mask, rgbs, rgb2d, pcds, instr, prop,
+                run_inference=not training
+            )
+        # torch.cuda.synchronize()
+        # print("Time taken for forward pass: ", time() - start)
+        return out  # loss if training, else action

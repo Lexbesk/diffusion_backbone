@@ -79,6 +79,7 @@ def suppress_output_on_non_main():
 
 if __name__ == '__main__':
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
     # Arguments
     args = parse_arguments()
     print("Arguments:")
@@ -105,6 +106,7 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = False
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision('medium')
 
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)

@@ -43,12 +43,12 @@ class TriStageLRScheduler(_LRScheduler):
     def __init__(
         self,
         optimizer,
-        init_lr=1e-4,
+        init_lr=2e-5,
         init_lr_scale=0.1,
-        final_lr_scale=0.1,
-        total_steps=200000,
+        final_lr_scale=0.5,
+        total_steps=50000,
         phase_ratio="(0.05, 0.1, 0.85)",
-        lr=1e-4
+        lr=2e-5
     ):
         self.optimizer = optimizer
         self.init_lr = init_lr

@@ -135,7 +135,7 @@ class BaseTrainTester:
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model
         )
-        print("Model parameters:", count_parameters(_model))
+        count_parameters(_model)
         # Somehow necessary for torch.compile to work without DDP complaining:
         if hasattr(_model, 'encoder') and hasattr(_model.encoder, 'feature_pyramid'):
             _model.encoder.feature_pyramid = _model.encoder.feature_pyramid.to(
@@ -145,7 +145,7 @@ class BaseTrainTester:
         return _model
 
     @torch.no_grad()
-    def get_workspace_normalizer(self):
+    def get_workspace_normalizer(self, ndims=3):
         print("Computing workspace normalizer...")
 
         # Initialize datasets with arguments
@@ -168,9 +168,9 @@ class BaseTrainTester:
         )
 
         # Loop and compute action min-max
-        min_, max_ = torch.ones(3) * 10000, -torch.ones(3) * 10000
+        min_, max_ = torch.ones(ndims) * 10000, -torch.ones(ndims) * 10000
         for sample in tqdm(data_loader):
-            action = sample["action"][..., :3].reshape([-1, 3])
+            action = sample["action"][..., :ndims].reshape([-1, ndims])
             min_ = torch.min(min_, action.min(0).values)
             max_ = torch.max(max_, action.max(0).values)
 
@@ -189,7 +189,7 @@ class BaseTrainTester:
             optimizer_grouped_parameters.append(
                 {"params": [], "weight_decay": self.args.wd, "lr": 0.1 * self.args.lr}
             )
-        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
+        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias", 'norm']
         for name, param in model.named_parameters():
             if self.args.finetune_backbone and 'backbone' in name:
                 optimizer_grouped_parameters[2]["params"].append(param)
@@ -403,7 +403,7 @@ class BaseTrainTester:
         model.eval()
 
         for i, sample in tqdm(enumerate(loader)):
-            if i == val_iters:
+            if i == val_iters or i > 1000:
                 break
 
             pred_action = self._model_forward(model, sample, training=False)
@@ -466,7 +466,17 @@ class BaseTrainTester:
             map_location="cpu",
             weights_only=True
         )
-        model.load_state_dict(model_dict["weight"])
+        # Load weights flexibly
+        msn, unxpct = model.load_state_dict(model_dict["weight"], strict=False)
+        if msn:
+            print(f"Missing keys (not found in checkpoint): {len(msn)}")
+            print(msn)
+        if unxpct:
+            print(f"Unexpected keys (ignored): {len(unxpct)}")
+            print(unxpct)
+        if not msn and not unxpct:
+            print("All keys matched successfully!")
+        # Load optimizer
         if 'optimizer' in model_dict:
             optimizer.load_state_dict(model_dict["optimizer"])
         start_iter = model_dict.get("iter", 0)

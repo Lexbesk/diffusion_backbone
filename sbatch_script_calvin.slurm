@@ -2,8 +2,8 @@
 
 #SBATCH --job-name=training # Job name
 #SBATCH --open-mode=append
-#SBATCH --output=/home/ngkanats/repos/lbs/analogical_manipulation/rlbench_output_%j.log
-#SBATCH --error=/home/ngkanats/repos/lbs/analogical_manipulation/rlbench_error_%j.log
+#SBATCH --output=/home/ngkanats/repos/lbs/analogical_manipulation/output_%j.log
+#SBATCH --error=/home/ngkanats/repos/lbs/analogical_manipulation/error_%j.log
 #SBATCH --nodes=1
 #SBATCH --time=2-00:00:00             # Time limit (hh:mm:ss)
 #SBATCH --ntasks=1                  # Number of tasks (processes)
@@ -29,4 +29,4 @@ export NCCL_IB_DISABLE=1
 
 
 cd /home/ngkanats/repos/lbs/analogical_manipulation
-bash scripts/calvin/train.sh
+bash scripts/calvin/train_flower.sh
