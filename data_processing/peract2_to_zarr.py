@@ -18,6 +18,7 @@ from data_processing.rlbench_utils import (
 
 STORE_EVERY = 1  # in keyposes
 NCAM = 3
+NHAND = 2
 IM_SIZE = 256
 DEPTH_SCALE = 2**24 - 1
 
@@ -49,72 +50,26 @@ def all_tasks_main(split, tasks):
     # Initialize zarr
     compressor = Blosc(cname='lz4', clevel=1, shuffle=Blosc.SHUFFLE)
     with zarr.open_group(filename, mode="w") as zarr_file:
-        zarr_file.create_dataset(
-            "rgb",
-            shape=(0, NCAM, 3, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, NCAM, 3, IM_SIZE, IM_SIZE),
-            compressor=compressor,
-            dtype="uint8"
-        )
-        zarr_file.create_dataset(
-            "depth",
-            shape=(0, NCAM, IM_SIZE, IM_SIZE),
-            chunks=(STORE_EVERY, NCAM, IM_SIZE, IM_SIZE),
-            compressor=compressor,
-            dtype="float16"
-        )
-        zarr_file.create_dataset(
-            "proprioception",
-            shape=(0, 3, 2, 8),
-            chunks=(STORE_EVERY, 3, 2, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-        zarr_file.create_dataset(
-            "action",
-            shape=(0, 1, 2, 8),
-            chunks=(STORE_EVERY, 1, 2, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-        zarr_file.create_dataset(
-            "proprioception_joints",
-            shape=(0, 1, 2, 8),
-            chunks=(STORE_EVERY, 1, 2, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-        zarr_file.create_dataset(
-            "action_joints",
-            shape=(0, 1, 2, 8),
-            chunks=(STORE_EVERY, 1, 2, 8),
-            compressor=compressor,
-            dtype="float32"
-        )
-        zarr_file.create_dataset(
-            "extrinsics",
-            shape=(0, NCAM, 4, 4),
-            chunks=(STORE_EVERY, NCAM, 4, 4),
-            compressor=compressor,
-            dtype="float16"
-        )
-        zarr_file.create_dataset(
-            "intrinsics",
-            shape=(0, NCAM, 3, 3),
-            chunks=(STORE_EVERY, NCAM, 3, 3),
-            compressor=compressor,
-            dtype="float16"
-        )
-        zarr_file.create_dataset(
-            "task_id", shape=(0,), chunks=(STORE_EVERY,),
-            compressor=compressor,
-            dtype="uint8"
-        )
-        zarr_file.create_dataset(
-            "variation", shape=(0,), chunks=(STORE_EVERY,),
-            compressor=compressor,
-            dtype="uint8"
-        )
+
+        def _create(field, shape, dtype):
+            zarr_file.create_dataset(
+                field,
+                shape=(0,) + shape,
+                chunks=(STORE_EVERY,) + shape,
+                compressor=compressor,
+                dtype=dtype
+            )
+
+        _create("rgb", (NCAM, 3, IM_SIZE, IM_SIZE), "uint8")
+        _create("depth", (NCAM, IM_SIZE, IM_SIZE), "float16")
+        _create("proprioception", (3, NHAND, 8), "float32")
+        _create("action", (1, NHAND, 8), "float32")
+        _create("proprioception_joints", (3, NHAND, 8), "float32")
+        _create("action_joints", (1, NHAND, 8), "float32")
+        _create("extrinsics", (NCAM, 4, 4), "float16")
+        _create("intrinsics", (NCAM, 3, 3), "float16")
+        _create("task_id", (), "uint8")
+        _create("variation", (), "uint8")
 
         # Loop through episodes
         for task in tasks:
@@ -161,20 +116,18 @@ def all_tasks_main(split, tasks):
 
                 # Proprioception (keyframes, 3, 2, 8)
                 states = np.stack([np.concatenate([
-                    demo[k].left.gripper_pose,
-                    [demo[k].left.gripper_open],
-                    demo[k].right.gripper_pose,
-                    [demo[k].right.gripper_open]
+                    demo[k].left.gripper_pose, [demo[k].left.gripper_open],
+                    demo[k].right.gripper_pose, [demo[k].right.gripper_open]
                 ]) for k in key_frames]).astype(np.float32)
                 # Store current eef pose as well as two previous ones
                 prop = states[:-1]
                 prop_1 = np.concatenate([prop[:1], prop[:-1]])
                 prop_2 = np.concatenate([prop_1[:1], prop_1[:-1]])
                 prop = np.concatenate([prop_2, prop_1, prop], 1)
-                prop = prop.reshape(len(prop), 3, 2, 8)
+                prop = prop.reshape(len(prop), 3, NHAND, 8)
 
                 # Action (keyframes, 1, 2, 8)
-                actions = states[1:].reshape(len(states[1:]), 1, 2, 8)
+                actions = states[1:].reshape(len(states[1:]), 1, NHAND, 8)
 
                 # Proprioception in joints (keyframes, 3, 2, 8)
                 states = np.stack([np.concatenate([
@@ -184,10 +137,10 @@ def all_tasks_main(split, tasks):
                     [demo[k].right.gripper_open]
                 ]) for k in key_frames]).astype(np.float32)
                 # Store current eef pose as well as two previous ones
-                prop_joints = states[:-1].reshape(len(states[:-1]), 1, 2, 8)
+                prop_jnts = states[:-1].reshape(len(states[:-1]), 1, NHAND, 8)
 
                 # Action in joints (keyframes, 1, 2, 8)
-                actions_joints = states[1:].reshape(len(states[1:]), 1, 2, 8)
+                actions_jnts = states[1:].reshape(len(states[1:]), 1, NHAND, 8)
 
                 # Extrinsics (keyframes, cameras, 4, 4)
                 extrinsics = np.stack([
@@ -222,8 +175,8 @@ def all_tasks_main(split, tasks):
                 zarr_file['depth'].append(depth)
                 zarr_file['proprioception'].append(prop)
                 zarr_file['action'].append(actions)
-                zarr_file['proprioception_joints'].append(prop_joints)
-                zarr_file['action_joints'].append(actions_joints)
+                zarr_file['proprioception_joints'].append(prop_jnts)
+                zarr_file['action_joints'].append(actions_jnts)
                 zarr_file['extrinsics'].append(extrinsics)
                 zarr_file['intrinsics'].append(intrinsics)
                 zarr_file['task_id'].append(task_id)

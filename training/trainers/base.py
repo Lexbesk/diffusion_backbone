@@ -47,7 +47,7 @@ class BaseTrainTester:
             )
         ).cuda()
 
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0 and not self.args.eval_only:
             self.writer = SummaryWriter(log_dir=args.log_dir)
 
     def get_datasets(self):
@@ -76,7 +76,7 @@ class BaseTrainTester:
             worker_seed = torch.initial_seed() % 2**32
             np.random.seed(worker_seed)
             random.seed(worker_seed)
-            # np.random.seed(np.random.get_state()[1][0] + worker_id)
+
         # Datasets
         train_dataset, val_dataset = self.get_datasets()
         # Samplers and loaders
