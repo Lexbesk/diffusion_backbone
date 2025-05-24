@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 import PIL.Image as Image
 import moviepy.video.io.ImageSequenceClip
-import cv2
+# import cv2
 
 from modeling.utils.utils import (
     cross_product,
@@ -242,7 +242,7 @@ def visualize_actions_and_point_clouds_(visible_pcd, visible_rgb,
         image_flat = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
         image = image_flat.reshape(*reversed(canvas.get_width_height()), 3)
         image = image[60:, 110:-110] # HACK <>
-        image = cv2.resize(image, dsize=None, fx=0.75, fy=0.75)
+        # image = cv2.resize(image, dsize=None, fx=0.75, fy=0.75)
         images.append(image)
     images = np.concatenate([
         np.concatenate(images[:5], axis=1),
@@ -340,106 +340,7 @@ def visualize_actions_and_point_clouds(visible_pcd, visible_rgb,
         image_flat = np.frombuffer(canvas.tostring_argb(), dtype='uint8')
         image = image_flat.reshape(*reversed(canvas.get_width_height()), 4)[..., 1:]
         image = image[60:, 110:-110] # HACK <>
-        image = cv2.resize(image, dsize=None, fx=0.75, fy=0.75)
-        images.append(image)
-    # images = np.concatenate([
-    #     np.concatenate(images[:5], axis=1),
-    #     np.concatenate(images[5:10], axis=1)
-    # ], axis=0)
-    images = np.concatenate(images, 1)
-    if save:
-        Image.fromarray(images, mode='RGB').save(savename)
-
-    plt.close()
-    # from ipdb import set_trace; set_trace()
-
-    return images, rand_inds
-
-
-def visualize_actions_and_point_clouds_isaac(visible_pcd, visible_rgb,
-                                       gripper_pose_trajs, legends=[], markers=[],
-                                       save=True, rotation_param="quat_from_query",
-                                       rand_inds=None, savename='diff_traj.png'):
-    """Visualize by plotting the point clouds and gripper pose.
-
-    Args:
-        visible_pcd: A tensor of shape (B, ncam, 3, H, W)
-        visible_rgb: A tensor of shape (B, ncam, 3, H, W)
-        gripper_pose_trajs: A list of tensors of shape (B, 8)
-        legends: A list of strings indicating the legend for each trajectory
-    """
-    gripper_pose_trajs = [t.data.cpu() for t in gripper_pose_trajs]
-
-    cur_vis_pcd = visible_pcd[0].permute(0, 2, 3, 1).flatten(0, -2).data.cpu().numpy()
-    cur_vis_rgb = visible_rgb[0].permute(0, 2, 3, 1).flatten(0, -2).data.cpu().numpy()
-    if rand_inds is None:
-        rand_inds = torch.randperm(cur_vis_pcd.shape[0]).data.cpu().numpy()[:50000]
-        mask = (
-            # (cur_vis_pcd[rand_inds, 2] >= 0.2) &
-            # (cur_vis_pcd[rand_inds, 1] <= 2) &
-            # (cur_vis_pcd[rand_inds, 0] <= 1.5)
-            (cur_vis_pcd[rand_inds, 2] >= 0.3)
-            # & (cur_vis_pcd[rand_inds, 0] >= -0.2)
-        )
-        # from ipdb import set_trace; set_trace()
-        rand_inds = rand_inds[mask]
-    fig = plt.figure()
-    canvas = fig.canvas
-    # ax = fig.add_subplot(projection='3d')
-    ax = Axes3D(fig, auto_add_to_figure=False)
-    fig.add_axes(ax)
-    ax.scatter(cur_vis_pcd[rand_inds, 0],
-               cur_vis_pcd[rand_inds, 1],
-               cur_vis_pcd[rand_inds, 2],
-               c=cur_vis_rgb[rand_inds], s=1,
-               zorder=1)
-
-    # predicted gripper pose
-    cont_range_inds = np.linspace(0, 1, len(gripper_pose_trajs)).astype(np.float32)
-    cm = plt.get_cmap('brg')
-    colors = cm(cont_range_inds)
-    legends = (legends if len(legends) == len(gripper_pose_trajs)
-               else [""] * len(gripper_pose_trajs))
-    markers = (markers if len(markers) == len(gripper_pose_trajs)
-                else ["*"] * len(gripper_pose_trajs))
-    for gripper_pose, color, legend, marker in (
-        zip(gripper_pose_trajs, colors, legends, markers)
-        ):
-        gripper_pcd = get_three_points_from_curr_action(
-            gripper_pose, rotation_param=rotation_param, for_vis=True
-        )
-        ax.plot(gripper_pcd[0, [1, 0, 2], 0],
-                gripper_pcd[0, [1, 0, 2], 1],
-                gripper_pcd[0, [1, 0, 2], 2],
-                c=color,
-                markersize=1, marker=marker,
-                linestyle='--', linewidth=1,
-                label=legend,
-                zorder=2)
-        polygons = compute_rectangle_polygons(gripper_pcd[0])
-        for poly_ind, polygon in enumerate(polygons):
-            polygon = Poly3DCollection(polygon, facecolors=color)
-            alpha = 0.5 if poly_ind == 0 else 1.3
-            polygon.set_edgecolor([min(c * alpha, 1.0) for c in color])
-            polygon.set_zorder(3)
-            ax.add_collection3d(polygon)
-
-    fig.tight_layout()
-    ax.legend(loc="lower center", ncol=len(gripper_pose_trajs))
-    # ax.set_xlim(-0.75, 0.75)
-    # ax.set_ylim(-0.75, 0.75)
-    # ax.set_zlim(0.5, 1.5)
-    images = []
-    # for elev, azim in zip([10, 15, 20, 25, 30, 25, 20, 15, 45, 90],
-    #                       [0, 45, 90, 135, 180, 225, 270, 315, 360, 360]):
-    for elev, azim in zip([10, 90],
-                          [0, 360]):
-        ax.view_init(elev=elev, azim=azim, roll=0)
-        canvas.draw()
-        image_flat = np.frombuffer(canvas.tostring_argb(), dtype='uint8')
-        image = image_flat.reshape(*reversed(canvas.get_width_height()), 4)[..., 1:]
-        image = image[60:, 110:-110] # HACK <>
-        image = cv2.resize(image, dsize=None, fx=0.75, fy=0.75)
+        # image = cv2.resize(image, dsize=None, fx=0.75, fy=0.75)
         images.append(image)
     # images = np.concatenate([
     #     np.concatenate(images[:5], axis=1),

@@ -16,7 +16,7 @@ from data_processing.rlbench_utils import (
 )
 
 
-STORE_EVERY = 1  # in keyposes
+STORE_EVERY = 1
 NCAM = 4
 NHAND = 1
 IM_SIZE = 128
@@ -27,7 +27,6 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     # Tuples: (name, type, default)
     arguments = [
-        # Dataset/loader arguments
         ('root', str, '/data/group_data/katefgroup/VLA/peract_raw/'),
         ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/Peract_zarr/')
     ]

@@ -32,24 +32,39 @@ class CALVINDataset(BaseDataset):
         return ['calvin'] * self.chunk_size
 
     def _get_instr(self, idx):
-        return [self._instructions[int(t_)] for t_ in self.annos['instr_id'][idx:idx + self.chunk_size]]
+        return [
+            self._instructions[int(t_)]
+            for t_ in self.annos['instr_id'][idx:idx + self.chunk_size]
+        ]
 
     def __getitem__(self, idx):
+        """
+        C is the chunk size.
+        Returns:
+            - task: ['calvin'] * C
+            - instr: [str], len C
+            - rgb: (C, 1, 3, 200, 200)
+            - depth: (C, 1, 200, 200)
+            - rgb2d: (C, 1, 3, 84, 84)
+            - wrist_depth: (C, 1, 84, 84)
+            - extrinsics_wrist: (C, 4, 4)
+            - proprioception: (C, 1, 1, 3+3+1)
+            - action: (C, T=10, 1, 3+3+1)
+        """
         # First detect which copy we fall into
-        idx = idx % (len(self.annos['action']) // self.chunk_size - 1)
+        idx = idx % (len(self.annos['action']) // self.chunk_size)
         # and then which chunk
         idx = idx * self.chunk_size
         if self._actions_only:
             return {"action": self._get_action(idx)}
         return {
             "task": self._get_task(idx),
-            "instr": self._get_instr(idx),  # [str]
-            "rgb": self._get_attr_by_idx(idx, 'rgb_front'),  # n_cam3d, 3, H, W
-            "depth": self._get_attr_by_idx(idx, 'depth_front'),  # n_cam3d H W
-            "rgb2d": self._get_attr_by_idx(idx, 'rgb_wrist'),  # n_cam2d 3 H W
-            "wrist_depth": self._get_attr_by_idx(idx, 'depth_wrist'),  # n_cam2d H, W
-            "extrinsics_wrist": self._get_attr_by_idx(idx, 'extrinsics_wrist'),  # tensor(4, 4)
-            # Unsqueeze action and proprio to include an "nhand" dim
-            "proprioception": self._get_attr_by_idx(idx, 'proprioception'),  # 1 1 8
-            "action": self._get_action(idx)  # tensor(T, 1, 8)
+            "instr": self._get_instr(idx),
+            "rgb": self._get_attr_by_idx(idx, 'rgb_front'),
+            "depth": self._get_attr_by_idx(idx, 'depth_front'),
+            "rgb2d": self._get_attr_by_idx(idx, 'rgb_wrist'),
+            "wrist_depth": self._get_attr_by_idx(idx, 'depth_wrist'),
+            "extrinsics_wrist": self._get_attr_by_idx(idx, 'extrinsics_wrist'),
+            "proprioception": self._get_attr_by_idx(idx, 'proprioception'),
+            "action": self._get_action(idx)
         }

@@ -82,7 +82,7 @@ class BaseDataset(Dataset):
         In addition self.annos may contain fields for task/instruction ids
         """
         # First detect which copy we fall into
-        idx = idx % (len(self.annos['action']) // self.chunk_size - 1)
+        idx = idx % (len(self.annos['action']) // self.chunk_size)
         # and then which chunk
         idx = idx * self.chunk_size
         if self._actions_only:
@@ -97,4 +97,4 @@ class BaseDataset(Dataset):
         }
 
     def __len__(self):
-        return self.copies * (len(self.annos['action']) // self.chunk_size - 1)
+        return self.copies * (len(self.annos['action']) // self.chunk_size)
