@@ -1,11 +1,10 @@
+from copy import deepcopy
 import os
 import random
 
-from kornia import augmentation as K
 import numpy as np
 import torch
 from torch import optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, ConstantLR
 from torch.utils.data.distributed import DistributedSampler
 from torch import nn
 import torch.distributed as dist
@@ -15,37 +14,29 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange, tqdm
 
 from modeling.encoder.text import fetch_tokenizers
-from utils.common_utils import count_parameters
-from utils.pytorch3d_transforms import relative_to_absolute
-from ..schedulers import TriStageLRScheduler
-from ..utils import compute_metrics
+from ..common_utils import count_parameters
+from ..depth2cloud import fetch_depth2cloud
+from ..data_preprocessors import fetch_data_preprocessor
+from ..ema import EMA
+from ..schedulers import fetch_scheduler
+from .utils import compute_metrics
 
 
 class BaseTrainTester:
     """Train/test a trajectory optimization algorithm."""
 
-    def __init__(self, args, dataset_cls, model_cls, depth2cloud, im_size):
+    def __init__(self, args, dataset_cls, model_cls):
         """Initialize."""
         self.args = args
         self.dataset_cls = dataset_cls
         self.model_cls = model_cls
-        self.depth2cloud = depth2cloud
-        self.aug = K.AugmentationSequential(
-            # K.RandomHorizontalFlip(p=0.5),
-            K.RandomAffine(
-                degrees=0,
-                translate=0.0,
-                scale=(0.75, 1.25),
-                padding_mode="reflection",
-                p=0.8
-            ),
-            # K.RandomRotation((-5, 5), p=0.3),
-            K.RandomResizedCrop(
-                size=(im_size, im_size),
-                scale=(0.95, 1.05),
-                p=0.1
-            )
-        ).cuda()
+
+        self.preprocessor = fetch_data_preprocessor(self.args.dataset)(
+            self.args.keypose_only,
+            self.args.num_history,
+            custom_imsize=self.args.custom_img_size,
+            depth2cloud=fetch_depth2cloud(self.args.dataset)
+        )
 
         if dist.get_rank() == 0 and not self.args.eval_only:
             self.writer = SummaryWriter(log_dir=args.log_dir)
@@ -189,7 +180,8 @@ class BaseTrainTester:
             optimizer_grouped_parameters.append(
                 {"params": [], "weight_decay": self.args.wd, "lr": 0.1 * self.args.lr}
             )
-        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias", 'norm']
+        no_decay = ['bias', 'LayerNorm', 'layernorm', 'ln', 'norm']
+        # no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]  # , 'norm']
         for name, param in model.named_parameters():
             if self.args.finetune_backbone and 'backbone' in name:
                 optimizer_grouped_parameters[2]["params"].append(param)
@@ -203,40 +195,24 @@ class BaseTrainTester:
         )
         return optimizer
 
-    def get_lr_scheduler(self, optimizer):
-        """Initialize learning rate scheduler."""
-        if self.args.lr_scheduler == "constant":
-            scheduler = ConstantLR(
-                optimizer, factor=1.0, total_iters=self.args.train_iters
-            )
-        elif self.args.lr_scheduler == "cosine":
-            scheduler = CosineAnnealingLR(optimizer, T_max=self.args.train_iters)
-        elif self.args.lr_scheduler == "tristage":
-            scheduler = TriStageLRScheduler(optimizer)
-        else:
-            raise NotImplementedError
-
-        return scheduler
-
     def main(self):
         """Run main training/testing pipeline."""
         # Get loaders
         train_loader, val_loader, train_sampler = self.get_loaders()
-        # # Warmup
-        # for sample in tqdm(train_loader):
-        #     pass
 
         # Get model
         model = self.get_model()
         self.tokenizer = fetch_tokenizers(self.args.backbone)
-        if not self.args.checkpoint or not os.path.exists(self.args.checkpoint):
+        if not os.path.exists(self.args.checkpoint):
             normalizer = self.get_workspace_normalizer()
             model.workspace_normalizer.copy_(normalizer)
             dist.barrier(device_ids=[torch.cuda.current_device()])
 
         # Get optimizer
         optimizer = self.get_optimizer(model)
-        lr_scheduler = self.get_lr_scheduler(optimizer)
+        lr_scheduler = fetch_scheduler(
+            self.args.lr_scheduler, optimizer, self.args.train_iters
+        )
         scaler = torch.GradScaler()
 
         # Move model to devices
@@ -250,33 +226,40 @@ class BaseTrainTester:
             broadcast_buffers=False, find_unused_parameters=True
         )
 
+        # Initialize EMA copy
+        ema_model = deepcopy(model)
+        self.ema = EMA()
+
         # Check for a checkpoint
         start_iter, best_loss = 0, None
         if self.args.checkpoint:
-            start_iter, best_loss = self.load_checkpoint(model, optimizer)
+            start_iter, best_loss = self.load_checkpoint(model, ema_model, optimizer)
         print(model.module.workspace_normalizer)
 
         # Eval only
-        if bool(self.args.eval_only):
+        if self.args.eval_only:
             if dist.get_rank() == 0:
                 print("Test evaluation.......")
                 model.eval()
-                new_loss = self.evaluate_nsteps(
-                    model, val_loader, step_id=-1,
+                self.evaluate_nsteps(
+                    model if self.args.use_ema else ema_model,
+                    val_loader, step_id=-1,
                     val_iters=-1
                 )
             dist.barrier(device_ids=[torch.cuda.current_device()])
-            return model
+            return model if self.args.use_ema else ema_model
 
         # Step the lr scheduler to the current step
         for _ in range(start_iter):
             lr_scheduler.step()
 
-        # Training loop
-        model.train()
+        # Step the sampler to the currect "epoch"
         samples_per_epoch = len(train_loader)
         epoch = start_iter // samples_per_epoch + 1
-        train_sampler.set_epoch(epoch)
+        train_sampler.set_epoch(epoch)  # ensures new batches are sampled
+
+        # Training loop
+        model.train()
         iter_loader = iter(train_loader)
         for step_id in trange(start_iter, self.args.train_iters):
             try:
@@ -290,88 +273,48 @@ class BaseTrainTester:
                 sample = next(iter_loader)
 
             self.train_one_step(model, optimizer, scaler, lr_scheduler, sample)
+            self.ema.step(model, ema_model, self.args.use_ema, step_id)
 
             if (step_id + 1) % self.args.val_freq == 0 and dist.get_rank() == 0:
                 print("Train evaluation.......")
                 model.eval()
-                new_loss = self.evaluate_nsteps(
-                    model, train_loader, step_id,
+                self.evaluate_nsteps(
+                    model if self.args.use_ema else ema_model,
+                    train_loader, step_id,
                     val_iters=10,
                     split='train'
                 )
                 print("Test evaluation.......")
                 new_loss = self.evaluate_nsteps(
-                    model, val_loader, step_id,
+                    model if self.args.use_ema else ema_model,
+                    val_loader, step_id,
                     val_iters=-1
                 )
                 # save model
                 best_loss = self.save_checkpoint(
-                    model, optimizer, step_id,
+                    model, ema_model, optimizer, step_id,
                     new_loss, best_loss
                 )
                 model.train()
             dist.barrier(device_ids=[torch.cuda.current_device()])
 
-        return model
-
-    def _run_depth2cloud(self, sample):
-        return None  # implemented in child classes
+        return model if self.args.use_ema else ema_model
 
     @torch.no_grad()
     def prepare_batch(self, sample, augment=False):
-        # Actions
-        if self.args.keypose_only:
-            sample["action"] = sample["action"][:, [-1]]
-
-        # Observations
-        pcds = self._run_depth2cloud(sample)
-        if augment:
-            b, nc, _, h, w = sample['rgb'].shape
-            obs = torch.cat((
-                sample['rgb'].cuda(non_blocking=True).half() / 255,
-                pcds.half()
-            ), 2)  # (B, ncam, 6, H, W)
-            obs = obs.view(-1, 6, h, w)
-            obs = self.aug(obs)
-            rgbs = obs[:, :3].view(b, nc, 3, h, w).float()
-            pcds = obs[:, 3:].view(b, nc, 3, h, w).float()
-        else:
-            rgbs = sample['rgb'].cuda(non_blocking=True).float() / 255
-        rgb2d = sample["rgb2d"]
-        if rgb2d is not None:
-            rgb2d = sample['rgb2d'].cuda(non_blocking=True).float() / 255
-
-        # Check for history requirements
-        proprio = sample["proprioception"].cuda(non_blocking=True)
-        nhist_ = proprio.size(1)  # proprio is B nhist nhand 7+X
-        assert nhist_ >= self.args.num_history, "not enough proprio timesteps"
-        proprio = proprio[:, :max(self.args.num_history, 1)]
-
-        return (
-            sample["action"].cuda(non_blocking=True),
-            torch.zeros(sample["action"].shape[:-1], dtype=bool, device='cuda'),
-            rgbs,
-            rgb2d,
-            pcds,
-            sample["instr"],
-            proprio
-        )
+        pass  # implement in children
 
     def _model_forward(self, model, sample, training=True):
         action, action_mask, rgbs, rgb2d, pcds, instr, prop = self.prepare_batch(
             sample, augment=training
         )
-        # from time import time
-        # torch.cuda.synchronize()
-        # start = time()
-        instr = self.tokenizer(instr).cuda(non_blocking=True)
+        if self.args.pre_tokenize:
+            instr = self.tokenizer(instr).cuda(non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = model(
                 action, action_mask, rgbs, rgb2d, pcds, instr, prop,
                 run_inference=not training
             )
-        # torch.cuda.synchronize()
-        # print("Time taken for forward pass: ", time() - start)
         return out  # loss if training, else action
 
     def train_one_step(self, model, optimizer, scaler, lr_scheduler, sample):
@@ -411,13 +354,11 @@ class BaseTrainTester:
             if self.args.relative_action:
                 pred_action = relative_to_absolute(
                     pred_action[:, :, 0],
-                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
-                    qform=self.args.quaternion_format
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0]
                 )
                 gt_action = relative_to_absolute(
                     gt_action[:, :, 0],
-                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0],
-                    qform=self.args.quaternion_format
+                    sample["proprioception"].cuda(non_blocking=True)[:, :, 0]
                 )
 
             losses, losses_B = compute_metrics(pred_action, gt_action)
@@ -453,7 +394,7 @@ class BaseTrainTester:
 
         return -values[f'{split}-losses/mean/traj_pos_acc_001']
 
-    def load_checkpoint(self, model, optimizer):
+    def load_checkpoint(self, model, ema_model, optimizer):
         """Load from checkpoint."""
         print("=> trying checkpoint '{}'".format(self.args.checkpoint))
         if not os.path.exists(self.args.checkpoint):
@@ -476,6 +417,9 @@ class BaseTrainTester:
             print(unxpct)
         if not msn and not unxpct:
             print("All keys matched successfully!")
+        # EMA weights
+        if model_dict.get("ema_weight") is not None:
+            ema_model.load_state_dict(model_dict["ema_weight"], strict=True)
         # Load optimizer
         if 'optimizer' in model_dict:
             optimizer.load_state_dict(model_dict["optimizer"])
@@ -489,16 +433,19 @@ class BaseTrainTester:
         torch.cuda.empty_cache()
         return start_iter, best_loss
 
-    def save_checkpoint(self, model, optimizer, step_id, new_loss, best_loss):
+    def save_checkpoint(self, model, ema_model, optimizer,
+                        step_id, new_loss, best_loss):
         """Save checkpoint if requested."""
         model_state = model.state_dict()
         optimizer_state = optimizer.state_dict()
+        ema_state = ema_model.state_dict() if self.args.use_ema else None
 
         # Best checkpoint
         if new_loss is not None and (best_loss is None or new_loss < best_loss):
             best_loss = new_loss
             torch.save({
                 "weight": model_state,
+                "ema_weight": ema_state,
                 "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
@@ -507,15 +454,17 @@ class BaseTrainTester:
         # Last checkpoint (always saved)
         torch.save({
             "weight": model_state,
+            "ema_weight": ema_state,
             "optimizer": optimizer_state,
             "iter": step_id + 1,
             "best_loss": best_loss
         }, self.args.log_dir / "last.pth")
 
         # Save intermediate checkpoints
-        if (step_id + 1) % 40000 == 0:
+        if (step_id + 1) % 60000 == 0:
             torch.save({
                 "weight": model_state,
+                "ema_weight": ema_state,
                 "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
@@ -548,3 +497,13 @@ def base_collate_fn(batch):
 
 def actions_collate_fn(batch):
     return {"action": torch.cat([item["action"] for item in batch])}
+
+
+def relative_to_absolute(action, proprio):
+    # action (B, T, 8), proprio (B, 1, 7)
+    pos = proprio[..., :3] + action[..., :3].cumsum(1)
+
+    orn = proprio[..., 3:6] + action[..., 3:6].cumsum(1)
+    orn = (orn + torch.pi) % (2 * torch.pi) - torch.pi
+
+    return torch.cat([pos, orn, action[..., 6:]], -1)

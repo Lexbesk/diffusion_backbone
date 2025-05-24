@@ -1,11 +1,8 @@
-# Copy from https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/model/diffusion/ema_model.py
-import copy
-
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
 
 
-class EMAAdapter:
+class EMA:
     """
     Exponential Moving Average of models weights
     """
@@ -31,38 +28,29 @@ class EMAAdapter:
             power (float): Exponential factor of EMA warmup. Default: 2/3.
             min_value (float): The minimum EMA decay rate. Default: 0.
         """
-
         self.update_after_step = update_after_step
         self.inv_gamma = inv_gamma
         self.power = power
         self.min_value = min_value
         self.max_value = max_value
 
-        self.decay = 0.0
-        self.optimization_step = 0
-
     def copy_weights(self, new_model, ema_model):
         ema_model.load_state_dict(new_model.state_dict())
 
     def get_decay(self, optimization_step):
-        """
-        Compute the decay factor for the exponential moving average.
-        """
+        """Compute the decay factor."""
         step = max(0, optimization_step - self.update_after_step - 1)
         value = 1 - (1 + step / self.inv_gamma) ** -self.power
-
-        if step <= 0:
-            return 0.0
 
         return max(self.min_value, min(value, self.max_value))
 
     @torch.inference_mode()
-    def step(self, new_model, ema_model, use_ema):
+    def step(self, new_model, ema_model, use_ema, optimization_step):
         if not use_ema:
             self.copy_weights(new_model, ema_model)
             return
 
-        self.decay = self.get_decay(self.optimization_step)
+        decay = self.get_decay(optimization_step)
 
         for module, ema_module in zip(new_model.modules(), ema_model.modules()):
             for param, ema_param in zip(module.parameters(recurse=False), ema_module.parameters(recurse=False)):
@@ -76,8 +64,5 @@ class EMAAdapter:
                 elif not param.requires_grad:
                     ema_param.copy_(param.to(dtype=ema_param.dtype).data)
                 else:
-                    ema_param.mul_(self.decay)
-                    ema_param.add_(param.data.to(dtype=ema_param.dtype), alpha=1 - self.decay)
-
-        # verify that iterating over module and then parameters is identical to parameters recursively.
-        self.optimization_step += 1
+                    ema_param.mul_(decay)
+                    ema_param.add_(param.data.to(dtype=ema_param.dtype), alpha=1 - decay)

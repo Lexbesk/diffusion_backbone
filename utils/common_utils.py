@@ -29,8 +29,9 @@ def count_parameters(model):
         "Trainable model parameters:",
         sum(p.numel() for p in model.parameters() if p.requires_grad)
     )
+    # Print number of trainable parameters for main modules
     for name, submodule in model.named_modules():
-        if '.' not in name or name.count('.') <= 1:
+        if '.' not in name:
             submodule_params = sum(
                 p.numel() for p in submodule.parameters()
                 if p.requires_grad

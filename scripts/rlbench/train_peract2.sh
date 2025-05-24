@@ -19,7 +19,7 @@ chunk_size=1
 
 # Training/testing arguments, change these for HPT
 val_freq=4000
-eval_only=false
+eval_only=true
 lr=1e-4
 lr_scheduler=constant
 wd=1e-10
@@ -50,8 +50,9 @@ denoise_model=rectified_flow
 run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-DT$denoise_timesteps
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=peract2_front_wrist3d_2.pth
+denoise_timesteps=5
 
-ngpus=4
+ngpus=1
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \

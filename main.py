@@ -9,9 +9,8 @@ import torch
 
 from datasets import fetch_dataset_class
 from modeling.policy import fetch_model_class
-from training.depth2cloud import fetch_depth2cloud
-from training.trainers import fetch_train_tester
 from utils.common_utils import str2bool, str_none
+from utils.trainers import fetch_train_tester
 
 
 def parse_arguments():
@@ -42,10 +41,13 @@ def parse_arguments():
         ('wd', float, 5e-3),
         ('train_iters', int, 600000),
         ('use_compile', str2bool, False),
+        ('use_ema', str2bool, False),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
         ('keypose_only', str2bool, True),
+        ('pre_tokenize', str2bool, True),
+        ('custom_img_size', int, None),
         # Model arguments: encoder
         ('backbone', str, "clip"),
         ('output_level', str, "res3"),
@@ -111,11 +113,10 @@ if __name__ == '__main__':
     # Select dataset and model classes
     dataset_class = fetch_dataset_class(args.dataset)
     model_class = fetch_model_class(args.model_type)
-    depth2cloud = fetch_depth2cloud(args.dataset)
 
     # Run
     TrainTester = fetch_train_tester(args.dataset)
-    train_tester = TrainTester(args, dataset_class, model_class, depth2cloud)
+    train_tester = TrainTester(args, dataset_class, model_class)
     train_tester.main()
 
     # Safe program termination

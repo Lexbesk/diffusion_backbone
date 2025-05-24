@@ -1,8 +1,3 @@
-"""
-Modified from
-https://github.com/mees/calvin/blob/main/calvin_models/calvin_agent/evaluation/evaluate_policy.py
-"""
-
 import argparse
 import os
 import gc
@@ -20,8 +15,6 @@ from utils.common_utils import str2bool, str_none
 from online_evaluation_calvin.model_wrapper import create_model
 from online_evaluation_calvin.utils_with_calvin import (
     get_env,
-    prepare_visual_states,
-    prepare_proprio_states,
     count_success,
     get_env_state_for_initial_condition,
     collect_results,
@@ -33,7 +26,7 @@ from online_evaluation_calvin.multistep_sequences import get_sequences
 
 logger = logging.getLogger(__name__)
 
-EP_LEN = 60
+
 NUM_SEQUENCES = 1000
 
 
@@ -53,7 +46,9 @@ def parse_arguments():
         ('save_video', str2bool, False),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
-        ('pred_len', int, 12),
+        ('pred_len', int, 10),
+        ('pre_tokenize', str2bool, True),
+        ('custom_img_size', int, None),
         # Model arguments: encoder
         ('backbone', str, "clip"),
         ('fps_subsampling_factor', int, 5),
@@ -61,10 +56,9 @@ def parse_arguments():
         ('embedding_dim', int, 144),
         ('num_attn_heads', int, 9),
         ('num_vis_instr_attn_layers', int, 2),
-        ('num_history', int, 1),
         # Model arguments: head
-        ('relative_action', str2bool, False),
-        ('quaternion_format', str, 'xyzw'),
+        ('relative_action', str2bool, True),
+        ('quaternion_format', str, 'wxyz'),
         ('denoise_timesteps', int, 10),
         ('denoise_model', str, "rectified_flow")
     ]
@@ -100,7 +94,7 @@ def evaluate_policy(model, env, task_config_file, ann_config_file,
         # Run the model on the sequence, querying one instruction at a time
         result, videos = evaluate_sequence(
             env, model, task_oracle, initial_state,
-            eval_sequence, instr_dict
+            eval_sequence, instr_dict, save_video
         )
         # Store results on the logging file
         write_results(eval_log_dir, seq_ind, result)
@@ -125,7 +119,7 @@ def evaluate_policy(model, env, task_config_file, ann_config_file,
 
 
 def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence,
-                      instr_dict):
+                      instr_dict, save_video):
     """
     Evaluates a sequence of language instructions.
 
@@ -146,11 +140,13 @@ def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence,
 
         # Run the policy
         success, video = rollout(env, model, task_checker, subtask, lang)
-        video_aggregators.append(video)
+        if save_video:
+            video_aggregators.append(video)
 
         # Only move to the next subgoal if this one was successful
         if success:
             success_counter += 1
+            # return success_counter, video_aggregators
         else:
             return success_counter, video_aggregators
     return success_counter, video_aggregators
@@ -164,7 +160,7 @@ def rollout(env, model, task_oracle, subtask, lang):
         Success/Fail: a boolean indicates whether the task is completed
         video: a list of images that shows the trajectory of the robot
     """
-    video = [] # show video for debugging
+    video = []  # show video for debugging
     obs = env.get_obs()
 
     model.reset()
@@ -178,24 +174,22 @@ def rollout(env, model, task_oracle, subtask, lang):
     pbar = tqdm(range(EP_LEN))
     for step in pbar:
         # Prepare input
-        obs = prepare_visual_states(obs, env)
-        obs = prepare_proprio_states(obs)
+        obs = model.preprocess(obs, env)
         # Forward pass
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             trajectory = model.step(obs, lang)
         # Execute
         for act_ind in range(trajectory.shape[1]):
-            # calvin_env executes absolute action in the format of:
-            # [[x, y, z], [euler_x, euler_y, euler_z], [open]]
-            curr_action = [
-                trajectory[0, act_ind, :3],
-                trajectory[0, act_ind, 3:6],
-                trajectory[0, act_ind, [6]]
-            ]
+            curr_action = {
+                "action": [
+                    trajectory[0, act_ind, :3],  # [x, y, z]
+                    trajectory[0, act_ind, 3:6],  # [euler_x, euler_y, euler_z]
+                    trajectory[0, act_ind, [6]]  # [open in {-1, 1}]
+                ],
+                "type": "cartesian_abs"
+            }
             pbar.set_description(f"step: {step}")
-            curr_proprio = obs['proprio']
             obs, _, _, current_info = env.step(curr_action)
-            obs['proprio'] = curr_proprio  # keep for history
 
             # check if current step solves a task
             current_task_info = task_oracle.get_task_info_for_set(
@@ -210,6 +204,7 @@ def rollout(env, model, task_oracle, subtask, lang):
     return False, video
 
 
+@torch.no_grad()
 def main(args):
 
     # Set random seeds
@@ -222,9 +217,9 @@ def main(args):
     model = create_model(args)
 
     # Split sequence indices for multi-processing
-    sequence_indices = [
-        i for i in range(args.local_rank, NUM_SEQUENCES, int(os.environ["WORLD_SIZE"]))
-    ]
+    sequence_indices = list(
+        range(args.local_rank, NUM_SEQUENCES, int(os.environ["WORLD_SIZE"]))
+    )
 
     # Make environment
     env = get_env(args.merged_config_file, show_gui=False)
@@ -238,7 +233,7 @@ def main(args):
                     save_video=args.save_video)
 
     # Gather statistics from the whole dataset
-    results, sequence_inds = collect_results(args.base_log_dir)
+    results, _ = collect_results(args.base_log_dir)
     str_results = (
         " ".join([f"{i + 1}/5 : {v * 100:.1f}% |"
         for i, v in enumerate(count_success(results))]) + "|"
@@ -255,6 +250,7 @@ if __name__ == "__main__":
     args = parse_arguments()
     args.local_rank = int(os.environ["LOCAL_RANK"])
     args.device = torch.device('cuda')
+    EP_LEN = 360 // args.pred_len
 
     # DDP initialization
     torch.cuda.set_device(args.local_rank)

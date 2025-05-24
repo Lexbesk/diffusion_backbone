@@ -2,12 +2,11 @@ import logging
 
 import numpy as np
 import torch
-from torch.nn import functional as F
 
 from modeling.policy import fetch_model_class
 from modeling.encoder.text import fetch_tokenizers
-from utils.pytorch3d_transforms import relative_to_absolute
-from online_evaluation_calvin.utils_with_calvin import convert_action
+from utils.depth2cloud import fetch_depth2cloud
+from utils.data_preprocessors import fetch_data_preprocessor
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +17,12 @@ class Model:
     def __init__(self, args):
         self.args = args
         self.policy = self.get_policy()
+        self.preprocessor = fetch_data_preprocessor('calvin')(
+            keypose_only=False,
+            num_history=1,
+            custom_imsize=args.custom_img_size,
+            depth2cloud=fetch_depth2cloud('calvin')
+        )
         self.reset()
 
     def get_policy(self):
@@ -30,7 +35,7 @@ class Model:
             fps_subsampling_factor=self.args.fps_subsampling_factor,
             embedding_dim=self.args.embedding_dim,
             num_attn_heads=self.args.num_attn_heads,
-            nhist=self.args.num_history,
+            nhist=1,
             nhand=1,
             relative=self.args.relative_action,
             quaternion_format=self.args.quaternion_format,
@@ -45,22 +50,42 @@ class Model:
         self.policy = self.policy.to(device)
 
     def load_pretrained_weights(self):
-        state_dict = torch.load(self.args.checkpoint, map_location="cpu")["weight"]
+        state_dict = torch.load(self.args.checkpoint, map_location="cpu")["ema_weight"]
         model_weights = {}
         for key in state_dict:
             _key = key[7:]
             model_weights[_key] = state_dict[key]
         print(f'Loading weights from {self.args.checkpoint}')
-        self.policy.load_state_dict(model_weights)
+        self.policy.load_state_dict(model_weights, strict=True)
+
+    @torch.no_grad()
+    def preprocess(self, obs, env):
+        # proprio should be (B=1, nhist=1, nhand=1, 7)
+        proprio = self.preprocessor.process_actions(
+            torch.from_numpy(np.concatenate([
+                obs['robot_obs'][:6],
+                (obs['robot_obs'][[-1]] + 1) / 2
+            ], -1))[None, None, None]
+        )
+        # rgbs, pcds are (B=1, ncam=2, 3, H, W)
+        rgbs, pcds = self.preprocessor.process_obs(
+            torch.from_numpy(obs["rgb_obs"]["rgb_static"].transpose(2, 0, 1)[None, None]),
+            torch.from_numpy(obs["rgb_obs"]["rgb_gripper"].transpose(2, 0, 1)[None, None]),
+            torch.from_numpy(obs["depth_obs"]["depth_static"][None, None]),
+            torch.from_numpy(obs["depth_obs"]["depth_gripper"][None, None]),
+            torch.from_numpy(np.linalg.inv(np.array(env.cameras[1].view_matrix).reshape((4, 4)).T)[None]),
+            augment=False
+        )
+        return {'rgb': rgbs, 'pcd': pcds, 'proprio': proprio}
 
     @torch.no_grad()
     def step(self, obs, instruction):
         """
         Args:
             obs: {
-                rgb_obs: {rgb_static: (H, W, 3), rgb_gripper: (h, w, 3)},
-                pcd_obs: {pcd_static: (H, W, 3)},
-                proprio: (nhist, 8)
+                rgb: (B=1, ncam=2, 3, H, W),
+                pcd: (B=1, ncam=2, 3, H, W),
+                proprio: (B=1, nhist=1, nhand=1, 7)
             }
             instruction: str, the instruction of the task
 
@@ -73,79 +98,44 @@ class Model:
         trajectory_mask = torch.full([self.args.pred_len], False).to(device)
         trajectory_mask = trajectory_mask[None, :, None]
 
-        # Static camera
-        rgb3d = obs["rgb_obs"]["rgb_static"].transpose(2, 0, 1)[None, None]
-        rgb3d = torch.from_numpy(rgb3d).to(device).float()
-        rgb3d = rgb3d[..., 20:180, 20:180]
-
-        # Merge wrist camera
-        h, w = rgb3d.shape[-2:]
-        rgb2d = obs["rgb_obs"]["rgb_gripper"].transpose(2, 0, 1)[None]
-        rgb2d = torch.from_numpy(rgb2d).to(device).float()
-        rgb2d = F.interpolate(rgb2d, (h, w), mode='bilinear')[:, None]
-        rgbs = torch.cat((rgb3d, rgb2d), 1)
-
-        # Static camera point cloud
-        pcds = obs["pcd_obs"]["pcd_static"].transpose(2, 0, 1)[None, None]
-        pcds = torch.from_numpy(pcds).to(device).float()
-        pcds = pcds[..., 20:180, 20:180]
-
-        # Merge wrist camera point cloud
-        h, w = pcds.shape[-2:]
-        pcd2d = obs["pcd_obs"]["pcd_gripper"].transpose(2, 0, 1)[None]
-        pcd2d = torch.from_numpy(pcd2d).to(device).float()
-        pcd2d = F.interpolate(pcd2d, (h, w), mode='bilinear')[:, None]
-        pcds = torch.cat((pcds, pcd2d), 1)
-
-        # Proprioception
-        proprio = torch.from_numpy(obs["proprio"]).to(device).float()
-        proprio = proprio[None, :self.args.num_history, None]
-        from ipdb import set_trace
-        set_trace()
+        instr = (
+            [instruction,] if not self.args.pre_tokenize
+            else self.tokenizer([instruction,]).cuda(non_blocking=True)
+        )
 
         # Forward pass
         trajectory = self.policy(
             None,
             trajectory_mask,  # (1, T, 1)
-            rgbs,  # (1, 2, 3, 160, 160)
+            obs['rgb'],  # (1, 2, 3, h, w)
             None,  # (1, 1, 3, 84, 84)
-            pcds,  # (1, 2, 3, 160, 160)
-            self.tokenizer([instruction,]).cuda(non_blocking=True),
-            proprio[..., :7].float(),  # (1, nhist, 1, 7)
+            obs['pcd'],  # (1, 2, 3, h, w)
+            instr,
+            obs['proprio'],  # (1, nhist, 1, 7)
             run_inference=True
-        )  # (1, T, 1, 8)
-        trajectory = trajectory.view(1, self.args.pred_len, 8)  # (1, T, 8)
-
-        # Convert quaternion to Euler angles
-        trajectory = convert_action(trajectory)
+        )  # (1, T, 1, 7)
+        trajectory = trajectory.view(1, self.args.pred_len, 7)  # (1, T, 7)
+        trajectory = trajectory.data.cpu().numpy()
+        trajectory[..., -1] = 2 * (trajectory[..., -1] >= 0.5).astype(int) - 1
 
         # Back to absolute actions
         if bool(self.args.relative_action):
-            trajectory = relative_to_absolute(
+            trajectory = self._to_abs(
                 trajectory,
-                convert_action(proprio[:, [-1], 0])
+                obs['proprio'][:, [-1], 0].cpu().numpy()
             )
 
         return trajectory
+
+    @staticmethod
+    def _to_abs(action, proprio):
+        assert action.shape[-1] == 7 and len(action.shape) == 3
+        assert proprio.shape[-1] == 7 and len(proprio.shape) == 3
+        abs_pos_orn = proprio[..., :6] + np.cumsum(action[..., :6], -2)
+        return np.concatenate([abs_pos_orn, action[..., 6:]], -1)
 
 
 def create_model(args):
     model = Model(args)
     model.load_pretrained_weights()
     return model
-
-
-def relative_to_absolute(action, proprio, max_rel_pos=1.0, max_rel_orn=1.0,
-                         magic_scaling_factor_pos=1, magic_scaling_factor_orn=1):
-    assert action.shape[-1] == 7
-    assert proprio.shape[-1] == 7
-
-    rel_pos, rel_orn, gripper = np.split(action, [3, 6], -1)
-    rel_pos *= max_rel_pos * magic_scaling_factor_pos
-    rel_orn *= max_rel_orn * magic_scaling_factor_orn
-
-    pos_proprio, orn_proprio = proprio[..., :3], proprio[..., 3:6]
-
-    target_pos = pos_proprio + rel_pos
-    target_orn = orn_proprio + rel_orn
-    return np.concatenate([target_pos, target_orn, gripper], -1)

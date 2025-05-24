@@ -1,22 +1,21 @@
-main_dir=CALVIN
+main_dir=Peract2
 
 DATA_PATH="/data/user_data/ngkanats"
 
-train_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/train_rechunked8.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/CALVIN_zarr/val_rechunked8.zarr
-train_instructions=instructions/calvin/train_instructions.json
-val_instructions=instructions/calvin/val_instructions.json
+train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
+train_instructions=instructions/peract2/instructions.json
+val_instructions=instructions/peract2/instructions.json
 
-dataset=Calvin
+dataset=Peract2_3dfront_3dwrist
 num_workers=4
-memory_limit=6
 B=8
 B_val=8
-chunk_size=8
+chunk_size=1
 
 # Training/testing arguments, change these for HPT
-val_freq=10000
-eval_only=true
+val_freq=4000
+eval_only=false
 lr=2e-5
 lr_scheduler=tristage_flower
 wd=0.05
@@ -25,33 +24,31 @@ use_compile=false
 use_ema=true
 
 # Model arguments, change (some of) these for new architectures
-model_type=flower
-bimanual=false
-keypose_only=false
+model_type=flower_rlbench  # denoise3ddf
+bimanual=true
+keypose_only=true
 pre_tokenize=false
-custom_img_size=224
 
 backbone=clip
 finetune_backbone=false
 finetune_text_encoder=false
-fps_subsampling_factor=3
+fps_subsampling_factor=4
 
-C=192
+C=120
 num_attn_heads=8
 num_vis_instr_attn_layers=3
-num_history=1
+num_history=3
 
-workspace_normalizer_buffer=0.01
-quaternion_format=wxyz
-relative_action=true
+workspace_normalizer_buffer=0.05
+quaternion_format=xyzw
+relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-$backbone-finetuned_$finetune_backbone
+run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=flower.pth
 
-ngpus=1
+ngpus=4
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
@@ -61,7 +58,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --val_instructions $val_instructions \
     --dataset $dataset \
     --num_workers $num_workers \
-    --memory_limit $memory_limit \
     --batch_size $B \
     --batch_size_val $B_val \
     --chunk_size $chunk_size \
@@ -80,7 +76,6 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --bimanual $bimanual \
     --keypose_only $keypose_only \
     --pre_tokenize $pre_tokenize \
-    --custom_img_size $custom_img_size \
     --backbone $backbone \
     --finetune_backbone $finetune_backbone \
     --finetune_text_encoder $finetune_text_encoder \
