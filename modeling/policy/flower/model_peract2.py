@@ -15,6 +15,13 @@ from .transformers import (
     stateless_norm
 )
 from .utils import ActionIndex, generate_policy_prompt
+from ...utils.utils import (
+    compute_rotation_matrix_from_ortho6d,
+    get_ortho6d_from_rotation_matrix,
+    normalise_quat,
+    matrix_to_quaternion,
+    quaternion_to_matrix
+)
 
 
 class FLOWERVLA(nn.Module):
@@ -48,11 +55,11 @@ class FLOWERVLA(nn.Module):
         token_dropout: float = 0.1,
         
         # Model Structure
-        multistep: int = 10,
+        multistep: int = 2,
         num_sampling_steps: int = 4,
-        lowdim_obs_dim: int = 7,
-        action_dim: int = 7,
-        act_window_size: int = 10,
+        lowdim_obs_dim: int = 10,
+        action_dim: int = 10,
+        act_window_size: int = 2,
         
         # Model flags
         use_second_view: bool = True,
@@ -81,7 +88,6 @@ class FLOWERVLA(nn.Module):
         rope_theta: float = 32.0
     ):
         super().__init__()
-        self.action_space_index = ActionIndex()
         # Initialize model flags and configurations
         self._init_flags(
             use_second_view=use_second_view,
@@ -138,29 +144,64 @@ class FLOWERVLA(nn.Module):
 
         # Normalization for the 3D space, will be loaded in the main process
         self.workspace_normalizer = nn.Parameter(
-            torch.Tensor([[0., 0., 0., 0., 0., 0.],
-                          [1., 1., 1., 1., 1., 1.]]),
+            torch.Tensor([[0., 0., 0.],
+                          [1., 1., 1.]]),
             requires_grad=False
         )
         self.img_normalizer = CLIPTransform()
+        self._quaternion_format = 'xyzw'
 
     def normalize_pos(self, pos):
-        return torch.cat((
-            torch.clamp(pos[..., :3], -0.02, 0.02) / 0.02,
-            torch.clamp(pos[..., 3:6], -0.05, 0.05) / 0.05
-        ), -1)
         pos_min = self.workspace_normalizer[0].float().to(pos.device)
         pos_max = self.workspace_normalizer[1].float().to(pos.device)
         return (pos - pos_min) / (pos_max - pos_min) * 2.0 - 1.0
 
     def unnormalize_pos(self, pos):
-        return torch.cat((
-            pos[..., :3] * 0.02,
-            pos[..., 3:6] * 0.05
-        ), -1)
         pos_min = self.workspace_normalizer[0].float().to(pos.device)
         pos_max = self.workspace_normalizer[1].float().to(pos.device)
         return (pos + 1.0) / 2.0 * (pos_max - pos_min) + pos_min
+
+    def convert_rot(self, signal):
+        rot = normalise_quat(signal[..., 3:7])
+        res = signal[..., 7:] if signal.size(-1) > 7 else None
+        # The following code expects wxyz quaternion format!
+        if self._quaternion_format == 'xyzw':
+            rot = rot[..., (3, 0, 1, 2)]
+        # Convert to rotation matrix
+        rot = quaternion_to_matrix(rot)
+        # Convert to 6D
+        if len(rot.shape) == 4:
+            B, L, D1, D2 = rot.shape
+            rot = rot.reshape(B * L, D1, D2)
+            rot = get_ortho6d_from_rotation_matrix(rot)
+            rot = rot.reshape(B, L, 6)
+        else:
+            rot = get_ortho6d_from_rotation_matrix(rot)
+        # Concatenate pos, rot, other state info
+        signal = torch.cat([signal[..., :3], rot], dim=-1)
+        if res is not None:
+            signal = torch.cat((signal, res), -1)
+        return signal
+
+    def unconvert_rot(self, signal):
+        res = signal[..., 9:] if signal.size(-1) > 9 else None
+        if len(signal.shape) == 3:
+            B, L, _ = signal.shape
+            rot = signal[..., 3:9].reshape(B * L, 6)
+            mat = compute_rotation_matrix_from_ortho6d(rot)
+            quat = matrix_to_quaternion(mat)
+            quat = quat.reshape(B, L, 4)
+        else:
+            rot = signal[..., 3:9]
+            mat = compute_rotation_matrix_from_ortho6d(rot)
+            quat = matrix_to_quaternion(mat)
+        # The above code handled wxyz quaternion format!
+        if self._quaternion_format == 'xyzw':
+            quat = quat[..., (1, 2, 3, 0)]
+        signal = torch.cat([signal[..., :3], quat], dim=-1)
+        if res is not None:
+            signal = torch.cat((signal, res), -1)
+        return signal
 
     def _init_flags(self, **kwargs):
         """Initialize model flags and configurations"""
@@ -249,7 +290,6 @@ class FLOWERVLA(nn.Module):
         self.t_embedder = TimestepEmbedder(dit_dim)
         self.cond_norm = RmsNorm(hidden_dim)
         self.frequency_embedder = FreqEmbedder(dit_dim)
-        self.action_space_embedder = ActionSpaceEmbedderParameter(dit_dim, max_actions=len(self.action_space_index.action_spaces))
 
 
         # Positional encoding if not using ROPE/NOPE
@@ -272,15 +312,11 @@ class FLOWERVLA(nn.Module):
         ])
 
         # Create components per action space
-        for action_name, action_idx in self.action_space_index.action_spaces.items():
-            input_dim = self.action_space_index.get_action_dim(action_idx)
+        self.action_encoders =  Mlp(in_features=self.action_dim, hidden_features=dit_dim, out_features=dit_dim, bias=True)
+        self.action_decoders = nn.Linear(dit_dim, self.action_dim)  # .to(self.device)
             
-            # Add encoder/decoder for this action
-            self.action_encoders[action_name] =  Mlp(in_features=input_dim, hidden_features=dit_dim, out_features=dit_dim, bias=True)
-            self.action_decoders[action_name] = nn.Linear(dit_dim, input_dim)  # .to(self.device)
-                
-            if self.action_type_adaln:
-                self.adaln[action_name] = SharedAdaLNController(dit_dim, global_conddim=dit_dim, use_cross_attn=use_cross_attn)
+        if self.action_type_adaln:
+            self.adaln = SharedAdaLNController(dit_dim, global_conddim=dit_dim, use_cross_attn=use_cross_attn)
 
     def compute_loss(self, gt_trajectory, rgb3d, rgb2d, instruction):
         # Compute loss
@@ -438,14 +474,10 @@ class FLOWERVLA(nn.Module):
             torch.zeros(batch_size, self.dit_dim, device=device, dtype=default_type) 
             for _ in range(num_chunks)
         ]
-        
-        for action_idx in range(len(self.action_space_index.action_spaces)):
-            mask = (action_type == action_idx)
-            if mask.any():
-                action_name = self.action_space_index.get_action_name(action_idx)
-                action_mod = self.adaln[action_name](global_cond)
-                for i, signal in enumerate(action_mod):
-                    mod_signals[i] = signal
+
+        action_mod = self.adaln(global_cond)
+        for i, signal in enumerate(action_mod):
+            mod_signals[i] = signal
         
         return mod_signals
 
@@ -472,24 +504,25 @@ class FLOWERVLA(nn.Module):
         default_type = next(self.parameters()).dtype
 
         embed_tensor = torch.zeros(len(rgb_static), 1, 1)
-        action_type_tensor = torch.ones(len(rgb_static), self.act_window_size, 7)
+        action_type_tensor = torch.ones(len(rgb_static), self.act_window_size, self.action_dim)
         # Process primary image
         image_tensor = rgb_static
         B, T, C, H, W = image_tensor.shape
 
         # Extract visual features
         image_features = self.vlm._encode_image(
-            image_tensor.view(-1, C, H, W).to(device).to(default_type)
+            image_tensor.reshape(-1, C, H, W).to(device).to(default_type)
         ).to(default_type)
-        image_features = image_features.view(B, T * image_features.shape[1], -1)
+        image_features = image_features.reshape(B, T * image_features.shape[1], -1)
 
         # Process second view if enabled
         if self.use_second_view:
             image2_tensor = rgb_gripper
+            B, T, C, H, W = image2_tensor.shape
             image2_features = self.vlm._encode_image(
-                image2_tensor.view(-1, C, H, W).to(device).to(default_type)
+                image2_tensor.reshape(-1, C, H, W).to(device).to(default_type)
             ).to(default_type)
-            image2_features = image2_features.view(B, T * image2_features.shape[1], -1)
+            image2_features = image2_features.reshape(B, T * image2_features.shape[1], -1)
             image_features = torch.cat([image_features, image2_features], dim=1)
 
         # Get text embeddings once to reuse
@@ -538,37 +571,11 @@ class FLOWERVLA(nn.Module):
     def encode_actions(self, z, action_type):
         """Encode actions using action-specific encoders."""
         default_dtype = next(self.parameters()).dtype
-        action_type = action_type.to(z.device)
-        batch_size = z.shape[0]
-        encoded = torch.zeros(batch_size, z.shape[1], self.dit_dim, device=z.device).to(default_dtype)
-        
-        # Track valid dimensions per type
-        valid_dims = torch.zeros_like(z).to(default_dtype)
-        
-        for action_name, action_idx in self.action_space_index.action_spaces.items():
-            mask = (action_type == action_idx)
-            if mask.any():
-                encoded = self.action_encoders[action_name](z)
-        
-        return encoded, valid_dims
+        return self.action_encoders(z),  torch.zeros_like(z).to(default_dtype)
 
     def decode_actions(self, z, action_type, valid_dims):
         """Decode actions using action-specific decoders."""
-        default_dtype = next(self.parameters()).dtype
-        batch_size = z.shape[0]
-        max_action_dim = self.action_dim
-        decoded = torch.zeros(batch_size, z.shape[1], max_action_dim, 
-                        device=z.device).to(default_dtype)
-        
-        for action_name, action_idx in self.action_space_index.action_spaces.items():
-            mask = (action_type == action_idx)
-            if mask.any():
-                action_dim = self.action_space_index.get_action_dim(action_idx)
-                
-                pred = self.action_decoders[action_name](z)
-                # Only assign to valid dimensions
-                decoded = pred
-        return decoded
+        return self.action_decoders(z)
 
     def forward(
         self,
@@ -607,20 +614,29 @@ class FLOWERVLA(nn.Module):
         rgb3d = self.img_normalizer(rgb3d)
         # Inference, don't use gt_trajectory
         if run_inference:
+            B, T, H = trajectory_mask.shape
             trajectory = self.compute_trajectory(
-                trajectory_mask[:, :, 0], rgb3d[:, :1], rgb3d[:, 1:], instruction
+                trajectory_mask.view(B, T * H),
+                rgb3d[:, :1], rgb3d[:, 1:], instruction
             )
-            trajectory = trajectory[:, :, None]
-            trajectory[..., :6] = self.unnormalize_pos(trajectory[..., :6])
-            trajectory[..., 6] = (trajectory[..., 6] + 1) / 2
+            trajectory = trajectory.reshape(B, T, H, -1)
+            trajectory = self.unconvert_rot(
+                trajectory.flatten(1, 2)
+            ).unflatten(1, (T, H))
+            trajectory[..., :3] = self.unnormalize_pos(trajectory[..., :3])
+            trajectory[..., -1] = (trajectory[..., -1] + 1) / 2
             return trajectory
 
         # Training, use gt_trajectory to compute loss
-        gt_trajectory = gt_trajectory[:, :, 0].clone()
-        gt_trajectory[..., :6] = self.normalize_pos(gt_trajectory[..., :6])
-        gt_trajectory[..., 6] = 2 * gt_trajectory[..., 6] - 1
+        gt_trajectory = gt_trajectory.clone()
+        B, T, H, _ = gt_trajectory.shape
+        gt_trajectory[..., :3] = self.normalize_pos(gt_trajectory[..., :3])
+        gt_trajectory = self.convert_rot(
+            gt_trajectory.flatten(1, 2)
+        ).unflatten(1, (T, H))
+        gt_trajectory[..., -1] = 2 * gt_trajectory[..., -1] - 1
         return self.compute_loss(
-            gt_trajectory, rgb3d[:, :1], rgb3d[:, 1:], instruction)
+            gt_trajectory.flatten(1, 2), rgb3d[:, :1], rgb3d[:, 1:], instruction)
     
     def construct_prompts(self, language_instruction):
         """

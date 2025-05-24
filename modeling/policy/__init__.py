@@ -7,6 +7,7 @@ from .denoise_actor_3d_2dwrist import DenoiseActor as DenoiseActor2Dwrist
 from .denoise_actor_3d_le import DenoiseActor as DenoiseActor3DLE
 # from .denoise_actor_3d_2ndstage import DenoiseActor as DenoiseActor3D2ndStage
 from .flower.model import FLOWERVLA
+from .flower.model_peract2 import FLOWERVLA as FLOWERVLARLB
 
 
 def fetch_model_class(model_type):
@@ -20,6 +21,8 @@ def fetch_model_class(model_type):
         return DenoiseActor2Dwrist
     if model_type == 'flower':
         return FLOWERVLA
+    if model_type == 'flower_rlbench':
+        return FLOWERVLARLB
     # if model_type == 'denoise3dsa':
     #     return DenoiseActor3DSA
     # if model_type == 'denoise3ddf':
