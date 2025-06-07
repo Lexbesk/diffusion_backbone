@@ -6,6 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.vision_transformer import RmsNorm
 
+from modeling.utils.position_encodings import RotaryPositionEncoding
+
+
 ###############################################################################
 # Utility Functions
 ###############################################################################
@@ -305,6 +308,82 @@ class FlowerCrossAttention(nn.Module):
         out = self.resid_dropout(self.proj(out))
         return out
 
+
+class FlowerCrossAttention3D(FlowerCrossAttention):
+    """
+    Cross-attention module for 3D inputs, extending FlowerCrossAttention.
+    
+    Args:
+        dim: Input and output dimension.
+        n_heads: Number of attention heads.
+        attn_pdrop: Dropout rate on the attention weights.
+        resid_pdrop: Dropout rate on the output.
+        use_rope: Whether to apply rotary embeddings.
+        query_seq_len: Maximum length for queries.
+        context_seq_len: Maximum length for context.
+        rope_theta: Theta for query rotary embeddings.
+        context_rope_theta: Theta for context rotary embeddings.
+    """
+    def __init__(self,
+                 dim: int,
+                 n_heads: int,
+                 attn_pdrop: float = 0.1,
+                 resid_pdrop: float = 0.1,
+                 use_rope: bool = False,
+                 query_seq_len: int = 64,
+                 context_seq_len: int = 384,
+                 rope_theta: float = 32,
+                 context_rope_theta: float = 1000.0) -> None:
+        super().__init__(
+            dim, n_heads,
+            attn_pdrop, resid_pdrop,
+            use_rope,
+            query_seq_len, context_seq_len,
+            rope_theta, context_rope_theta
+        )
+
+    def forward(self, x, context, x_pos, context_pos, custom_attn_mask=None):
+        B, T, C = x.size()
+        _, S, _ = context.size()
+        q = self.q_proj(x).reshape(B, T, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = self.k_proj(context).reshape(B, S, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = self.v_proj(context).reshape(B, S, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        q = q.permute(0, 2, 1, 3).reshape(B, T, -1)
+        k = k.permute(0, 2, 1, 3).reshape(B, S, -1)
+        v = v.permute(0, 2, 1, 3).reshape(B, S, -1)
+        # apply 3d rope
+        qp, kvp = (x_pos, context_pos)
+        q_cos, q_sin = qp[..., 0], qp[..., 1]
+        k_cos, k_sin = kvp[..., 0], kvp[..., 1]
+        q = RotaryPositionEncoding.embed_rotary(q, q_cos, q_sin)
+        k = RotaryPositionEncoding.embed_rotary(k, k_cos, k_sin)
+        q = q.reshape(B, T, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = k.reshape(B, S, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = v.reshape(B, S, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        if custom_attn_mask is not None:
+            # First resh ape the mask to match q's sequence length
+            mask = custom_attn_mask.unsqueeze(1).unsqueeze(2)  # [32, 1, 1, 101]
+            mask = mask.expand(-1, self.n_heads, q.size(2), -1)  # [32, 16, 10, 101]
+            attn_output = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=mask,
+                dropout_p=self.attn_dropout.p if self.training else 0.0,
+                scale=self.scale,
+                is_causal=False
+            )
+        else:
+            attn_output = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.attn_dropout.p if self.training else 0.0,
+                scale=self.scale,
+                is_causal=False
+            )
+        out = attn_output.transpose(1, 2).reshape(B, T, C)
+        out = self.resid_dropout(self.proj(out))
+        return out
+
 ###############################################################################
 # Main FlowBlock
 ###############################################################################
@@ -417,6 +496,115 @@ class FlowBlock(nn.Module):
 
         return x_final
 
+
+class FlowBlock3D(nn.Module):
+    """
+    A transformer block for flow-based diffusion. Combines self-attention,
+    (optional) cross-attention, and a SwiGlu MLP with adaptive layer normalization modulation.
+    
+    Args:
+        dim: Input dimension.
+        heads: Number of attention heads.
+        attn_pdrop: Attention dropout rate.
+        resid_pdrop: Residual dropout rate.
+        mlp_pdrop: MLP dropout rate.
+        use_cross_attn: Whether to include a cross-attention layer.
+        use_rope: Whether to use rotary positional embeddings in self-attention.
+        query_seq_len: Maximum query sequence length.
+        rope_theta: Theta parameter for rotary embeddings.
+        lora_dim: Intermediate dimension for adaptive normalization modulation.
+        use_global_adaln: If True, combines global AdaLN modulation signals.
+    """
+    def __init__(self,
+                 dim: int,
+                 heads: int = 8,
+                 attn_pdrop: float = 0.1,
+                 resid_pdrop: float = 0.1,
+                 mlp_pdrop: float = 0.1,
+                 use_cross_attn: bool = False,
+                 use_rope: bool = False,
+                 query_seq_len: int = 128,
+                 rope_theta: float = 32,
+                 lora_dim: int = 256,
+                 use_global_adaln: bool = True) -> None:
+        super().__init__()
+        self.dim = dim
+        self.use_cross_attn = use_cross_attn
+        self.use_global_adaln = use_global_adaln
+
+        self.norm1 = RmsNorm(dim, eps=1e-6)
+        self.norm2 = RmsNorm(dim, eps=1e-6)
+        self.norm3 = RmsNorm(dim, eps=1e-6) if use_cross_attn else None
+
+        self.self_attn = FlowerAttention(dim=dim, n_heads=heads,
+                                           attn_pdrop=attn_pdrop, resid_pdrop=resid_pdrop,
+                                           use_rope=use_rope, max_seq_len=query_seq_len, rope_theta=rope_theta)
+        if use_cross_attn:
+            self.cross_attn = FlowerCrossAttention3D(dim=dim, n_heads=heads,
+                                                     attn_pdrop=attn_pdrop, resid_pdrop=resid_pdrop,
+                                                     use_rope=False)
+        self.mlp = SwiGlu(dim, dropout=mlp_pdrop)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(dim, lora_dim),  # Down-project
+            nn.Linear(lora_dim, 6 * dim)  # Up-project to produce 6 modulation signals
+        )
+
+    def forward(self, cx: torch.Tensor, c: torch.Tensor,
+                context: Optional[torch.Tensor] = None,
+                custom_attn_mask: Optional[torch.Tensor] = None,
+                custom_cross_attn_mask: Optional[torch.Tensor] = None,
+                is_causal: bool = False,
+                global_adaln: Optional[List[torch.Tensor]] = None,
+                x_pos=None, context_pos=None) -> torch.Tensor:
+        """
+        Forward pass through the FlowBlock.
+        
+        Args:
+            cx: Input tensor for the block (e.g. action latent representations) of shape [B, L, D].
+            c: Conditioning tensor (from external encoder).
+            context: Optional context tensor for cross-attention.
+            custom_attn_mask: Optional attention mask.
+            is_causal: If True, uses causal self-attention.
+            global_adaln: Optional list of global AdaLN modulation signals.
+        
+        Returns:
+            Output tensor of shape [B, L, D].
+        """
+        B, L, D = cx.shape
+        residual = cx
+
+        # Compute modulation signals.
+        modulation = self.adaLN_modulation(c)
+        signals = modulation.chunk(6, dim=1)
+        if self.use_global_adaln and global_adaln is not None:
+            mod_signals = [signals[i] + global_adaln[i] for i in range(6)]
+        else:
+            mod_signals = signals
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = mod_signals
+
+        # Self-attention block with modulation.
+        x_norm = self.norm1(cx)
+        x_mod = modulate(x_norm, shift_msa, scale_msa)
+        x_self = self.self_attn(x_mod, custom_attn_mask=custom_attn_mask, is_causal=is_causal)
+        x_out = residual + gate_msa.unsqueeze(1) * x_self
+
+        # Optionally apply cross-attention.
+        if self.use_cross_attn:
+            if context is None:
+                raise ValueError("Context is required for cross-attention.")
+            x_norm = self.norm2(x_out)
+            x_cross = self.cross_attn(x_norm, context, x_pos, context_pos, custom_attn_mask=custom_cross_attn_mask)
+            x_out = x_out + x_cross
+
+        # MLP block with modulation.
+        norm_layer = self.norm3 if self.use_cross_attn else self.norm2
+        x_norm = norm_layer(x_out)
+        x_mod = modulate(x_norm, shift_mlp, scale_mlp)
+        mlp_out = self.mlp(x_mod)
+        x_final = x_out + gate_mlp.unsqueeze(1) * mlp_out
+
+        return x_final
 
 
 ###############################################################################

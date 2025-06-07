@@ -24,8 +24,9 @@ class DenoiseActor(BaseDenoiseActor):
                  nhist=3,
                  nhand=1,
                  # Decoder arguments
+                 num_shared_attn_layers=4,
                  relative=False,
-                 quaternion_format='xyzw',
+                 rotation_format='quat_xyzw',
                  # Denoising arguments
                  denoise_timesteps=100,
                  denoise_model="ddpm"):
@@ -34,8 +35,9 @@ class DenoiseActor(BaseDenoiseActor):
             num_attn_heads=num_attn_heads,
             nhist=nhist,
             nhand=nhand,
+            num_shared_attn_layers=num_shared_attn_layers,
             relative=relative,
-            quaternion_format=quaternion_format,
+            rotation_format=rotation_format,
             denoise_timesteps=denoise_timesteps,
             denoise_model=denoise_model
         )
@@ -58,7 +60,8 @@ class DenoiseActor(BaseDenoiseActor):
         self.prediction_head = TransformerHead(
             embedding_dim=embedding_dim,
             nhist=nhist * nhand,
-            num_attn_heads=num_attn_heads
+            num_attn_heads=num_attn_heads,
+            num_shared_attn_layers=num_shared_attn_layers
         )
 
 
@@ -68,10 +71,12 @@ class TransformerHead(BaseTransformerHead):
                  embedding_dim=60,
                  num_attn_heads=8,
                  nhist=3,
+                 num_shared_attn_layers=4,
                  rotary_pe=False):
         super().__init__(
             embedding_dim=embedding_dim,
             num_attn_heads=num_attn_heads,
+            num_shared_attn_layers=num_shared_attn_layers,
             nhist=nhist,
             rotary_pe=False
         )

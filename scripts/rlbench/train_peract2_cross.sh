@@ -1,10 +1,6 @@
 main_dir=Peract2
 
-if [ -d "/lustre/fsw/portfolios/nvr/users/ngkanatsios" ]; then
-    DATA_PATH="/lustre/fsw/portfolios/nvr/users/ngkanatsios"
-else
-    DATA_PATH="/data/group_data/katefgroup/VLA"
-fi
+DATA_PATH=/data/user_data/ngkanats
 
 train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
 eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
@@ -15,6 +11,7 @@ dataset=Peract2_3dfront_3dwrist
 num_workers=4
 B=64
 B_val=64
+chunk_size=1
 
 # Training/testing arguments, change these for HPT
 val_freq=4000
@@ -23,6 +20,9 @@ lr=1e-4
 lr_scheduler=constant
 wd=1e-10
 train_iters=600000
+use_compile=false
+use_ema=true
+lv2_batch_size=4
 
 # Model arguments, change (some of) these for new architectures
 model_type=denoise3ddf
@@ -49,7 +49,7 @@ run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$deno
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 # checkpoint=peract2_front_wrist3d_2.pth
 
-ngpus=4
+ngpus=1
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
@@ -61,6 +61,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --num_workers $num_workers \
     --batch_size $B \
     --batch_size_val $B_val \
+    --chunk_size $chunk_size \
     --exp_log_dir $main_dir \
     --run_log_dir ${run_log_dir} \
     --checkpoint $checkpoint \
@@ -70,6 +71,8 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --lr_scheduler $lr_scheduler \
     --wd $wd \
     --train_iters $train_iters \
+    --use_compile $use_compile \
+    --lv2_batch_size $lv2_batch_size \
     --model_type $model_type \
     --bimanual $bimanual \
     --keypose_only $keypose_only \

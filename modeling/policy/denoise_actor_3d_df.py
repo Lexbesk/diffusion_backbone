@@ -1,5 +1,6 @@
 import einops
 import torch
+from torch import nn
 
 from ..encoder.multimodal.encoder_df import Encoder
 from ..utils.layers import AttentionModule
@@ -30,7 +31,9 @@ class DenoiseActor(BaseDenoiseActor):
                  quaternion_format='xyzw',
                  # Denoising arguments
                  denoise_timesteps=100,
-                 denoise_model="ddpm"):
+                 denoise_model="ddpm",
+                 # Training arguments
+                 lv2_batch_size=1):
         super().__init__(
             embedding_dim=embedding_dim,
             num_attn_heads=num_attn_heads,
@@ -39,7 +42,8 @@ class DenoiseActor(BaseDenoiseActor):
             relative=relative,
             quaternion_format=quaternion_format,
             denoise_timesteps=denoise_timesteps,
-            denoise_model=denoise_model
+            denoise_model=denoise_model,
+            lv2_batch_size=lv2_batch_size
         )
 
         # Vision-language encoder, runs only once
@@ -79,44 +83,53 @@ class TransformerHead(BaseTransformerHead):
         )
 
         # Shared attention layers
-        self.self_attn = AttentionModule(
-            num_layers=4,
-            d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.1,
-            n_heads=num_attn_heads,
-            pre_norm=False,
-            rotary_pe=rotary_pe,
-            use_adaln=True,
-            is_self=False
-        )
+        self.self_attn = nn.ModuleList([
+            AttentionModule(
+                num_layers=1,
+                d_model=embedding_dim,
+                dim_fw=embedding_dim,
+                dropout=0.1,
+                n_heads=num_attn_heads,
+                pre_norm=False,
+                rotary_pe=rotary_pe,
+                use_adaln=True,
+                is_self=False
+            )
+            for _ in range(4)
+        ])
 
         # Specific (non-shared) Output layers:
         # 1. Rotation
-        self.rotation_self_attn = AttentionModule(
-            num_layers=2,
-            d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.1,
-            n_heads=num_attn_heads,
-            pre_norm=False,
-            rotary_pe=rotary_pe,
-            use_adaln=True,
-            is_self=False
-        )
+        self.rotation_self_attn = nn.ModuleList([
+            AttentionModule(
+                num_layers=1,
+                d_model=embedding_dim,
+                dim_fw=embedding_dim,
+                dropout=0.1,
+                n_heads=num_attn_heads,
+                pre_norm=False,
+                rotary_pe=rotary_pe,
+                use_adaln=True,
+                is_self=False
+            )
+            for _ in range(4)
+        ])
 
         # 2. Position
-        self.position_self_attn = AttentionModule(
-            num_layers=2,
-            d_model=embedding_dim,
-            dim_fw=embedding_dim,
-            dropout=0.1,
-            n_heads=num_attn_heads,
-            pre_norm=False,
-            rotary_pe=rotary_pe,
-            use_adaln=True,
-            is_self=False
-        )
+        self.position_self_attn = nn.ModuleList([
+            AttentionModule(
+                num_layers=1,
+                d_model=embedding_dim,
+                dim_fw=embedding_dim,
+                dropout=0.1,
+                n_heads=num_attn_heads,
+                pre_norm=False,
+                rotary_pe=rotary_pe,
+                use_adaln=True,
+                is_self=False
+            )
+            for _ in range(4)
+        ])
 
         # Relative positional embeddings
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
@@ -184,13 +197,14 @@ class TransformerHead(BaseTransformerHead):
         )[-1]
 
         # Cross(!) attention among gripper and sampled context
-        traj_feats = self.self_attn(
-            seq1=traj_feats,
-            seq2=fps_scene_feats,
-            seq1_pos=rel_traj_pos,
-            seq2_pos=rel_fps_pos,
-            ada_sgnl=time_embs
-        )[-1]
+        for layer in self.self_attn:
+            traj_feats = layer(
+                seq1=traj_feats,
+                seq2=torch.cat((fps_scene_feats, traj_feats), 1),
+                seq1_pos=rel_traj_pos,
+                seq2_pos=torch.cat((rel_fps_pos, rel_traj_pos), 1),
+                ada_sgnl=time_embs
+            )[-1]
 
         # Rotation head
         rotation = self.predict_rot(
@@ -212,26 +226,30 @@ class TransformerHead(BaseTransformerHead):
 
     def predict_pos(self, traj_feats, fps_scene_feats,
                     rel_traj_pos, rel_fps_pos, time_embs):
-        position_features = self.position_self_attn(
-            seq1=traj_feats,
-            seq2=fps_scene_feats,
-            seq1_pos=rel_traj_pos,
-            seq2_pos=rel_fps_pos,
-            ada_sgnl=time_embs
-        )[-1]
+        position_features = traj_feats
+        for layer in self.position_self_attn:
+            position_features = layer(
+                seq1=position_features,
+                seq2=torch.cat((fps_scene_feats, position_features), 1),
+                seq1_pos=rel_traj_pos,
+                seq2_pos=torch.cat((rel_fps_pos, rel_traj_pos), 1),
+                ada_sgnl=time_embs
+            )[-1]
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
 
     def predict_rot(self, traj_feats, fps_scene_feats,
                     rel_traj_pos, rel_fps_pos, time_embs):
-        rotation_features = self.rotation_self_attn(
-            seq1=traj_feats,
-            seq2=fps_scene_feats,
-            seq1_pos=rel_traj_pos,
-            seq2_pos=rel_fps_pos,
-            ada_sgnl=time_embs
-        )[-1]
+        rotation_features = traj_feats
+        for layer in self.rotation_self_attn:
+            rotation_features = layer(
+                seq1=rotation_features,
+                seq2=torch.cat((fps_scene_feats, rotation_features), 1),
+                seq1_pos=rel_traj_pos,
+                seq2_pos=torch.cat((rel_fps_pos, rel_traj_pos), 1),
+                ada_sgnl=time_embs
+            )[-1]
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation

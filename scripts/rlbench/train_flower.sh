@@ -1,6 +1,6 @@
 main_dir=Peract2
 
-DATA_PATH="/data/user_data/ngkanats"
+DATA_PATH=/data/user_data/ngkanats
 
 train_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/train.zarr
 eval_data_dir=$DATA_PATH/zarr_datasets/Peract2_zarr/val.zarr
@@ -9,25 +9,26 @@ val_instructions=instructions/peract2/instructions.json
 
 dataset=Peract2_3dfront_3dwrist
 num_workers=4
-B=8
-B_val=8
+B=16
+B_val=32
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
-val_freq=4000
+val_freq=10000
 eval_only=false
-lr=2e-5
-lr_scheduler=tristage_flower
-wd=0.05
-train_iters=50000
+lr=1e-4
+lr_scheduler=constant  # tristage_flower
+wd=5e-10
+train_iters=600000
 use_compile=false
-use_ema=true
+use_ema=false
 
 # Model arguments, change (some of) these for new architectures
-model_type=flower_rlbench  # denoise3ddf
+model_type=flower_rlbench
 bimanual=true
 keypose_only=true
 pre_tokenize=false
+custom_img_size=224
 
 backbone=clip
 finetune_backbone=false
@@ -45,7 +46,7 @@ relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=reproduce_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model
+run_log_dir=frozen_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 ngpus=4
@@ -76,6 +77,7 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --bimanual $bimanual \
     --keypose_only $keypose_only \
     --pre_tokenize $pre_tokenize \
+    --custom_img_size $custom_img_size \
     --backbone $backbone \
     --finetune_backbone $finetune_backbone \
     --finetune_text_encoder $finetune_text_encoder \

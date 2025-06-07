@@ -48,7 +48,7 @@ def parse_arguments():
         ('num_history', int, 0),
         # Model arguments: head
         ('relative_action', str2bool, False),
-        ('quaternion_format', str, 'wxyz'),
+        ('rotation_format', str, 'quat_xyzw'),
         ('denoise_timesteps', int, 10),
         ('denoise_model', str, "rectified_flow")
     ]
@@ -71,7 +71,7 @@ def load_models(args):
         nhist=args.num_history,
         nhand=2 if args.bimanual else 1,
         relative=args.relative_action,
-        quaternion_format=args.quaternion_format,
+        rotation_format=args.rotation_format,
         denoise_timesteps=args.denoise_timesteps,
         denoise_model=args.denoise_model
     )

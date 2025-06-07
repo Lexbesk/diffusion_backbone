@@ -57,8 +57,9 @@ def parse_arguments():
         ('num_attn_heads', int, 9),
         ('num_vis_instr_attn_layers', int, 2),
         # Model arguments: head
+        ('num_shared_attn_layers', int, 16),
         ('relative_action', str2bool, True),
-        ('quaternion_format', str, 'wxyz'),
+        ('rotation_format', str, 'euler'),
         ('denoise_timesteps', int, 10),
         ('denoise_model', str, "rectified_flow")
     ]

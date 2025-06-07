@@ -36,7 +36,7 @@ class FLOWERVLA(nn.Module):
         nhand=1,
         # Decoder arguments
         relative=False,
-        quaternion_format='xyzw',
+        rotation_format='quat_xyzw',
         # Denoising arguments
         denoise_timesteps=100,
         denoise_model="ddpm",

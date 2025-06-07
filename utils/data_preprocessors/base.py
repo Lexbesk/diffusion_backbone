@@ -1,10 +1,9 @@
 class DataPreprocessor:
 
     def __init__(self, keypose_only=False, num_history=1,
-                 orig_imsize=256, custom_imsize=None, depth2cloud=None):
+                 custom_imsize=None, depth2cloud=None):
         self.keypose_only = keypose_only
         self.num_history = num_history
-        self.orig_imsize = orig_imsize
         self.custom_imsize = custom_imsize
         self.depth2cloud = depth2cloud
 
@@ -20,6 +19,7 @@ class DataPreprocessor:
         proprio = proprio.cuda(non_blocking=True)
         nhist_ = proprio.size(1)
         assert nhist_ >= self.num_history, "not enough proprio timesteps"
+        # the first proprio is the current state
         proprio = proprio[:, :max(self.num_history, 1)]
         return proprio
 

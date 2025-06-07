@@ -1,9 +1,7 @@
 import os
 import glob
-from pathlib import Path
 import random
 
-import open3d
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -17,8 +15,6 @@ from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlan
 from rlbench.backend.exceptions import InvalidActionError
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
-from pyrep.objects.dummy import Dummy
-from pyrep.objects.vision_sensor import VisionSensor
 
 from modeling.encoder.text import fetch_tokenizers
 from online_evaluation_rlbench.get_stored_demos import get_stored_demos
@@ -54,61 +50,11 @@ def task_file_to_task_class(task_file):
     return task_class
 
 
-class CameraMotion:
-    def __init__(self, cam: VisionSensor):
-        self.cam = cam
-
-    def step(self):
-        raise NotImplementedError()
-
-    def save_pose(self):
-        self._prev_pose = self.cam.get_pose()
-
-    def restore_pose(self):
-        self.cam.set_pose(self._prev_pose)
-
-
-class StaticCameraMotion(CameraMotion):
-
-    def __init__(self, cam: VisionSensor):
-        super().__init__(cam)
-
-    def step(self):
-        pass
-
-
-class TaskRecorder(object):
-
-    def __init__(self, cams_motion, fps=30):
-        self._cams_motion = cams_motion
-        self._fps = fps
-        self._snaps = {cam_name: [] for cam_name in self._cams_motion.keys()}
-
-    def take_snap(self):
-        for cam_name, cam_motion in self._cams_motion.items():
-            cam_motion.step()
-            self._snaps[cam_name].append(
-                (cam_motion.cam.capture_rgb() * 255.).astype(np.uint8))
-
-    def save(self, path):
-        print('Converting to video ...')
-        path = Path(path)
-        path.mkdir(exist_ok=True)
-        from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-
-        # Assume 'frames' is a list of RGB NumPy arrays with shape (H, W, 3)
-        for cam_name, cam_motion in self._cams_motion.items():
-            clip = ImageSequenceClip([image for image in self._snaps[cam_name]], fps=30)  # 30 FPS
-            clip.write_videofile("output_video.mp4", codec="libx264")
-            break
-
-
 class Mover:
 
     def __init__(self, task, max_tries=1):
         self._task = task
         self._last_action = None
-        self._step_id = 0
         self._max_tries = max_tries
 
     def __call__(self, action, collision_checking=False):
@@ -116,18 +62,17 @@ class Mover:
         if self._last_action is not None:
             action[:, 7] = self._last_action[:, 7].copy()
 
-        try_id = 0
         obs = None
         terminate = None
         reward = 0
 
-        for try_id in range(self._max_tries):
+        # Try to reach the desired pose
+        for _ in range(self._max_tries):
             action_collision = np.ones((action.shape[0], action.shape[1]+1))
             action_collision[:, :-1] = action
             if collision_checking:
                 action_collision[:, -1] = 0
-            # We need to fix this, Peract2 takes (right, left) action, but we 
-            # process it in terms of (left ,right) action
+            # Peract2 takes (right, left) action, but we predict (left, right)
             action_collision = action_collision[::-1]
             action_collision = action_collision.ravel()
             obs, reward, terminate = self._task.step(action_collision)
@@ -141,11 +86,7 @@ class Mover:
             if all(criteria) or reward == 1:
                 break
 
-            print(
-                f"Too far away (l_pos: {l_dist_pos:.3f}, r_pos: {r_dist_pos:.3f}, step: {self._step_id})... Retrying..."
-            )
-
-        # we execute the gripper action after re-tries
+        # Then execute the gripper action (open/close))
         action = target
         if (
             not reward == 1.0
@@ -156,16 +97,10 @@ class Mover:
             action_collision[:, :-1] = action
             if collision_checking:
                 action_collision[:, -1] = 0
-            # We need to fix this, Peract2 takes (right, left) action, but we 
-            # process it in terms of (left ,right) action
             action_collision = action_collision[::-1]
             action_collision = action_collision.ravel()
             obs, reward, terminate = self._task.step(action_collision)
 
-        if try_id == self._max_tries:
-            print(f"Failure after {self._max_tries} tries")
-
-        self._step_id += 1
         self._last_action = action.copy()
 
         return obs, reward, terminate
@@ -194,22 +129,23 @@ class Actioner:
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
         """
-        output = {"action": None}
-
-        gripper = gripper.unflatten(-1, (2, -1))  # (1, nhist, nhand=2, 7)
+        # b, nc = rgbs.shape[:2]
+        # rgbs = F.interpolate(
+        #     rgbs.flatten(0, 1), (224, 224),
+        #     mode='bilinear', antialias=True
+        # ).reshape(b, nc, -1, 224, 224)
 
         # Predict trajectory
-        output["action"] = self._policy(
+        return self._policy(
             None,
             torch.full([1, prediction_len, 2], False).to(rgbs.device),
             rgbs,
             None,
             pcds,
             self._instr,
-            gripper[..., :7],
+            gripper.unflatten(-1, (2, -1)),  # (1, nhist, nhand=2, 7)
             run_inference=True
         )
-        return output
 
     @property
     def device(self):
@@ -335,22 +271,6 @@ class RLBenchEnv:
     ):
         device = actioner.device
 
-        # if record_video:
-        #     # Add a global camera to the scene
-        #     cam_placeholder = Dummy('cam_cinematic_placeholder')
-        #     cam_resolution = [480, 480]
-        #     cam = VisionSensor.create(cam_resolution)
-        #     cam.set_pose(cam_placeholder.get_pose())
-        #     cam.set_parent(cam_placeholder)
-
-        #     # cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), 0.005)
-        #     global_cam_motion = StaticCameraMotion(cam)
-            
-        #     cams_motion = {"global": global_cam_motion}
-
-        #     tr = TaskRecorder(cams_motion, fps=5)
-        #     task._scene.register_step_callback(tr.take_snap)
-
         success_rate = 0
         total_reward = 0
         var_demos = get_stored_demos(
@@ -362,7 +282,7 @@ class RLBenchEnv:
             from_episode_number=0
         )
 
-        for demo_id, demo in enumerate(var_demos[:20]):
+        for demo_id, demo in enumerate(var_demos):
             if record_video:
                 frames = []
 
@@ -406,7 +326,7 @@ class RLBenchEnv:
                 # Update the observation based on the predicted action
                 try:
                     # Execute entire predicted trajectory step by step
-                    actions = output["action"][-1].cpu().numpy()
+                    actions = output[-1].cpu().numpy()
                     actions[..., -1] = actions[..., -1].round()
 
                     # execute
@@ -519,21 +439,6 @@ class ReplayRLBenchEnv(RLBenchEnv):
         num_history=1,
         record_video=True
     ):
-        # if record_video:
-        #     # Add a global camera to the scene
-        #     cam_placeholder = Dummy('cam_cinematic_placeholder')
-        #     cam_resolution = [480, 480]
-        #     cam = VisionSensor.create(cam_resolution)
-        #     cam.set_pose(cam_placeholder.get_pose())
-        #     cam.set_parent(cam_placeholder)
-
-        #     # cam_motion = CircleCameraMotion(cam, Dummy('cam_cinematic_base'), 0.005)
-        #     global_cam_motion = StaticCameraMotion(cam)
-            
-        #     cams_motion = {"global": global_cam_motion}
-
-        #     tr = TaskRecorder(cams_motion, fps=5)
-        #     task._scene.register_step_callback(tr.take_snap)
 
         success_rate = 0
         total_reward = 0
@@ -558,15 +463,20 @@ class ReplayRLBenchEnv(RLBenchEnv):
 
             # Find keyposes
             key_frames = keypoint_discovery(demo, bimanual=True)
+            # key_frames = np.arange(len(demo))[1:]
             states = np.stack([np.concatenate([
                 demo[k].left.gripper_pose,
                 [demo[k].left.gripper_open],
                 demo[k].right.gripper_pose,
                 [demo[k].right.gripper_open]
             ]) for k in key_frames]).astype(np.float32)
-            key_actions = states.reshape(len(states), 1, 2, 8)
+            key_actions = states.reshape(len(states), 1, 2, 8)  # [:6]
+            # key_actions[6:, :, :, :7] = key_actions[6][None, :, :, :7]  # fill the rest with the last action
+            print(key_actions[:, 0])
 
             for step_id in range(len(key_actions)):
+                print(step_id)
+                print(key_actions[step_id])
 
                 # Fetch the current observation and predict one action
                 rgb, _, _ = self.get_rgb_pcd_gripper_from_obs(obs)
@@ -596,6 +506,9 @@ class ReplayRLBenchEnv(RLBenchEnv):
                     reward = 0
 
             total_reward += max_reward
+            if record_video:
+                rgb, _, _ = self.get_rgb_pcd_gripper_from_obs(obs)
+                frames.append((rgb[0].cpu().numpy()[0].transpose(1, 2, 0) * 255).astype(np.uint8))
             if reward == 0:
                 step_id += 1
 
@@ -618,7 +531,7 @@ class ReplayRLBenchEnv(RLBenchEnv):
                 try:
                     from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
                     clip = ImageSequenceClip(frames, fps=5)
-                    clip.write_videofile(f"videos/replay_{task_str}_{demo_id}.mp4", codec="libx264")
+                    clip.write_videofile(f"videos2/replay_{task_str}_{demo_id}.mp4", codec="libx264")
                 except:
                     print("Error writing video file")
 

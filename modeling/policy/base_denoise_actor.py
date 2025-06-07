@@ -20,29 +20,38 @@ class DenoiseActor(nn.Module):
     def __init__(self,
                  # Encoder and decoder arguments
                  embedding_dim=60,
-                 num_attn_heads=9,
+                 num_attn_heads=8,
                  nhist=3,
                  nhand=1,
                  # Decoder arguments
+                 num_shared_attn_layers=4,
                  relative=False,
-                 quaternion_format='xyzw',
+                 rotation_format='quat_xyzw',
                  # Denoising arguments
                  denoise_timesteps=100,
-                 denoise_model="ddpm"):
+                 denoise_model="ddpm",
+                 # Training arguments
+                 lv2_batch_size=1):
         super().__init__()
         # Arguments to be accessed by the main class
-        self._quaternion_format = quaternion_format
+        self._rotation_format = rotation_format
         self._relative = relative
+        self._lv2_batch_size = lv2_batch_size
 
         # Vision-language encoder, runs only once
         self.encoder = None  # Implement this!
 
         # Action decoder, runs at every denoising timestep
-        self.traj_encoder = nn.Linear(9, embedding_dim)
+        self.traj_encoder = nn.Linear(
+            6 if rotation_format == 'euler' else 9,  # XYZ + Euler or 6D
+            embedding_dim
+        )
         self.prediction_head = TransformerHead(
             embedding_dim=embedding_dim,
             nhist=nhist * nhand,
-            num_attn_heads=num_attn_heads
+            num_attn_heads=num_attn_heads,
+            num_shared_attn_layers=num_shared_attn_layers,
+            rot_dim=3 if rotation_format == 'euler' else 6
         )
 
         # Noise/denoise schedulers and hyperparameters
@@ -52,10 +61,16 @@ class DenoiseActor(nn.Module):
         self.n_steps = denoise_timesteps
 
         # Normalization for the 3D space, will be loaded in the main process
-        self.workspace_normalizer = nn.Parameter(
-            torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
-            requires_grad=False
-        )
+        if rotation_format == 'euler':  # normalize pos+rot
+            self.workspace_normalizer = nn.Parameter(
+                torch.Tensor([[0., 0, 0, 0, 0, 0], [1., 1, 1, 1, 1, 1]]),
+                requires_grad=False
+            )
+        else:
+            self.workspace_normalizer = nn.Parameter(
+                torch.Tensor([[0., 0., 0.], [1., 1., 1.]]),
+                requires_grad=False
+            )
 
     def encode_inputs(self, rgb3d, rgb2d, pcd, instruction, proprio):
         fixed_inputs = self.encoder(
@@ -81,18 +96,17 @@ class DenoiseActor(nn.Module):
         trajectory_feats = self.traj_encoder(trajectory)
 
         # But use positions from unnormalized absolute trajectory
-        trajectory = trajectory.clone()
-        trajectory[..., :3] = self.unnormalize_pos(trajectory[..., :3])
+        traj_xyz = trajectory[..., :3].detach()
+        traj_xyz = self.unnormalize_pos(traj_xyz)
         if self._relative:  # relative to absolute
-            trajectory[..., :3] = (
+            traj_xyz = (
                 query_trajectory[..., :3]
-                + trajectory[..., :3]
-                # + torch.cumsum(trajectory[..., :3], dim=1)
+                + torch.cumsum(traj_xyz, dim=1)
             )
 
         return self.prediction_head(
             trajectory_feats,
-            trajectory,
+            traj_xyz,
             timestep,
             rgb3d_feats=rgb3d_feats,
             rgb3d_pos=pcd,
@@ -124,12 +138,12 @@ class DenoiseActor(nn.Module):
                 t_ind, trajectory[..., :3]
             ).prev_sample
             rot = self.rotation_scheduler.step(
-                out[..., 3:9],
-                t_ind, trajectory[..., 3:9]
+                out[..., 3:-1],
+                t_ind, trajectory[..., 3:]
             ).prev_sample
             trajectory = torch.cat((pos, rot), -1)
 
-        return torch.cat((trajectory, out[..., 9:]), -1)
+        return torch.cat((trajectory, out[..., -1:]), -1)
 
     def compute_trajectory(self, trajectory_mask,
                            rgb3d, rgb2d, pcd, instruction, proprio):
@@ -139,8 +153,9 @@ class DenoiseActor(nn.Module):
         )
 
         # Sample from learned model starting from noise
+        out_dim = 6 if self._rotation_format == 'euler' else 9
         trajectory = torch.randn(
-            size=tuple(trajectory_mask.shape) + (9,),
+            size=tuple(trajectory_mask.shape) + (out_dim,),
             device=trajectory_mask.device
         )
         trajectory = self.conditional_sample(
@@ -155,10 +170,9 @@ class DenoiseActor(nn.Module):
             trajectory.flatten(1, 2)
         ).unflatten(1, (traj_len, nhand))
         # unnormalize position
-        trajectory[..., :3] = self.unnormalize_pos(trajectory[..., :3])
+        trajectory = self.unnormalize_pos(trajectory)
         # Convert gripper status to probaility
-        if trajectory.shape[-1] > 7:
-            trajectory[..., 7] = trajectory[..., 7].sigmoid()
+        trajectory[..., -1] = trajectory[..., -1].sigmoid()
 
         return trajectory
 
@@ -170,16 +184,84 @@ class DenoiseActor(nn.Module):
         )
 
         # Process gt_trajectory
-        gt_openess = gt_trajectory[..., 7:]
-        gt_trajectory = gt_trajectory[..., :7]
+        gt_openess = gt_trajectory[..., -1:]
+        gt_trajectory = gt_trajectory[..., :-1]
         # Normalize all pos
-        gt_trajectory = gt_trajectory.clone()
-        gt_trajectory[..., :3] = self.normalize_pos(gt_trajectory[..., :3])
+        gt_trajectory = self.normalize_pos(gt_trajectory)
         # Convert rotation parametrization
         _, traj_len, nhand, _ = gt_trajectory.shape
         gt_trajectory = self.convert_rot(
             gt_trajectory.flatten(1, 2)
         ).unflatten(1, (traj_len, nhand))
+
+        # Loop lv2_batch_size times and sample different noises with same input
+        # Trick to effectively increase the batch size without re-encoding
+        total_loss = 0
+        for _ in range(self._lv2_batch_size):
+            # Sample noise
+            noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
+
+            # Sample a random timestep
+            timesteps = self.position_scheduler.sample_noise_step(
+                num_noise=len(noise), device=noise.device
+            )
+
+            # Add noise to the clean trajectories
+            pos = self.position_scheduler.add_noise(
+                gt_trajectory[..., :3], noise[..., :3],
+                timesteps
+            )
+            rot = self.rotation_scheduler.add_noise(
+                gt_trajectory[..., 3:], noise[..., 3:],
+                timesteps
+            )
+            noisy_trajectory = torch.cat((pos, rot), -1)
+
+            # Predict the noise residual
+            pred = self.policy_forward_pass(
+                noisy_trajectory,
+                timesteps, fixed_inputs
+            )
+
+            # Compute loss
+            for layer_pred in pred:
+                pos = layer_pred[..., :3]
+                rot = layer_pred[..., 3:-1]
+                denoise_target = self.position_scheduler.prepare_target(
+                    noise, gt_trajectory
+                )
+                loss = (
+                    30 * F.l1_loss(pos, denoise_target[..., :3], reduction='mean')
+                    + 10 * F.l1_loss(rot, denoise_target[..., 3:], reduction='mean')
+                )
+                if torch.numel(gt_openess) > 0:
+                    openess = layer_pred[..., -1:]
+                    loss += F.binary_cross_entropy_with_logits(openess, gt_openess)
+                total_loss = total_loss + loss
+        return total_loss / self._lv2_batch_size
+
+    def compute_loss_(self, gt_trajectory,
+                     rgb3d, rgb2d, pcd, instruction, proprio):
+        # Encode observations, states, instructions
+        fixed_inputs = self.encode_inputs(
+            rgb3d, rgb2d, pcd, instruction, proprio
+        )
+
+        # Process gt_trajectory
+        gt_openess = gt_trajectory[..., 7:]
+        gt_trajectory = gt_trajectory[..., :7]
+        # Normalize all pos
+        gt_trajectory = self.normalize_pos(gt_trajectory)
+        # Convert rotation parametrization
+        _, traj_len, nhand, _ = gt_trajectory.shape
+        gt_trajectory = self.convert_rot(
+            gt_trajectory.flatten(1, 2)
+        ).unflatten(1, (traj_len, nhand))
+
+        # Loop lv2_batch_size times and sample different noises with same input
+        # Trick to effectively increase the batch size without re-encoding
+        gt_openess = torch.cat([gt_openess for _ in range(self._lv2_batch_size)])
+        gt_trajectory = torch.cat([gt_trajectory for _ in range(self._lv2_batch_size)])
 
         # Sample noise
         noise = torch.randn(gt_trajectory.shape, device=gt_trajectory.device)
@@ -201,6 +283,11 @@ class DenoiseActor(nn.Module):
         noisy_trajectory = torch.cat((pos, rot), -1)
 
         # Predict the noise residual
+        fixed_inputs = (
+            torch.cat([item for _ in range(self._lv2_batch_size)])
+            if item is not None else None
+            for item in fixed_inputs
+        )
         pred = self.policy_forward_pass(
             noisy_trajectory,
             timesteps, fixed_inputs
@@ -224,21 +311,33 @@ class DenoiseActor(nn.Module):
             total_loss = total_loss + loss
         return total_loss
 
-    def normalize_pos(self, pos):
-        pos_min = self.workspace_normalizer[0].float().to(pos.device)
-        pos_max = self.workspace_normalizer[1].float().to(pos.device)
-        return (pos - pos_min) / (pos_max - pos_min) * 2.0 - 1.0
+    def normalize_pos(self, signal):
+        n = min(self.workspace_normalizer.size(-1), signal.size(-1))
+        _min = self.workspace_normalizer[0][:n].float()
+        _max = self.workspace_normalizer[1][:n].float()
+        return torch.cat((
+            (signal[..., :n] - _min) / (_max - _min) * 2.0 - 1.0,
+            signal[..., n:]
+        ), -1)
 
-    def unnormalize_pos(self, pos):
-        pos_min = self.workspace_normalizer[0].float().to(pos.device)
-        pos_max = self.workspace_normalizer[1].float().to(pos.device)
-        return (pos + 1.0) / 2.0 * (pos_max - pos_min) + pos_min
+    def unnormalize_pos(self, signal):
+        n = min(self.workspace_normalizer.size(-1), signal.size(-1))
+        _min = self.workspace_normalizer[0][:n].float()
+        _max = self.workspace_normalizer[1][:n].float()
+        return torch.cat((
+            (signal[..., :n] + 1.0) / 2.0 * (_max - _min) + _min,
+            signal[..., n:]
+        ), -1)
 
     def convert_rot(self, signal):
+        # If Euler then no conversion
+        if self._rotation_format == 'euler':
+            return signal
+        # Else assume quaternion
         rot = normalise_quat(signal[..., 3:7])
         res = signal[..., 7:] if signal.size(-1) > 7 else None
         # The following code expects wxyz quaternion format!
-        if self._quaternion_format == 'xyzw':
+        if self._rotation_format == 'quat_xyzw':
             rot = rot[..., (3, 0, 1, 2)]
         # Convert to rotation matrix
         rot = quaternion_to_matrix(rot)
@@ -257,6 +356,10 @@ class DenoiseActor(nn.Module):
         return signal
 
     def unconvert_rot(self, signal):
+        # If Euler then no conversion
+        if self._rotation_format == 'euler':
+            return signal
+        # Else assume quaternion
         res = signal[..., 9:] if signal.size(-1) > 9 else None
         if len(signal.shape) == 3:
             B, L, _ = signal.shape
@@ -269,7 +372,7 @@ class DenoiseActor(nn.Module):
             mat = compute_rotation_matrix_from_ortho6d(rot)
             quat = matrix_to_quaternion(mat)
         # The above code handled wxyz quaternion format!
-        if self._quaternion_format == 'xyzw':
+        if self._rotation_format == 'quat_xyzw':
             quat = quat[..., (1, 2, 3, 0)]
         signal = torch.cat([signal[..., :3], quat], dim=-1)
         if res is not None:
@@ -298,19 +401,14 @@ class DenoiseActor(nn.Module):
             proprio: (B, nhist, nhand, 3+4+X)
 
         Note:
-            The input rotation is ALWAYS expressed as a quaternion.
-            The model converts it to 6D internally.
+            The input rotation is expressed either as:
+                a) quaternion (4D), then the model converts it to 6D internally.
+                b) Euler angles (3D).
 
         Returns:
             - loss: scalar, if run_inference is False
-            - trajectory: (B, trajectory_length, nhand, 3+4+X), at inference
+            - trajectory: (B, trajectory_length, nhand, 3+rot+1), at inference
         """
-        # Convert rotation to 6D
-        _, nhist, nhand, _ = proprio.shape
-        proprio = self.convert_rot(
-            proprio[..., :7].flatten(1, 2)
-        ).unflatten(1, (nhist, nhand))
-
         # Inference, don't use gt_trajectory
         if run_inference:
             return self.compute_trajectory(
@@ -330,8 +428,10 @@ class TransformerHead(nn.Module):
     def __init__(self,
                  embedding_dim=60,
                  num_attn_heads=8,
+                 num_shared_attn_layers=4,
                  nhist=3,
-                 rotary_pe=True):
+                 rotary_pe=True,
+                 rot_dim=6):
         super().__init__()
 
         # Different embeddings
@@ -377,7 +477,7 @@ class TransformerHead(nn.Module):
 
         # Shared attention layers
         self.self_attn = AttentionModule(
-            num_layers=4,
+            num_layers=num_shared_attn_layers,
             d_model=embedding_dim,
             dim_fw=embedding_dim,
             dropout=0.1,
@@ -405,9 +505,8 @@ class TransformerHead(nn.Module):
         self.rotation_predictor = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
-            nn.Linear(embedding_dim, 6)
+            nn.Linear(embedding_dim, rot_dim)
         )
-        # self.rotation_norm = nn.LayerNorm(embedding_dim)
 
         # 2. Position
         self.position_proj = nn.Linear(embedding_dim, embedding_dim)
@@ -427,7 +526,6 @@ class TransformerHead(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, 3)
         )
-        # self.position_norm = nn.LayerNorm(embedding_dim)
 
         # 3. Openess
         self.openess_predictor = nn.Sequential(
@@ -574,7 +672,6 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         position_features = position_features[:, :traj_len]
-        # position_features = self.position_norm(position_features)
         position_features = self.position_proj(position_features)  # (B, N, C)
         position = self.position_predictor(position_features)
         return position, position_features
@@ -588,7 +685,6 @@ class TransformerHead(nn.Module):
             ada_sgnl=time_embs
         )[-1]
         rotation_features = rotation_features[:, :traj_len]
-        # rotation_features = self.rotation_norm(rotation_features)
         rotation_features = self.rotation_proj(rotation_features)  # (B, N, C)
         rotation = self.rotation_predictor(rotation_features)
         return rotation

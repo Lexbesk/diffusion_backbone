@@ -7,7 +7,7 @@ def compute_metrics(pred, gt):
     select_mask = (quat_l1 < quat_l1_).float()
     quat_l1 = (select_mask * quat_l1 + (1 - select_mask) * quat_l1_)
     # gripper openess
-    openess = ((pred[..., -1:] >= 0.5) == (gt[..., -1:] > 0.5)).bool()
+    openess = ((pred[..., -1:] >= 0.5) == (gt[..., -1:] >= 0.5)).bool()
     tr = 'traj_'
 
     # Trajectory metrics

@@ -42,6 +42,7 @@ def parse_arguments():
         ('train_iters', int, 600000),
         ('use_compile', str2bool, False),
         ('use_ema', str2bool, False),
+        ('lv2_batch_size', int, 1),
         # Model arguments: general policy type
         ('model_type', str, 'denoise3d'),
         ('bimanual', str2bool, False),
@@ -61,9 +62,10 @@ def parse_arguments():
         ('num_vis_instr_attn_layers', int, 3),
         ('num_history', int, 1),
         # Model arguments: head
+        ('num_shared_attn_layers', int, 4),
         ('workspace_normalizer_buffer', float, 0.04),
         ('relative_action', str2bool, False),
-        ('quaternion_format', str, 'wxyz'),
+        ('rotation_format', str, 'quat_wxyz'),
         ('denoise_timesteps', int, 10),
         ('denoise_model', str, "rectified_flow")
     ]

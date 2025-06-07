@@ -27,30 +27,38 @@ def read_zarr_with_cache(fname, mem_gb=16):
     return zarr.open_group(cached_store, mode="r")
 
 
-def to_relative_action(actions, anchor_actions, qform='xyzw'):
-    # deltas wrt previous time step
-    # actions: (..., N, 8), anchor_actions: (..., 1, 8)
-    assert actions.shape[-1] == 8
+def to_relative_action(actions, anchor_action, qform='xyzw'):
+    """
+    Compute delta actions where the first delta is relative to anchor,
+    and subsequent deltas are relative to the previous timestep.
 
-    prev = torch.cat([anchor_actions, actions], dim=-2)[..., :-1, :]
-    rel_pos = actions[..., :3] - prev[..., :3]  # (..., N, 3)
+    Args:
+        actions: (..., N, 8)  — future trajectory
+        anchor_action: (..., 1, 8) — current pose to treat as timestep -1
+        qform: 'xyzw' or 'wxyz' — quaternion format
+
+    Returns:
+        delta_actions: (..., N, 8)
+    """
+    assert actions.shape[-1] == 8
+    # Stitch anchor in front and shift everything by one
+    prev = torch.cat([anchor_action, actions[..., :-1, :]], -2)  # (..., N, 8)
+
+    rel_pos = actions[..., :3] - prev[..., :3]
 
     if qform == 'xyzw':
-        # pytorch3d takes wxyz quaternion, the input is xyzw
         rel_orn = pytorch3d_transforms.quaternion_multiply(
             actions[..., [6, 3, 4, 5]],
-            pytorch3d_transforms.quaternion_invert(prev[..., [6,3,4,5]])
+            pytorch3d_transforms.quaternion_invert(prev[..., [6, 3, 4, 5]])
         )[..., [1, 2, 3, 0]]
     elif qform == 'wxyz':
-        # pytorch3d takes wxyz quaternion, the input is xyzw
         rel_orn = pytorch3d_transforms.quaternion_multiply(
             actions[..., 3:7],
             pytorch3d_transforms.quaternion_invert(prev[..., 3:7])
         )
     else:
-        assert False
+        raise ValueError("Invalid quaternion format")
 
     gripper = actions[..., -1:]
-    rel_actions = torch.concat([rel_pos, rel_orn, gripper], dim=-1)
 
-    return rel_actions
+    return torch.cat([rel_pos, rel_orn, gripper], -1)  # (..., N, 8)

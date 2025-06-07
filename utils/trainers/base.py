@@ -121,17 +121,28 @@ class BaseTrainTester:
             num_attn_heads=self.args.num_attn_heads,
             nhist=self.args.num_history,
             nhand=2 if self.args.bimanual else 1,
+            num_shared_attn_layers=self.args.num_shared_attn_layers,
             relative=self.args.relative_action,
-            quaternion_format=self.args.quaternion_format,
+            rotation_format=self.args.rotation_format,
             denoise_timesteps=self.args.denoise_timesteps,
-            denoise_model=self.args.denoise_model
+            denoise_model=self.args.denoise_model,
+            lv2_batch_size=self.args.lv2_batch_size
         )
-        count_parameters(_model)
+
+        # Print basic modules' parameters
+        if dist.get_rank() == 0:
+            count_parameters(_model)
+
         # Somehow necessary for torch.compile to work without DDP complaining:
         if hasattr(_model, 'encoder') and hasattr(_model.encoder, 'feature_pyramid'):
             _model.encoder.feature_pyramid = _model.encoder.feature_pyramid.to(
                 memory_format=torch.channels_last
             )
+        # Useful for some models to ensure parameters are contiguous
+        for name, param in _model.named_parameters():
+            if param.requires_grad and param.ndim > 1 and not param.is_contiguous():
+                print(f"Fixing layout for: {name}")
+                param.data = param.contiguous()
 
         return _model
 
@@ -178,10 +189,10 @@ class BaseTrainTester:
         ]
         if self.args.finetune_backbone:
             optimizer_grouped_parameters.append(
-                {"params": [], "weight_decay": self.args.wd, "lr": 0.1 * self.args.lr}
+                {"params": [], "weight_decay": self.args.wd, "lr": self.args.lr}
             )
         no_decay = ['bias', 'LayerNorm', 'layernorm', 'ln', 'norm']
-        # no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]  # , 'norm']
+        no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]  # , 'norm']
         for name, param in model.named_parameters():
             if self.args.finetune_backbone and 'backbone' in name:
                 optimizer_grouped_parameters[2]["params"].append(param)
@@ -242,12 +253,12 @@ class BaseTrainTester:
                 print("Test evaluation.......")
                 model.eval()
                 self.evaluate_nsteps(
-                    model if self.args.use_ema else ema_model,
+                    ema_model if self.args.use_ema else model,
                     val_loader, step_id=-1,
                     val_iters=-1
                 )
             dist.barrier(device_ids=[torch.cuda.current_device()])
-            return model if self.args.use_ema else ema_model
+            return ema_model if self.args.use_ema else model
 
         # Step the lr scheduler to the current step
         for _ in range(start_iter):
@@ -279,16 +290,16 @@ class BaseTrainTester:
                 print("Train evaluation.......")
                 model.eval()
                 self.evaluate_nsteps(
-                    model if self.args.use_ema else ema_model,
+                    ema_model if self.args.use_ema else model,
                     train_loader, step_id,
                     val_iters=10,
                     split='train'
                 )
                 print("Test evaluation.......")
                 new_loss = self.evaluate_nsteps(
-                    model if self.args.use_ema else ema_model,
+                    ema_model if self.args.use_ema else model,
                     val_loader, step_id,
-                    val_iters=-1
+                    val_iters=1250
                 )
                 # save model
                 best_loss = self.save_checkpoint(
@@ -298,7 +309,7 @@ class BaseTrainTester:
                 model.train()
             dist.barrier(device_ids=[torch.cuda.current_device()])
 
-        return model if self.args.use_ema else ema_model
+        return ema_model if self.args.use_ema else model
 
     @torch.no_grad()
     def prepare_batch(self, sample, augment=False):
@@ -346,7 +357,7 @@ class BaseTrainTester:
         model.eval()
 
         for i, sample in tqdm(enumerate(loader)):
-            if i == val_iters or i > 1000:
+            if i == val_iters:
                 break
 
             pred_action = self._model_forward(model, sample, training=False)
@@ -420,7 +431,7 @@ class BaseTrainTester:
         # EMA weights
         if model_dict.get("ema_weight") is not None:
             ema_model.load_state_dict(model_dict["ema_weight"], strict=True)
-        # Load optimizer
+        # Useful for resuming training
         if 'optimizer' in model_dict:
             optimizer.load_state_dict(model_dict["optimizer"])
         start_iter = model_dict.get("iter", 0)
@@ -437,16 +448,14 @@ class BaseTrainTester:
                         step_id, new_loss, best_loss):
         """Save checkpoint if requested."""
         model_state = model.state_dict()
-        optimizer_state = optimizer.state_dict()
         ema_state = ema_model.state_dict() if self.args.use_ema else None
 
         # Best checkpoint
-        if new_loss is not None and (best_loss is None or new_loss < best_loss):
+        if best_loss is None or new_loss < best_loss:
             best_loss = new_loss
             torch.save({
                 "weight": model_state,
                 "ema_weight": ema_state,
-                "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / "best.pth")
@@ -455,17 +464,16 @@ class BaseTrainTester:
         torch.save({
             "weight": model_state,
             "ema_weight": ema_state,
-            "optimizer": optimizer_state,
+            "optimizer": optimizer.state_dict(),
             "iter": step_id + 1,
             "best_loss": best_loss
         }, self.args.log_dir / "last.pth")
 
         # Save intermediate checkpoints
-        if (step_id + 1) % 60000 == 0:
+        if (step_id + 1) % 150000 == 0:
             torch.save({
                 "weight": model_state,
                 "ema_weight": ema_state,
-                "optimizer": optimizer_state,
                 "iter": step_id + 1,
                 "best_loss": best_loss
             }, self.args.log_dir / f"interm{step_id + 1}.pth")
@@ -507,3 +515,49 @@ def relative_to_absolute(action, proprio):
     orn = (orn + torch.pi) % (2 * torch.pi) - torch.pi
 
     return torch.cat([pos, orn, action[..., 6:]], -1)
+
+
+def from_delta_action(deltas, anchor_action, qform='xyzw'):
+    """
+    Reconstruct absolute actions from deltas and initial anchor action.
+
+    Args:
+        deltas: (..., N, 8) — delta actions (relative to previous timestep)
+        anchor_action: (..., 1, 8) — starting pose
+        qform: 'xyzw' or 'wxyz'
+
+    Returns:
+        actions: (..., N, 8) — absolute action trajectory
+    """
+    assert deltas.shape[-1] == 8
+    abs_actions = [anchor_action.squeeze(-2)]  # (..., 8)
+
+    for t in range(deltas.shape[-2]):
+        prev = abs_actions[-1]
+        delta = deltas[..., t, :]
+
+        # Position update
+        pos = prev[..., :3] + delta[..., :3]
+
+        # Quaternion update
+        if qform == 'xyzw':
+            prev_q = prev[..., [6, 3, 4, 5]]
+            delta_q = delta[..., [6, 3, 4, 5]]
+            new_q = pytorch3d_transforms.quaternion_multiply(delta_q, prev_q)[..., [1, 2, 3, 0]]
+        elif qform == 'wxyz':
+            prev_q = prev[..., 3:7]
+            delta_q = delta[..., 3:7]
+            new_q = pytorch3d_transforms.quaternion_multiply(delta_q, prev_q)
+        else:
+            raise ValueError("Invalid quaternion format")
+
+        # Gripper remains as-is (no delta)
+        grip = delta[..., -1:]
+
+        new_action = torch.cat([pos, new_q, grip], dim=-1)
+        abs_actions.append(new_action)
+
+    # Stack and remove the anchor (first entry)
+    actions = torch.stack(abs_actions[1:], dim=-2)  # (..., N, 8)
+
+    return actions

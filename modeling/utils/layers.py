@@ -123,7 +123,9 @@ class AttentionLayer(DummyLayer):
         )
         self.dropout = nn.Dropout(dropout)
         self.norm_q = nn.LayerNorm(d_model)
-        self.norm_kv = self.norm_q if is_self else nn.LayerNorm(d_model)
+        self.norm_kv = None
+        if pre_norm:
+            self.norm_kv = self.norm_q if is_self else nn.LayerNorm(d_model)
 
     def forward(self, seq1, seq2,
                 seq2_key_padding_mask=None,

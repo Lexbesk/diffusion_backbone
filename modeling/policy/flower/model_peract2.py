@@ -2,6 +2,7 @@ import functools
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.layers.mlp import Mlp
 from transformers import AutoModelForCausalLM, AutoProcessor
 
@@ -11,7 +12,7 @@ from .transformers import (
     RmsNorm,
     FreqEmbedder,
     ActionSpaceEmbedderParameter,
-    FlowBlock, 
+    FlowBlock,
     stateless_norm
 )
 from .utils import ActionIndex, generate_policy_prompt
@@ -43,13 +44,14 @@ class FLOWERVLA(nn.Module):
         nhand=1,
         # Decoder arguments
         relative=False,
-        quaternion_format='xyzw',
+        rotation_format='quat_xyzw',
         # Denoising arguments
         denoise_timesteps=100,
         denoise_model="ddpm",
+        lv2_batch_size=1,
         # VLM Configuration
         vlm_path: str = "microsoft/Florence-2-large",
-        freeze_florence: bool = False,
+        freeze_florence: bool = True,
         freeze_vision_tower: bool = False,
         vlm_prompt_style: str = "default",
         token_dropout: float = 0.1,
@@ -76,7 +78,7 @@ class FLOWERVLA(nn.Module):
         sampling_type: str = 'uniform',
         dit_dim: int = 1024,
         n_heads: int = 16,
-        n_layers: int = 18,
+        n_layers: int = 12,  # was 18 for calvin
         attn_pdrop: float = 0.1,
         resid_pdrop: float = 0.1,
         mlp_pdrop: float = 0.1,
@@ -141,6 +143,31 @@ class FLOWERVLA(nn.Module):
             query_seq_len=query_seq_len,
             rope_theta=rope_theta,
         )
+
+        # Load pre-training weights
+        weights = torch.load(
+            '/home/ngkanats/repos/lbs/analogical_manipulation/360000_model_weights.pt',
+            map_location="cpu",
+            weights_only=True
+        )
+        _dict = {}
+        for key, value in weights.items():
+            _key = key.replace('agent.', '')
+            if _key.startswith('dit') and _key.endswith('.weight') and 'mlp' in _key:
+                _key = _key.replace('.c_fc1', '.fc1')
+                _key = _key.replace('.c_fc2', '.fc2')
+                _key = _key.replace('.c_proj', '.proj')
+            _dict[_key] = value
+        # Load weights flexibly
+        msn, unxpct = self.load_state_dict(_dict, strict=False)
+        if msn:
+            print(f"Missing keys (not found in checkpoint): {len(msn)}")
+            print(msn)
+        if unxpct:
+            print(f"Unexpected keys (ignored): {len(unxpct)}")
+            print(unxpct)
+        if not msn and not unxpct:
+            print("All keys matched successfully!")
 
         # Normalization for the 3D space, will be loaded in the main process
         self.workspace_normalizer = nn.Parameter(
@@ -373,9 +400,14 @@ class FLOWERVLA(nn.Module):
         # Forward pass
         vtheta = self.dit_forward(zt, t, cond)
         # Compute loss on valid dimensions only
-        diff = (z1 - actions) - vtheta
-        valid_diff = diff
-        loss = (valid_diff ** 2).mean()
+        # diff = (z1 - actions) - vtheta
+        # valid_diff = diff
+        # loss = (valid_diff ** 2).mean()
+        loss = (
+            30 * F.l1_loss(vtheta[..., :3], (z1 - actions)[..., :3], reduction='mean')
+            + 10 * F.l1_loss(vtheta[..., 3:9], (z1 - actions)[..., 3:9], reduction='mean')
+            + ((vtheta[..., 9:] - (z1 - actions)[..., 9:]) ** 2).mean()
+        )
 
         return loss
 

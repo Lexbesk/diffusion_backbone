@@ -12,7 +12,6 @@ class CALVINDataPreprocessor(DataPreprocessor):
         super().__init__(
             keypose_only=keypose_only,
             num_history=num_history,
-            orig_imsize=orig_imsize,
             custom_imsize=custom_imsize,
             depth2cloud=depth2cloud
         )

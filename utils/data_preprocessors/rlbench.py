@@ -12,7 +12,6 @@ class RLBenchDataPreprocessor(DataPreprocessor):
         super().__init__(
             keypose_only=keypose_only,
             num_history=num_history,
-            orig_imsize=orig_imsize,
             custom_imsize=custom_imsize,
             depth2cloud=depth2cloud
         )
@@ -32,14 +31,6 @@ class RLBenchDataPreprocessor(DataPreprocessor):
                 p=0.1
             )
         ).cuda()
-        # self.aug = K.AugmentationSequential(
-        #     K.RandomAffine(
-        #         degrees=0.0,
-        #         translate=(10/orig_imsize, 10/orig_imsize),
-        #         padding_mode='border',
-        #         p=1.0
-        #     )
-        # ).cuda()
 
     def process_obs(self, rgbs, rgb2d, depth, extrinsics, intrinsics,
                     augment=False):
@@ -71,6 +62,7 @@ class RLBenchDataPreprocessor(DataPreprocessor):
         else:
             # Simply convert to full precision
             rgb_3d = rgbs.cuda(non_blocking=True).float() / 255
+            pcd_3d = pcds[:, :rgb_3d.size(1)].float()
         if self.custom_imsize is not None and self.custom_imsize != rgb_3d.size(-1):
             b, nc, _, _, _ = rgb_3d.shape
             rgb_3d = F.interpolate(
@@ -95,7 +87,7 @@ class RLBenchDataPreprocessor(DataPreprocessor):
         else:
             rgbs = rgb_3d
         if pcd_3d.size(1) < pcds.size(1):
-            pcds = torch.cat((pcd_3d.float(), pcds[:, :pcd_3d.size(1)].float()))
+            pcds = torch.cat((pcd_3d, pcds[:, :pcd_3d.size(1)].float()))
         else:
-            pcds = pcd_3d.float()
+            pcds = pcd_3d
         return rgbs, pcds

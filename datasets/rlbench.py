@@ -138,7 +138,8 @@ class TaskRLBenchDataset(RLBenchDataset):
         copies=None,
         relative_action=False,
         mem_limit=8,
-        actions_only=False
+        actions_only=False,
+        chunk_size=4
     ):
         super().__init__(
             root=root,
@@ -146,7 +147,8 @@ class TaskRLBenchDataset(RLBenchDataset):
             copies=copies,
             relative_action=relative_action,
             mem_limit=mem_limit,
-            actions_only=actions_only
+            actions_only=actions_only,
+            chunk_size=chunk_size
         )
         tids = np.where(self.annos['task_id'][:] == 4)[0]
         self._min = tids.min()

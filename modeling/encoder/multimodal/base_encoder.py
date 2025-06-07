@@ -1,4 +1,10 @@
+import math
+
+import einops
 from torch import nn
+from torch.nn import functional as F
+
+from ...policy.flower.transformers import RmsNorm
 
 from ...utils.layers import AttentionModule
 from ..vision import fetch_visual_encoders
@@ -33,10 +39,16 @@ class Encoder(nn.Module):
             p.requires_grad = finetune_backbone
 
         # Attention from vision to language
-        self.vl_attention = AttentionModule(
-            num_layers=num_vis_instr_attn_layers, d_model=embedding_dim,
-            dim_fw=4 * embedding_dim, n_heads=num_attn_heads, pre_norm=False
-        )
+        if backbone == 'clip':
+            self.vl_attention = AttentionModule(
+                num_layers=num_vis_instr_attn_layers, d_model=embedding_dim,
+                dim_fw=4 * embedding_dim, n_heads=num_attn_heads, pre_norm=False
+            )
+
+        # Specific to florence2
+        if backbone == 'florence2':
+            self.cond_linear = nn.Linear(1024, embedding_dim, bias=False)
+            self.cond_norm = RmsNorm(1024)
 
     def forward(self, rgb3d, rgb2d, pcd, instruction, proprio):
         """
@@ -62,6 +74,7 @@ class Encoder(nn.Module):
         """
         vl_enc_fn = {
             'clip': self.encode_clip,
+            'florence2': self.encode_florence2
             # 'siglip2_256': self.encode_siglip,
             # 'siglip2_512': self.encode_siglip
         }[self._backbone_name]
@@ -119,6 +132,43 @@ class Encoder(nn.Module):
             - instr_feats: (B, L, F)
         """
         return None, None, None, None
+
+    def encode_florence2(self, rgb3d, rgb2d, pcd, text):
+        """
+        Compute visual features/pos embeddings at different scales.
+
+        Args:
+            - rgb3d: (B, ncam3d, 3, H, W), rgb obs of 3D cameras
+            - rgb2d: (B, ncam2d, 3, H, W), rgb obs of 2D cameras
+            - pcd: (B, ncam3d, 3, H, W) or None
+            - text: [str] of len=B, text instruction
+
+        Returns:
+            - rgb3d_feats: (B, Np, F)
+            - rgb2d_feats: (B, ncam2d, F)
+            - pcd: (B, Np, 3)
+            - instr_feats: (B, L, F)
+        """
+        rgb3d = self.normalize(rgb3d)
+        rgb3d_feats, instr_feats = self.backbone(rgb3d, text)
+        rgb3d_feats = self.cond_linear(self.cond_norm(rgb3d_feats))
+        instr_feats = self.cond_linear(self.cond_norm(instr_feats))
+
+        # Point cloud
+        num_cameras = pcd.shape[1]
+        h_ = int(math.sqrt(rgb3d_feats.shape[1] // num_cameras))
+        # Interpolate point cloud to get the corresponding locations
+        pcd = F.interpolate(
+            einops.rearrange(pcd, "bt ncam c h w -> (bt ncam) c h w"),
+            (h_, h_),
+            mode='bilinear'
+        )
+        # Merge different cameras
+        pcd = einops.rearrange(
+            pcd,
+            "(bt ncam) c h w -> bt (ncam h w) c", ncam=num_cameras
+        )
+        return rgb3d_feats, None, pcd, instr_feats
 
     def run_fps(self, features, pos):
         # features (B, Np, F)

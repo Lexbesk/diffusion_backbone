@@ -37,8 +37,9 @@ class Model:
             num_attn_heads=self.args.num_attn_heads,
             nhist=1,
             nhand=1,
+            num_shared_attn_layers=self.args.num_shared_attn_layers,
             relative=self.args.relative_action,
-            quaternion_format=self.args.quaternion_format,
+            rotation_format=self.args.rotation_format,
             denoise_timesteps=self.args.denoise_timesteps,
             denoise_model=self.args.denoise_model
         )
@@ -65,7 +66,7 @@ class Model:
             torch.from_numpy(np.concatenate([
                 obs['robot_obs'][:6],
                 (obs['robot_obs'][[-1]] + 1) / 2
-            ], -1))[None, None, None]
+            ], -1))[None, None, None].float()
         )
         # rgbs, pcds are (B=1, ncam=2, 3, H, W)
         rgbs, pcds = self.preprocessor.process_obs(

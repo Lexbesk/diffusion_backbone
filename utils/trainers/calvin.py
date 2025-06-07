@@ -16,10 +16,10 @@ class CALVINTrainTester(BaseTrainTester):
     @torch.no_grad()
     def prepare_batch(self, sample, augment=False):
         sample["action"] = self.preprocessor.process_actions(sample["action"])
-        proprio = self.preprocessor.process_actions(sample["proprioception"])
+        proprio = self.preprocessor.process_proprio(sample["proprioception"])
         rgbs, pcds = self.preprocessor.process_obs(
-            sample['rgb'], sample["rgb2d"],
-            sample['depth'], sample['wrist_depth'], sample['extrinsics_wrist'],
+            sample["rgb"], sample["rgb2d"],
+            sample["depth"], sample["wrist_depth"], sample["extrinsics_wrist"],
             augment=augment
         )
         return (

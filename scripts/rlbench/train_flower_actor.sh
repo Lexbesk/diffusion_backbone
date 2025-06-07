@@ -9,46 +9,46 @@ val_instructions=instructions/peract2/instructions.json
 
 dataset=Peract2_3dfront_3dwrist
 num_workers=4
-B=16
-B_val=64
+B=8
+B_val=8
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
-val_freq=4000
+val_freq=10000
 eval_only=false
-lr=1e-4
-lr_scheduler=constant
-wd=1e-10
+lr=2e-5
+lr_scheduler=constant  # tristage_flower
+wd=5e-10
 train_iters=600000
 use_compile=false
-use_ema=true
-lv2_batch_size=4
+use_ema=false
 
 # Model arguments, change (some of) these for new architectures
-model_type=denoise3d  # denoise3ddf
+model_type=flower_actor
 bimanual=true
 keypose_only=true
+pre_tokenize=true
+custom_img_size=224
 
-backbone=clip
-finetune_backbone=false
+backbone=florence2
+finetune_backbone=true
 finetune_text_encoder=false
-fps_subsampling_factor=4
+fps_subsampling_factor=1
 
-C=120
-num_attn_heads=8
+C=1024
+num_attn_heads=16
 num_vis_instr_attn_layers=3
 num_history=3
+num_shared_attn_layers=4
 
 workspace_normalizer_buffer=0.05
-quaternion_format=xyzw
+rotation_format=quat_xyzw
 relative_action=false
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-run_log_dir=ema_n_lv2_n_compile_$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model
+run_log_dir=$model_type-$dataset-C$C-B$B-lr$lr-$lr_scheduler-H$num_history-$denoise_model-$backbone-finetuned_$finetune_backbone
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
-# checkpoint=train_logs/Peract2/reproduce_denoise3d-Peract2_3dfront_3dwrist-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10/best.pth
-# checkpoint=peract2_front_wrist3d_2.pth
 
 ngpus=4
 
@@ -73,10 +73,12 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --wd $wd \
     --train_iters $train_iters \
     --use_compile $use_compile \
-    --lv2_batch_size $lv2_batch_size \
+    --use_ema $use_ema \
     --model_type $model_type \
     --bimanual $bimanual \
     --keypose_only $keypose_only \
+    --pre_tokenize $pre_tokenize \
+    --custom_img_size $custom_img_size \
     --backbone $backbone \
     --finetune_backbone $finetune_backbone \
     --finetune_text_encoder $finetune_text_encoder \
@@ -85,8 +87,9 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --num_attn_heads $num_attn_heads \
     --num_vis_instr_attn_layers $num_vis_instr_attn_layers \
     --num_history $num_history \
+    --num_shared_attn_layers $num_shared_attn_layers \
     --workspace_normalizer_buffer $workspace_normalizer_buffer \
     --relative_action $relative_action \
-    --quaternion_format $quaternion_format \
+    --rotation_format $rotation_format \
     --denoise_timesteps $denoise_timesteps \
     --denoise_model $denoise_model
