@@ -6,7 +6,9 @@ from .rlbench import (
     PeractDataset,
     PeractTwoCamDataset,
     SinglePeract2Dataset,
-    Peract2AllDataset
+    Peract2AllDataset,
+    DatPeractDataset,
+    DatPeractTwoCamDataset
 )
 
 
@@ -18,7 +20,10 @@ def fetch_dataset_class(dataset_name):
         "Peract2_3dfront_2dwrist": Peract2Dataset3cam2Dwrist,
         "Peract": PeractDataset,
         "PeractTwoCam": PeractTwoCamDataset,
+        "PeractDat": DatPeractDataset,
+        "PeractDatTwoCam": DatPeractTwoCamDataset,
         'Calvin': CALVINDataset,
+        'Calvin10th': CALVINDataset,
         "Peract2TCSingle": SinglePeract2Dataset,
         "Peract2All": Peract2AllDataset
     }

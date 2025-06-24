@@ -31,21 +31,6 @@ PERACT2_TASKS = [
 ]
 
 
-MOBALOHA_TASKS = [
-    'open_marker',
-    'handover_block',
-    'insert_battery',
-    'insert_marker_into_cup',
-    'lift_ball',
-
-    'pickup_plate',
-    'stack_blocks',
-    'stack_bowls',
-    'straighten_rope',
-    'ziploc'
-]
-
-
 class RLBenchDataset(BaseDataset):
     """RLBench dataset."""
     quat_format= 'xyzw'
@@ -161,6 +146,52 @@ class TaskRLBenchDataset(RLBenchDataset):
         return super().__getitem__(idx)
 
 
+class DatPeractDataset(RLBenchDataset):
+    """RLBench dataset under Peract setup."""
+    tasks = PERACT_TASKS
+    cameras = ("left_shoulder", "right_shoulder", "wrist", "front")
+    camera_inds = None
+    train_copies = 10
+    camera_inds2d = None
+
+    def __getitem__(self, idx):
+        """
+        self.annos: {
+            action: (N, T, 8) float
+            depth: (N, n_cam, H, W) float16
+            proprioception: (N, nhist, 8) float
+            rgb: (N, n_cam, 3, H, W) uint8
+            task_id: (N,) uint8
+            variation: (N,) uint8
+            extrinsics: (N, n_cam, 4, 4) float
+            intrinsics: (N, n_cam, 3, 3) float
+        }
+        """
+        # First detect which copy we fall into
+        idx = idx % (len(self.annos['action']) // self.chunk_size)
+        # and then which chunk
+        idx = idx * self.chunk_size
+        if self._actions_only:
+            return {"action": self._get_action(idx)}
+        return {
+            "task": self._get_task(idx),  # [str]
+            "instr": self._get_instr(idx),  # [str]
+            "rgb": self._get_rgb(idx),  # tensor(n_cam3d, 3, H, W)
+            "pcd": self._get_attr_by_idx(idx, 'pcd', True),  # tensor(n_cam3d, H, W)
+            "proprioception": self._get_proprioception(idx),  # tensor(1, 8)
+            "action": self._get_action(idx),  # tensor(T, 8)
+        }
+
+
+class DatPeractTwoCamDataset(DatPeractDataset):
+    """RLBench dataset under Peract setup."""
+    tasks = PERACT_TASKS
+    cameras = ("wrist", "front")
+    camera_inds = [2, 3]
+    train_copies = 10
+    camera_inds2d = None
+
+
 class PeractDataset(RLBenchDataset):
     """RLBench dataset under Peract setup."""
     tasks = PERACT_TASKS
@@ -221,15 +252,6 @@ class SinglePeract2Dataset(TaskRLBenchDataset):
     cameras = ("front", "wrist_left", "wrist_right")
     camera_inds = None
     train_copies = 10
-    camera_inds2d = None
-
-class Mobaloha3cam(RLBenchDataset):
-    """RLBench dataset under Peract2 setup."""
-    tasks = MOBALOHA_TASKS
-    variations = [0]
-    cameras = ("front", "wrist_left", "wrist_right")
-    camera_inds = (0, 1, 2)  # use only front, wrist_left and wrist_right
-    train_copies = 10  # how many copies of the dataset to load
     camera_inds2d = None
 
 
