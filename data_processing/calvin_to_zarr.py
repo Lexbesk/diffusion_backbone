@@ -10,7 +10,6 @@ import hydra
 from omegaconf import OmegaConf
 
 
-STORE_EVERY = 1
 IM_SIZE = 200
 ACTION_LEN = 10
 ACTION_DIM = 7
@@ -22,7 +21,10 @@ def parse_arguments():
     # Tuples: (name, type, default)
     arguments = [
         ('root', str, '/data/group_data/katefgroup/VLA/calvin_dataset/task_ABC_D'),
-        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/CALVIN_zarr')
+        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/CALVIN_zarr'),
+        ('store_every', int, 1),
+        ('store_val', int, 1),
+        ('store_instructions', int, 1)
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
@@ -77,7 +79,7 @@ def all_tasks_main(env, split):
             zarr_file.create_dataset(
                 field,
                 shape=(0,) + shape,
-                chunks=(STORE_EVERY,) + shape,
+                chunks=(1,) + shape,
                 compressor=compressor,
                 dtype=dtype
             )
@@ -94,6 +96,8 @@ def all_tasks_main(env, split):
 
         # Loop through episodes
         for ann_id, (start, end) in tqdm(enumerate(annos['info']['indx'])):
+            if ann_id % STORE_EVERY != 0:
+                continue
             rgb_front, rgb_wrist, depth_front, depth_wrist = [], [], [], []
             ext_wrist = []
             prop, actions, rel_actions = [], [], []
@@ -178,28 +182,31 @@ if __name__ == "__main__":
     args = parse_arguments()
     ROOT = args.root
     STORE_PATH = args.tgt
+    STORE_EVERY = args.store_every
 
     env = get_env(
-        "online_evaluation_calvin/configs/merged_config_val_abc_d.yaml",
+        "online_evaluation_calvin/configs/merged_config_train_abc_d.yaml",
         show_gui=False
     )
     all_tasks_main(env, 'train')
     env.close()
     del env
 
-    env = get_env(
-        "online_evaluation_calvin/configs/merged_config_val_abc_d.yaml",
-        show_gui=False
-    )
-    all_tasks_main(env, 'val')
-    env.close()
-    del env
+    if bool(args.store_val):
+        env = get_env(
+            "online_evaluation_calvin/configs/merged_config_val_abc_d.yaml",
+            show_gui=False
+        )
+        all_tasks_main(env, 'val')
+        env.close()
+        del env
 
     # Store instructions as json (can be run independently)
-    os.makedirs('instructions/calvin', exist_ok=True)
-    instr = store_instructions('train')
-    with open('instructions/calvin/train_instructions.json', 'w') as fid:
-        json.dump(instr, fid)
-    instr = store_instructions('val')
-    with open('instructions/calvin/val_instructions.json', 'w') as fid:
-        json.dump(instr, fid)
+    if bool(args.store_instructions):
+        os.makedirs('instructions/calvin', exist_ok=True)
+        instr = store_instructions('train')
+        with open('instructions/calvin/train_instructions.json', 'w') as fid:
+            json.dump(instr, fid)
+        instr = store_instructions('val')
+        with open('instructions/calvin/val_instructions.json', 'w') as fid:
+            json.dump(instr, fid)

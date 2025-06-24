@@ -163,10 +163,10 @@ def keypoint_discovery(demo, method="heuristic", bimanual=False):
         raise NotImplementedError
 
 
-def _store_instructions(root, task):
+def _store_instructions(root, task, splits):
     # both root and path are strings
     var2text = {}
-    for split in ['train', 'val']:
+    for split in splits:
         folder = f'{root}/{split}/{task}/all_variations/episodes'
         eps = {ep for ep in os.listdir(folder) if ep.startswith('ep')}
         for ep in eps:
@@ -181,6 +181,6 @@ def _store_instructions(root, task):
     return var2text
 
 
-def store_instructions(root, task_list):
+def store_instructions(root, task_list, splits=['train', 'val']):
     # {task: {var: [text]}}
-    return {task: _store_instructions(root, task) for task in task_list}
+    return {task: _store_instructions(root, task, splits) for task in task_list}

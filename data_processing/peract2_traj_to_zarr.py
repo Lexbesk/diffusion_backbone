@@ -11,7 +11,6 @@ from tqdm import tqdm
 from data_processing.rlbench_utils import image_to_float_array
 
 
-STORE_EVERY = 1
 NCAM = 3
 NHAND = 2
 ACTION_LEN = 10
@@ -50,7 +49,7 @@ def all_tasks_main(split, tasks):
             zarr_file.create_dataset(
                 field,
                 shape=(0,) + shape,
-                chunks=(STORE_EVERY,) + shape,
+                chunks=(1,) + shape,
                 compressor=compressor,
                 dtype=dtype
             )

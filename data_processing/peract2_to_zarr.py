@@ -16,7 +16,6 @@ from data_processing.rlbench_utils import (
 )
 
 
-STORE_EVERY = 1
 NCAM = 3
 NHAND = 2
 IM_SIZE = 256
@@ -54,7 +53,7 @@ def all_tasks_main(split, tasks):
             zarr_file.create_dataset(
                 field,
                 shape=(0,) + shape,
-                chunks=(STORE_EVERY,) + shape,
+                chunks=(1,) + shape,
                 compressor=compressor,
                 dtype=dtype
             )
@@ -63,7 +62,7 @@ def all_tasks_main(split, tasks):
         _create("depth", (NCAM, IM_SIZE, IM_SIZE), "float16")
         _create("proprioception", (3, NHAND, 8), "float32")
         _create("action", (1, NHAND, 8), "float32")
-        _create("proprioception_joints", (3, NHAND, 8), "float32")
+        _create("proprioception_joints", (1, NHAND, 8), "float32")
         _create("action_joints", (1, NHAND, 8), "float32")
         _create("extrinsics", (NCAM, 4, 4), "float16")
         _create("intrinsics", (NCAM, 3, 3), "float16")
@@ -135,7 +134,6 @@ def all_tasks_main(split, tasks):
                     demo[k].right.joint_positions,
                     [demo[k].right.gripper_open]
                 ]) for k in key_frames]).astype(np.float32)
-                # Store current eef pose as well as two previous ones
                 prop_jnts = states[:-1].reshape(len(states[:-1]), 1, NHAND, 8)
 
                 # Action in joints (keyframes, 1, 2, 8)
