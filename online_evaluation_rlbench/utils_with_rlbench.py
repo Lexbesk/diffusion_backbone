@@ -18,6 +18,7 @@ from rlbench.backend.exceptions import InvalidActionError
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.const import RenderMode
 
+from modeling.encoder.text import fetch_tokenizers, fetch_text_encoders
 from online_evaluation_rlbench.get_stored_demos import get_stored_demos
 
 
@@ -111,13 +112,18 @@ class Mover:
 
 class Actioner:
 
-    def __init__(self, policy=None):
+    def __init__(self, policy=None, backbone='clip'):
         self._policy = policy
         self._policy.eval()
         self._instr = None
+        self.tokenizer = fetch_tokenizers(backbone)
+        # self.encoder, _ = fetch_text_encoders('clip')
+        # self.encoder.cuda()
 
     def load_episode(self, descriptions):
-        self._instr = [random.choice(descriptions)]
+        instr = [random.choice(descriptions)]
+        self._instr = self.tokenizer(instr).cuda(non_blocking=True)
+        # self._instr = self.encoder(self._instr)
 
     def predict(self, rgbs, pcds, gripper, prediction_len=1):
         """
@@ -130,10 +136,8 @@ class Actioner:
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
         """
-        output = {"action": None}
-
         # Predict trajectory
-        output["action"] = self._policy(
+        return self._policy(
             None,
             torch.full([1, prediction_len, 1], False).to(rgbs.device),
             rgbs,
@@ -143,7 +147,6 @@ class Actioner:
             gripper[:, :, None, :7],  # (1, nhist, nhand=1, 7)
             run_inference=True
         ).view(1, prediction_len, 8)
-        return output
 
     @property
     def device(self):
@@ -155,7 +158,8 @@ class RLBenchEnv:
     def __init__(
         self,
         data_path,
-        image_size=(128, 128),
+        task_str=None,
+        image_size=(256, 256),
         apply_rgb=False,
         apply_depth=False,
         apply_pc=False,
@@ -354,12 +358,10 @@ class RLBenchEnv:
                     prediction_len=prediction_len
                 )
 
-                terminate = True
-
                 # Update the observation based on the predicted action
                 try:
                     # Execute entire predicted trajectory step by step
-                    actions = output["action"][-1].cpu().numpy()
+                    actions = output[-1].cpu().numpy()
                     actions[..., -1] = actions[..., -1].round()
 
                     # execute

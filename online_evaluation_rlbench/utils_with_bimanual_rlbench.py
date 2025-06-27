@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from rlbench.observation_config import ObservationConfig, CameraConfig
 from rlbench.environment import Environment
 from rlbench.action_modes.action_mode import BimanualMoveArmThenGripper
-from rlbench.action_modes.gripper_action_modes import BimanualDiscrete
+from rlbench.action_modes.gripper_action_modes import BimanualDiscrete, assert_action_shape
 from rlbench.action_modes.arm_action_modes import BimanualEndEffectorPoseViaPlanning
 from rlbench.backend.exceptions import InvalidActionError
 from pyrep.errors import IKError, ConfigurationPathError
@@ -108,11 +108,11 @@ class Mover:
 
 class Actioner:
 
-    def __init__(self, policy=None):
+    def __init__(self, policy=None, backbone='clip'):
         self._policy = policy
         self._policy.eval()
         self._instr = None
-        self.tokenizer = fetch_tokenizers('clip')
+        self.tokenizer = fetch_tokenizers(backbone)
 
     def load_episode(self, descriptions):
         instr = [random.choice(descriptions)]
@@ -129,11 +129,11 @@ class Actioner:
         Returns:
             {"action": torch.Tensor, "trajectory": torch.Tensor}
         """
-        # b, nc = rgbs.shape[:2]
-        # rgbs = F.interpolate(
-        #     rgbs.flatten(0, 1), (224, 224),
-        #     mode='bilinear', antialias=True
-        # ).reshape(b, nc, -1, 224, 224)
+        b, nc = rgbs.shape[:2]
+        rgbs = F.interpolate(
+            rgbs.flatten(0, 1), (224, 224),
+            mode='bilinear', antialias=True
+        ).reshape(b, nc, -1, 224, 224)
 
         # Predict trajectory
         return self._policy(
@@ -157,6 +157,7 @@ class RLBenchEnv:
     def __init__(
         self,
         data_path,
+        task_str=None,
         image_size=(256, 256),
         apply_rgb=False,
         apply_depth=False,
@@ -177,7 +178,7 @@ class RLBenchEnv:
 
         self.action_mode = BimanualMoveArmThenGripper(
             arm_action_mode=BimanualEndEffectorPoseViaPlanning(collision_checking=collision_checking),
-            gripper_action_mode=BimanualDiscrete()
+            gripper_action_mode=HandoverDiscrete() if 'handover' in task_str else BimanualDiscrete()
         )
         self.env = Environment(
             self.action_mode, str(data_path), self.obs_config,
@@ -470,13 +471,12 @@ class ReplayRLBenchEnv(RLBenchEnv):
                 demo[k].right.gripper_pose,
                 [demo[k].right.gripper_open]
             ]) for k in key_frames]).astype(np.float32)
-            key_actions = states.reshape(len(states), 1, 2, 8)  # [:6]
-            # key_actions[6:, :, :, :7] = key_actions[6][None, :, :, :7]  # fill the rest with the last action
-            print(key_actions[:, 0])
+            key_actions = states.reshape(len(states), 1, 2, 8)
+            print(len(demo), key_frames)
 
             for step_id in range(len(key_actions)):
-                print(step_id)
-                print(key_actions[step_id])
+                # print(step_id)
+                # print(key_actions[step_id])
 
                 # Fetch the current observation and predict one action
                 rgb, _, _ = self.get_rgb_pcd_gripper_from_obs(obs)
@@ -530,8 +530,8 @@ class ReplayRLBenchEnv(RLBenchEnv):
             if record_video and reward < 1:
                 try:
                     from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-                    clip = ImageSequenceClip(frames, fps=5)
-                    clip.write_videofile(f"videos2/replay_{task_str}_{demo_id}.mp4", codec="libx264")
+                    clip = ImageSequenceClip(frames, fps=1)
+                    clip.write_videofile(f"videos4/replay_{task_str}_{demo_id}.mp4", codec="libx264")
                 except:
                     print("Error writing video file")
 
@@ -539,3 +539,69 @@ class ReplayRLBenchEnv(RLBenchEnv):
         valid = len(var_demos) > 0
 
         return success_rate, valid, len(var_demos)
+
+
+class HandoverDiscrete(BimanualDiscrete):
+    """
+    A custom gripper action mode for the handover task.
+    It forces one gripper to release so that the other grasps.
+    """
+
+    def action(self, scene, action):
+        assert_action_shape(action, self.action_shape(scene.robot))
+        if 0.0 > action[0] > 1.0:
+            raise InvalidActionError(
+                'Gripper action expected to be within 0 and 1.')
+
+        if 0.0 > action[1] > 1.0:
+            raise InvalidActionError(
+                'Gripper action expected to be within 0 and 1.')
+
+        right_open_condition = all(
+            x > 0.9 for x in scene.robot.right_gripper.get_open_amount())
+
+        left_open_condition = all(
+            x > 0.9 for x in scene.robot.left_gripper.get_open_amount())
+
+        right_current_ee = 1.0 if right_open_condition else 0.0
+        left_current_ee = 1.0 if left_open_condition else 0.0
+
+        right_action = float(action[0] > 0.5)
+        left_action = float(action[1] > 0.5)
+
+        if right_current_ee != right_action or left_current_ee != left_action:
+            if not self._detach_before_open:
+                self._actuate(scene, action)
+
+        # Move objects between grippers
+        if right_current_ee != right_action:
+            if right_action == 0.0 and self._attach_grasped_objects:
+                left_grasped_objects = scene.robot.left_gripper.get_grasped_objects()
+                for g_obj in scene.task.get_graspable_objects():
+                    if g_obj in left_grasped_objects:
+                        scene.robot.left_gripper.release()
+                        scene.robot.right_gripper.grasp(g_obj)
+                    else:
+                        scene.robot.right_gripper.grasp(g_obj)
+            else:
+                scene.robot.right_gripper.release()
+        if left_current_ee != left_action:
+            if left_action == 0.0 and self._attach_grasped_objects:
+                right_grasped_objects = scene.robot.right_gripper.get_grasped_objects()
+                for g_obj in scene.task.get_graspable_objects():
+                    if g_obj in right_grasped_objects:
+                        scene.robot.right_gripper.release()
+                        scene.robot.left_gripper.grasp(g_obj)
+                    else:
+                        scene.robot.left_gripper.grasp(g_obj)
+            else:
+                scene.robot.left_gripper.release()
+
+        if right_current_ee != right_action or left_current_ee != left_action:
+            if self._detach_before_open:
+                self._actuate(scene, action)
+            if right_action == 1.0 or left_action == 1.0:
+                # Step a few more times to allow objects to drop
+                for _ in range(10):
+                    scene.pyrep.step()
+                    scene.task.step()

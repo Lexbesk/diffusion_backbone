@@ -19,6 +19,8 @@ tasks=(
 # Testing arguments
 checkpoint=train_logs/Peract2/reproduce_denoise3d-Peract2_3dfront_3dwrist-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10/best.pth
 checkpoint_alias=reproduce_denoise3d-Peract2_3dfront_3dwrist-C120-B64-lr1e-4-constant-H3-rectified_flow-DT10
+checkpoint=train_logs/Peract2/flower_actor-Peract2_3dfront_3dwrist-C1024-B8-lr2e-5-constant-H3-rectified_flow-florence2-finetuned_true/best.pth
+checkpoint_alias=flower_actor-Peract2_3dfront_3dwrist-C1024-B8-lr2e-5-constant-H3-rectified_flow-florence2-finetuned_true
 
 num_episodes=100
 max_tries=2
@@ -34,17 +36,18 @@ dataset=Peract2_3dfront_3dwrist
 image_size=256,256
 
 # Model arguments
-model_type=denoise3d
+model_type=flower_actor
 bimanual=true
 prediction_len=1
-fps_subsampling_factor=4
-embedding_dim=120
-num_attn_heads=8
+backbone=florence2
+fps_subsampling_factor=1
+embedding_dim=1024
+num_attn_heads=16
 num_vis_instr_attn_layers=3
 num_history=3
 relative_action=false
 rotation_format=quat_xyzw
-denoise_timesteps=10
+denoise_timesteps=5
 denoise_model=rectified_flow
 
 num_ckpts=${#tasks[@]}
@@ -66,6 +69,7 @@ for ((i=0; i<$num_ckpts; i++)); do
         --model_type $model_type \
         --bimanual $bimanual \
         --prediction_len $prediction_len \
+        --backbone $backbone \
         --fps_subsampling_factor $fps_subsampling_factor \
         --embedding_dim $embedding_dim \
         --num_attn_heads $num_attn_heads \

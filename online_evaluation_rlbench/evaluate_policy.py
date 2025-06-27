@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     # Load models
     model = load_models(args)
-    print(model.workspace_normalizer)
+    # print(model.workspace_normalizer)
 
     # Evaluate - reload environment for each task (crashes otherwise)
     task_success_rates = {}
@@ -124,6 +124,7 @@ if __name__ == "__main__":
         env_cls = ReplayRLBenchEnv if args.replay else RLBenchEnv
         env = env_cls(
             data_path=args.data_dir,
+            task_str=task_str,
             image_size=[int(x) for x in args.image_size.split(",")],
             apply_rgb=True,
             apply_pc=True,
@@ -133,14 +134,14 @@ if __name__ == "__main__":
         )
 
         # Actioner (runs the policy online)
-        actioner = Actioner(model)
+        actioner = Actioner(model, backbone=args.backbone)
 
         # Evaluate
         var_success_rates = env.evaluate_task_on_multiple_variations(
             task_str,
             max_steps=args.max_steps,
             actioner=actioner,
-            max_tries=args.max_tries if not args.replay else 1,
+            max_tries=args.max_tries,
             prediction_len=args.prediction_len,
             num_history=args.num_history
         )
