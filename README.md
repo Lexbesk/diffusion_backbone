@@ -1,11 +1,36 @@
 
 # Installation
-NEW:
+Grasp Diffuser:
 ```
-> conda create -y --name robot_26 python=3.10
-> conda activate robot_26
-> pip install torch torchvision torchaudio
-> pip install einops tqdm transformers zarr diffusers kornia tensorboard
+conda create -n graspdiff python=3.10
+conda activate graspdiff
+
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu124
+
+Install pytorch3d:
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
+
+Install submodule pointnet2:
+cd submodules
+git clone https://github.com/erikwijmans/Pointnet2_PyTorch.git
+cd Pointnet2_PyTorch
+pip install -e .
+
+Install dependencies:
+pip install mujoco
+
+pip install diffusers easydict einops huggingface-hub hydra-core imageio kornia ninja numpy omegaconf open3d opencv-python pillow scikit-learn scipy tensorboard timm tokenizers tqdm transform3d transformers transforms3d trimesh zarr
+
+Finally, run in main directory:
+pip install -e .
+
+To run training:
+conda activate graspdiff
+module load cuda-12.4
+export MUJOCO_GL=egl
+export XDG_RUNTIME_DIR="tmp"
+bash scripts/dexonomy/train_general.sh
+
 ```
 
 OLD:
