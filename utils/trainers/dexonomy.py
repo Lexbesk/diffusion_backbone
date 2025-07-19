@@ -485,7 +485,7 @@ class DexonomyTrainTester:
             sample_to_save["obj_pose"] = sample["obj_pose"].cpu().numpy()
             
             if self.args.test_mujoco:
-                succ_num_batch, fail_num_batch = val_batch(sample_to_save, self.args.log_dir)
+                succ_num_batch, fail_num_batch = val_batch(sample_to_save, self.args.log_dir, self.args.vis_freq)
                 mujoco_succ_num += succ_num_batch
                 mujoco_fail_num += fail_num_batch
             

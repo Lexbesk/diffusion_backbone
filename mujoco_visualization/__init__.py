@@ -102,7 +102,7 @@ def safe_eval_one(params, grasp_data=None):
         return
     
 COUNT = 0
-def val_batch(batch, vis_path): # numpy batch
+def val_batch(batch, vis_path, vis_freq=100): # numpy batch
     global CONFIGS
     configs = CONFIGS
     configs.vis_path = vis_path
@@ -119,7 +119,7 @@ def val_batch(batch, vis_path): # numpy batch
             else:
                 item = val[j]
             grasp_data[key] = item  
-        visualize = True if COUNT % 100 == 0 else False
+        visualize = True if COUNT % vis_freq == 0 else False
         ip = (grasp_data, configs, f'sample_grasp_{COUNT}', visualize)
         succ = safe_eval_one(ip)
         if succ:

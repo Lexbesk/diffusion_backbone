@@ -50,18 +50,19 @@ denoise_timesteps=10
 denoise_model=rectified_flow
 
 num_shared_attn_layers=20
-embedding_dim=256
+embedding_dim=512
 accurate_joint_pos=true
 test_mujoco=true
+vis_freq=10000000000
 
-run_log_dir=run_Jul18_$model_type-$dataset-lr$lr-$lr_scheduler-$denoise_model-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-ajp$accurate_joint_pos-embed$embedding_dim-C$C-nlayers$num_shared_attn_layers
+run_log_dir=run_Jul19_$model_type-$dataset-lr$lr-$lr_scheduler-$denoise_model-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-ajp$accurate_joint_pos-embed$embedding_dim-C$C-nlayers$num_shared_attn_layers-visfreq$vis_freq
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-run_log_dir=run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20
-checkpoint=train_logs/DEXONOMY_type1_pcdcentric/run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20/last.pth
+# run_log_dir=run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20
+# checkpoint=train_logs/DEXONOMY_type1_pcdcentric/run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20/last.pth
 
 
-ngpus=2
+ngpus=4
 
 export NCCL_P2P_DISABLE=1
 export NCCL_IB_DISABLE=1
@@ -91,3 +92,4 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --accurate_joint_pos $accurate_joint_pos \
     --test_mujoco $test_mujoco \
     --lv2_batch_size $lv2_batch_size \
+    --vis_freq $vis_freq \

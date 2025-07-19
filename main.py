@@ -74,6 +74,7 @@ def parse_arguments():
         ('accurate_joint_pos', str2bool, False),
         ('save_for_mujoco', str2bool, False),
         ('test_mujoco', str2bool, False),
+        ('vis_freq', int, 100),
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
