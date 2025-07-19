@@ -1,5 +1,6 @@
 from .calvin import CALVINTrainTester
 from .rlbench import RLBenchTrainTester
+from .dexonomy import DexonomyTrainTester
 
 
 def fetch_train_tester(dataset_name):
@@ -12,4 +13,6 @@ def fetch_train_tester(dataset_name):
         return RLBenchTrainTester
     if 'calvin' in dataset_name:
         return CALVINTrainTester
+    if 'dexonomy' in dataset_name:
+        return DexonomyTrainTester
     return None

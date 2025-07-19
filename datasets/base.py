@@ -25,15 +25,18 @@ class BaseDataset(Dataset):
         self.chunk_size = chunk_size
 
         # Load instructions
-        self._instructions = self._load_instructions(instructions)
+        if instructions is None:
+            self._instructions = None
+        elif isinstance(instructions, str):
+            self._instructions = self._load_instructions(instructions)
 
         # Load all annotations lazily
         self.annos = read_zarr_with_cache(root, mem_gb=mem_limit)
         # Sanity check
-        len_ = len(self.annos['action'])
+        len_ = len(self.annos['grasp_qpos'])
         for key in self.annos:
             assert len(self.annos[key]) == len_, f'length mismatch in {key}'
-        print(f"Found {len(self.annos['action'])} samples")
+        print(f"Found {len(self.annos['grasp_qpos'])} samples")
 
     def _load_instructions(self, instruction_file):
         return json.load(open(instruction_file))
@@ -97,4 +100,4 @@ class BaseDataset(Dataset):
         }
 
     def __len__(self):
-        return self.copies * (len(self.annos['action']) // self.chunk_size)
+        return self.copies * (len(self.annos['grasp_qpos']) // self.chunk_size)

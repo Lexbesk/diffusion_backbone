@@ -15,4 +15,7 @@ def fetch_data_preprocessor(dataset_name):
         return partial(RLBenchDataPreprocessor, orig_imsize=128)
     if 'calvin' in dataset_name:
         return partial(CALVINDataPreprocessor, orig_imsize=200)
+    if 'dexonomy' in dataset_name:
+        from .dexonomy import DexonomyDataPreprocessor
+        return DexonomyDataPreprocessor
     return None

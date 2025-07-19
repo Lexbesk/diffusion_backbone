@@ -14,10 +14,10 @@ def parse_arguments():
     # Tuples: (name, type, default)
     arguments = [
         # Dataset/loader arguments
-        ('src', str, '/data/user_data/ngkanats/zarr_datasets/Peract2_dense_zarr/train.zarr'),
-        ('tgt', str, '/data/user_data/ngkanats/zarr_datasets/Peract2_dense_zarr/train_rechunked4.zarr'),
+        ('src', str, '/data/user_data/austinz/Robots/manipulation/zarr_datasets/Dexonomy_zarr_type10/train.zarr'),
+        ('tgt', str, '/data/user_data/austinz/Robots/manipulation/zarr_datasets/Dexonomy_zarr_type10/train_rechunked4.zarr'),
         ('chunk_size', int, 4),
-        ('shuffle', str2bool, False)
+        ('shuffle', str2bool, True)
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
@@ -35,9 +35,9 @@ def rechunk_zarr_group(
     # Load old Zarr group (read-only)
     old_group = zarr.open_group(old_zarr_path, mode='r')
     if shuffle:
-        inds = np.random.permutation(len(old_group['action']))
+        inds = np.random.permutation(len(old_group['grasp_qpos']))
     else:
-        inds = np.arange(len(old_group['action']))
+        inds = np.arange(len(old_group['grasp_qpos']))
 
     # Create new Zarr group (overwrite if exists)
     if os.path.exists(new_zarr_path):

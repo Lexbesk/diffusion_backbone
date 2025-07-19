@@ -389,7 +389,7 @@ class DenoiseActor(nn.Module):
         instruction,
         proprio,
         run_inference=False
-    ):
+        ):
         """
         Arguments:
             gt_trajectory: (B, trajectory_length, nhand, 3+4+X)

@@ -15,6 +15,11 @@ def fetch_schedulers(denoise_model, denoise_timesteps):
             beta_schedule="squaredcos_cap_v2",
             prediction_type="epsilon"
         )
+        angle_noise_scheduler = DDPMScheduler(
+            num_train_timesteps=denoise_timesteps,
+            beta_schedule="squaredcos_cap_v2",
+            prediction_type="epsilon"
+        )
     elif denoise_model == "ddim":
         position_noise_scheduler = DDIMScheduler(
             num_train_timesteps=denoise_timesteps,
@@ -26,7 +31,15 @@ def fetch_schedulers(denoise_model, denoise_timesteps):
             beta_schedule="squaredcos_cap_v2",
             prediction_type="epsilon"
         )
+        angle_noise_scheduler = DDIMScheduler(
+            num_train_timesteps=denoise_timesteps,
+            beta_schedule="squaredcos_cap_v2",
+            prediction_type="epsilon"
+        )
     elif denoise_model in ("rectified_flow", "unit", "pi0", "flow_uniform"):
+        # raise NotImplementedError(
+        #     f"Scheduler {denoise_model} is not implemented for grasp diffuser."
+        # )
         noise_sampler_config = {"mean": 0, "std": 1.5}
         if denoise_model == "unit":
             noise_sampler_config = {"mean": 0, "std": 1.0}
@@ -44,4 +57,8 @@ def fetch_schedulers(denoise_model, denoise_timesteps):
             noise_sampler=samplers[denoise_model],
             noise_sampler_config=noise_sampler_config
         )
-    return position_noise_scheduler, rotation_noise_scheduler
+        angle_noise_scheduler = RFScheduler(
+            noise_sampler=samplers[denoise_model],
+            noise_sampler_config=noise_sampler_config
+        )
+    return position_noise_scheduler, rotation_noise_scheduler, angle_noise_scheduler

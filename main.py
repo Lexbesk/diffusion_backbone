@@ -22,8 +22,8 @@ def parse_arguments():
         ('eval_data_dir', Path, ''),
         ('train_instructions', Path, ''),
         ('val_instructions', Path, ''),
-        ('dataset', str, "Peract"),
-        ('num_workers', int, 4),
+        ('dataset', str, "Dexonomy"),
+        ('num_workers', int, 1),
         ('batch_size', int, 64),
         ('batch_size_val', int, 64),
         ('chunk_size', int, 1),
@@ -36,6 +36,7 @@ def parse_arguments():
         ('checkpoint', str_none, None),
         ('val_freq', int, 4000),
         ('eval_only', str2bool, False),
+        ('eval_overfit', str2bool, False),
         ('lr', float, 1e-4),
         ('lr_scheduler', str, "constant"),
         ('wd', float, 5e-3),
@@ -44,7 +45,7 @@ def parse_arguments():
         ('use_ema', str2bool, False),
         ('lv2_batch_size', int, 1),
         # Model arguments: general policy type
-        ('model_type', str, 'denoise3d'),
+        ('model_type', str, 'grasp_denoiser'),
         ('bimanual', str2bool, False),
         ('keypose_only', str2bool, True),
         ('pre_tokenize', str2bool, True),
@@ -57,7 +58,7 @@ def parse_arguments():
         ('finetune_text_encoder', str2bool, False),
         ('fps_subsampling_factor', int, 5),
         # Model arguments: encoder and head
-        ('embedding_dim', int, 120),  # must be divisible by 6
+        ('embedding_dim', int, 128),  # must be divisible by 6
         ('num_attn_heads', int, 8),
         ('num_vis_instr_attn_layers', int, 3),
         ('num_history', int, 1),
@@ -66,8 +67,13 @@ def parse_arguments():
         ('workspace_normalizer_buffer', float, 0.04),
         ('relative_action', str2bool, False),
         ('rotation_format', str, 'quat_wxyz'),
-        ('denoise_timesteps', int, 10),
-        ('denoise_model', str, "rectified_flow")
+        ('denoise_timesteps', int, 1000),
+        ('denoise_model', str, "rectified_flow"),
+        # Visualization arguments
+        ('visualize_denoising_steps', str2bool, False),
+        ('accurate_joint_pos', str2bool, False),
+        ('save_for_mujoco', str2bool, False),
+        ('test_mujoco', str2bool, False),
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])

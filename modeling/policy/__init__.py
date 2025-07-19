@@ -10,6 +10,7 @@ from .flower.model import FLOWERVLA
 from .flower.model_peract2 import FLOWERVLA as FLOWERVLARLB
 from .flower.model_peract2_3d import FLOWERVLA3D
 from .flower_actor import DenoiseActor as FlowerActor
+from .base_grasp_denoiser import GraspDenoiser
 
 
 def fetch_model_class(model_type):
@@ -37,4 +38,6 @@ def fetch_model_class(model_type):
     #     return DenoiseActor3D2ndStage
     if model_type == 'flower_actor':
         return FlowerActor
+    if model_type == 'grasp_denoiser':
+        return GraspDenoiser
     return None
