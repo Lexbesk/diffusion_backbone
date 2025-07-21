@@ -360,6 +360,7 @@ class GraspDenoiser(nn.Module):
                  xml_path='/data/user_data/austinz/Robots/DexGraspBench/assets/hand/shadow/right_hand.xml',
                  visualize_denoising_steps=False,
                  accurate_joint_pos=False,
+                 guidance_weight=None,
                  ):
         super().__init__()
         # Arguments to be accessed by the main class
@@ -373,6 +374,8 @@ class GraspDenoiser(nn.Module):
         self.visualize_denoising_steps = visualize_denoising_steps
         self.visualization_data = {} # "partial_points": [B, N, 3], "grasps": [B, M, 29]}
         self.accurate_joint_pos = accurate_joint_pos
+        
+        self.guidance_weight = guidance_weight
 
         # Vision-language encoder, runs only once
         self.encoder = SceneEncoder(pcd_feat_dim, embedding_dim)
@@ -532,7 +535,7 @@ class GraspDenoiser(nn.Module):
             joint_xyz = xyz.unsqueeze(1).expand(-1,22,3)
         return joint_xyz
 
-    def policy_forward_pass(self, grasp, timestep, fixed_inputs):
+    def policy_forward_pass(self, grasp, timestep, fixed_inputs, grasp_type_id, train):
         _t0 = self._start_timer()
         # Parse inputs
         pcd_feats, pcd, focus_idx = fixed_inputs
@@ -557,12 +560,14 @@ class GraspDenoiser(nn.Module):
             pcd_feats,
             pcd,
             focus_idx=focus_idx,
+            grasp_type_id=grasp_type_id,
+            train=train
         )
         
         self._stop_timer(_t0, "transformer_head")
         return out
 
-    def conditional_sample(self, grasp, device, fixed_inputs):
+    def conditional_sample(self, grasp, device, fixed_inputs, grasp_type_id):
         # Set schedulers
         self.position_scheduler.set_timesteps(self.n_steps, device=device)
 
@@ -570,15 +575,27 @@ class GraspDenoiser(nn.Module):
         timesteps = self.position_scheduler.timesteps
         # print(timesteps, 'timesteps')
         for t_ind, t in enumerate(timesteps):
-            out = self.policy_forward_pass(
-                grasp,
-                t * torch.ones(len(grasp)).to(device).long(),
-                fixed_inputs
-            )
-            out = out[-1]  # keep only last layer's output
-            grasp = self.position_scheduler.step(
-                out,
-                t_ind, grasp).prev_sample
+            t_batch = t * torch.ones(len(grasp), device=device, dtype=torch.long)
+            if self.guidance_weight is not None:  # e.g., 1.5
+                pred_uncond = self.policy_forward_pass(grasp, t_batch, fixed_inputs,
+                                                    grasp_type_id=None, train=False)[-1]
+                pred_cond   = self.policy_forward_pass(grasp, t_batch, fixed_inputs,
+                                                    grasp_type_id=grasp_type_id, train=False)[-1]
+                pred = pred_uncond + self.guidance_weight * (pred_cond - pred_uncond)
+            else:
+                pred = self.policy_forward_pass(grasp, t_batch, fixed_inputs,
+                                                grasp_type_id=grasp_type_id, train=False)[-1]
+            grasp = self.position_scheduler.step(pred, t_ind, grasp).prev_sample
+            
+            # out = self.policy_forward_pass(
+            #     grasp,
+            #     t * torch.ones(len(grasp)).to(device).long(),
+            #     fixed_inputs, grasp_type_id
+            # )
+            # out = out[-1]  # keep only last layer's output
+            # grasp = self.position_scheduler.step(
+            #     out,
+            #     t_ind, grasp).prev_sample
             
             # print(grasp.shape, 'grasp shape') # [B, 31]
             # Back to quaternion
@@ -603,7 +620,7 @@ class GraspDenoiser(nn.Module):
 
         return grasp
 
-    def compute_grasp(self, pcd, focus_idx):
+    def compute_grasp(self, pcd, focus_idx, grasp_type_id=None):
         # Encode observations, states, instructions
         fixed_inputs = (self.encode_inputs(pcd), pcd, focus_idx)
 
@@ -616,7 +633,8 @@ class GraspDenoiser(nn.Module):
         grasp = self.conditional_sample(
             grasp,
             device=pcd.device,
-            fixed_inputs=fixed_inputs
+            fixed_inputs=fixed_inputs,
+            grasp_type_id=grasp_type_id
         )
         
         
@@ -640,7 +658,7 @@ class GraspDenoiser(nn.Module):
         
         return grasp, pregrasp, squeeze
 
-    def compute_loss(self, gt_grasp, gt_pregrasp, gt_squeeze, pcd, focus_idx):
+    def compute_loss(self, gt_grasp, gt_pregrasp, gt_squeeze, pcd, focus_idx, grasp_type_id=None):
         # Encode observations, states, instructions
         fixed_inputs = (self.encode_inputs(pcd), pcd, focus_idx)
         # print(gt_grasp)
@@ -690,7 +708,7 @@ class GraspDenoiser(nn.Module):
             # Predict the noise residual
             pred = self.policy_forward_pass(
                 noisy_grasp,
-                timesteps, fixed_inputs
+                timesteps, fixed_inputs, grasp_type_id, train=True
             )
 
             # Compute loss
@@ -855,6 +873,7 @@ class GraspDenoiser(nn.Module):
         gt_squeeze,
         pcd,
         focus_idx=None,
+        grasp_type_id=None,
         run_inference=False
         ):
         """
@@ -873,12 +892,12 @@ class GraspDenoiser(nn.Module):
         # Inference, don't use gt_grasp
         if run_inference:
             return self.compute_grasp(
-                pcd, focus_idx
+                pcd, focus_idx, grasp_type_id=grasp_type_id
             )
 
         # Training, use gt_grasp to compute loss
         return self.compute_loss(
-            gt_grasp, gt_pregrasp, gt_squeeze, pcd, focus_idx
+            gt_grasp, gt_pregrasp, gt_squeeze, pcd, focus_idx, grasp_type_id=grasp_type_id
         )
 
 
@@ -904,6 +923,20 @@ class TransformerHead(nn.Module):
             nn.ReLU(),
             nn.Linear(embedding_dim, embedding_dim)
         )
+        
+        # Fuse (time, class) → embedding_dim
+        self.cond_fuse = nn.Sequential(
+            nn.Linear(embedding_dim * 2, embedding_dim),
+            nn.GELU(),
+            nn.Linear(embedding_dim, embedding_dim)
+        )
+        
+        num_grasp_types = 34
+        self.type_embed = nn.Embedding(num_grasp_types, embedding_dim)
+
+        # For classifier-free guidance (optional):
+        self.null_type = nn.Parameter(torch.zeros(embedding_dim))  # learned null vector (better than pure zeros)
+        self.class_dropout_prob = 0.1  # p to drop conditioning during training
 
         # Estimate attends to context (no subsampling)
         self.cross_attn = AttentionModule(
@@ -1039,8 +1072,27 @@ class TransformerHead(nn.Module):
         # focus on the point
         self.focus_embed = nn.Parameter(torch.zeros(embedding_dim))    # ΔE_focus
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
+    
+    def build_condition(self, timesteps, grasp_type_id, train: bool):
+        time_embs = self.time_emb(timesteps)              # (B, d)
+        if grasp_type_id is None:
+            # Unconditional path (e.g., inference w/o class)
+            class_emb = self.null_type.unsqueeze(0).expand(time_embs.size(0), -1)
+        else:
+            class_emb = self.type_embed(grasp_type_id)    # (B, d)
+            # print(grasp_type_id, 'grasp type id shape')
+            if train and self.class_dropout_prob > 0:
+                drop_mask = (torch.rand_like(grasp_type_id.float()) < self.class_dropout_prob)
+                # Replace dropped examples with null_type
+                if drop_mask.any():
+                    class_emb[drop_mask] = self.null_type
+                    # print('using grasp type id, but some are dropped')
+                    # print(class_emb[drop_mask].shape)
+        fused = self.cond_fuse(torch.cat([time_embs, class_emb], dim=-1))
+        return fused, class_emb  # shape (B, d)
 
-    def forward(self, grasp_feats, grasp_xyzs, timesteps, pcd_feats, pcd, focus_idx=None):
+
+    def forward(self, grasp_feats, grasp_xyzs, timesteps, pcd_feats, pcd, focus_idx=None, grasp_type_id=None, train=True):
         """
         Arguments:
             traj_feats: (B, trajectory_length, nhand, F)
@@ -1081,7 +1133,15 @@ class TransformerHead(nn.Module):
         # print(pcd.shape, pcd_feats.shape, 'pcd shape, pcd feats shape')
 
         # Denoising timesteps' embeddings
-        time_embs = self.encode_denoising_timestep(timesteps)
+        # time_embs = self.encode_denoising_timestep(timesteps)
+        time_embs, class_emb = self.build_condition(
+            timesteps=timesteps,
+            grasp_type_id=grasp_type_id,
+            train=train
+        )  # (B, F)
+        if grasp_type_id is not None:
+            class_shift = class_emb.unsqueeze(1)  # (B, 1, d)
+            grasp_feats = grasp_feats + class_shift
 
         # Positional embeddings
         rel_grasp_pos, rel_pcd_pos, rel_pos = self.get_positional_embeddings(grasp_xyzs, pcd)

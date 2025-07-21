@@ -21,12 +21,15 @@ class fcMocapEval(BaseEval):
             ]
         ) 
         
-        all_points_to_mark = self.grasp_data['partial_points'][:]
+        all_points_to_mark = self.grasp_data['partial_points'][:1]
+        is_anchor = self.grasp_data.get("anchor_visible", None)
+        color = [1.0, 0.3, 0.3, 1.0] if is_anchor else [0.0, 0.5, 0.5, 1.0]
+        
         # all_points_to_mark = np.concatenate(
         #     [all_points_to_mark, self.grasp_data["palm_centre"][None], self.grasp_data["thumb_tip"][None],
         #      self.grasp_data["middle_tip"][None]], axis=0)
         
-        scale = 0.005
+        scale = 0.01
         if self.configs.task.simulation_test:
             visualize = False
         else:
@@ -51,7 +54,7 @@ class fcMocapEval(BaseEval):
                 self.mj_ho.control_hand_with_interp(
                     self.grasp_data["pregrasp_qpos"],
                     self.grasp_data["grasp_qpos"],
-                    all_points_to_mark, scale=scale
+                    all_points_to_mark, scale=scale, color=color
                 )
 
                 # 3. Move hand to squeeze pose.
@@ -60,7 +63,7 @@ class fcMocapEval(BaseEval):
                 self.mj_ho.control_hand_with_interp(
                     self.grasp_data["grasp_qpos"],
                     self.grasp_data["squeeze_qpos"],
-                    all_points_to_mark, scale=scale
+                    all_points_to_mark, scale=scale, color=color
                 )
 
                 # 4. Add external force on the object
@@ -70,7 +73,7 @@ class fcMocapEval(BaseEval):
 
             # 5. Wait for 2 seconds
             for _ in range(10):
-                self.mj_ho.control_hand_step(step_inner=50, partial_points=all_points_to_mark, scale=scale)
+                self.mj_ho.control_hand_step(step_inner=50, partial_points=all_points_to_mark, scale=scale, color=color)
 
                 # Early stop
                 latter_obj_qpos = self.mj_ho.get_obj_pose()

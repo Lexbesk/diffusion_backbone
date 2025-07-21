@@ -434,7 +434,7 @@ class MjHO:
         return
 
     def control_hand_with_interp(
-        self, hand_qpos1, hand_qpos2, partial_points, step_outer=10, step_inner=10, scale=0.06
+        self, hand_qpos1, hand_qpos2, partial_points, step_outer=10, step_inner=10, scale=0.06, color=None
     ):
         if self.hand_mocap:
             pose_interp = interplote_pose(hand_qpos1[:7], hand_qpos2[:7], step_outer)
@@ -447,10 +447,10 @@ class MjHO:
                 self.data.mocap_quat[0] = pose_interp[j, 3:7]
             self.data.ctrl[:] = qpos_interp[j]
             mujoco.mj_forward(self.model, self.data)
-            self.control_hand_step(step_inner, partial_points, scale=scale)
+            self.control_hand_step(step_inner, partial_points, scale=scale, color=color)
         return
     
-    def _draw_partial_pcd(self, partial_points, scale):
+    def _draw_partial_pcd(self, partial_points, scale, color=None):
             # transform point cloud from object frame ➜ world frame
             obj_pos, obj_quat = self.get_obj_pose()[:3], self.get_obj_pose()[3:]
             # print(f"Object pose: {obj_pos}, {obj_quat}")
@@ -466,7 +466,7 @@ class MjHO:
                 # if scene.ngeom >= scene.maxgeom:
                 #     break              # avoid overflow; raise if you prefer
                 geom = scene.geoms[scene.ngeom]        # get write-slot
-                rgba = [1.0, 0.2, 0.4, 1.0] if i <= 22 else [0.1, 0.6, 1.0, 1.0]
+                rgba = color if color is not None else [0.5, 0.5, 0.5, 1.0]
                 
                 mujoco.mjv_initGeom(                   # low-level C helper
                     geom,
@@ -482,15 +482,15 @@ class MjHO:
                 # print(i)
 
 
-    def control_hand_step(self, step_inner, partial_points, scale=0.06):
+    def control_hand_step(self, step_inner, partial_points, scale=0.06, color=None):
         for _ in range(step_inner):
             mujoco.mj_step(self.model, self.data)
 
         if self.debug_render is not None:
             self._move_camera()  
             self.debug_render.update_scene(self.data, camera="closeup", scene_option=self.debug_options)
-            if not self.configs.task.simulation_test:
-                self._draw_partial_pcd(partial_points, scale=scale)
+            # if not self.configs.task.simulation_test:
+            self._draw_partial_pcd(partial_points, scale=scale, color=color)
             scene = self.debug_render.scene
             pixels = self.debug_render.render()
             self.debug_images.append(pixels)

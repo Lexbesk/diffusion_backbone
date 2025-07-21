@@ -1,27 +1,28 @@
-# main_dir=DEXONOMY_7k_pcdcentric
-main_dir=DEXONOMY_70k_pcdcentric
+# main_dir=DEXONOMY_70k_pcdcentric
+main_dir=DEXONOMY_type1_pcdcentric
+
 
 DATA_PATH="/data/user_data/austinz/Robots/manipulation"
 
-# train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_7000/train.zarr
-# eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_7000/val.zarr
-train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_70k/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_70k/val.zarr
+train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1new/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1/val.zarr
+# train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_70k/train.zarr
+# eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_70k/val.zarr
 train_instructions=instructions/calvin/train_keypose_instructions.json
 val_instructions=instructions/calvin/val_keypose_instructions.json
 
 dataset=Dexonomy
-num_workers=4
+num_workers=2
 memory_limit=6
-B=128
-B_val=128
+lv2_batch_size=4 # equally divides the batch size B=64
+B=16
+B_val=16
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
 val_freq=100
 eval_only=true
-eval_overfit=false
-lr=3e-4
+lr=1e-4
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
@@ -50,19 +51,24 @@ denoise_model=rectified_flow
 
 num_shared_attn_layers=20
 embedding_dim=256
-visualize_denoising_steps=true
 accurate_joint_pos=true
-save_for_mujoco=true # directly load dataset from DexDataset, and save the batches of predictions
 test_mujoco=true
+vis_freq=1
+val_set_all_anchor=true
 
-run_log_dir=overfit_is_good_$model_type-$dataset-lr$lr-$lr_scheduler-$denoise_model-B$B-Bval$B_val-DT$denoise_timesteps
+run_log_dir=run_Jul19_$model_type-$dataset-lr$lr-$lr_scheduler-$denoise_model-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-ajp$accurate_joint_pos-embed$embedding_dim-C$C-nlayers$num_shared_attn_layers-visfreq$vis_freq
+checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-checkpoint=train_logs/DEXONOMY_70k_pcdcentric/run_Jul16_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B32-Bval8-DT10-ajptrue-embed256-C192-n_attn_layers20-frozenpe/last.pth
+run_log_dir=run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20
+checkpoint=train_logs/DEXONOMY_type1_pcdcentric/run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20/last.pth
+
 
 ngpus=1
 
 export NCCL_P2P_DISABLE=1
 export NCCL_IB_DISABLE=1
+export MUJOCO_GL=egl
+export XDG_RUNTIME_DIR="tmp"
 
 torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     main.py \
@@ -82,9 +88,11 @@ torchrun --nproc_per_node $ngpus --master_port $RANDOM \
     --chunk_size $chunk_size \
     --embedding_dim $embedding_dim \
     --num_workers $num_workers \
-    --eval_only $eval_only \
-    --eval_overfit $eval_overfit \
-    --visualize_denoising_steps $visualize_denoising_steps \
+    --exp_log_dir $main_dir \
+    --run_log_dir ${run_log_dir} \
     --accurate_joint_pos $accurate_joint_pos \
-    --save_for_mujoco $save_for_mujoco \
     --test_mujoco $test_mujoco \
+    --lv2_batch_size $lv2_batch_size \
+    --vis_freq $vis_freq \
+    --eval_only $eval_only \
+    --val_set_all_anchor $val_set_all_anchor \

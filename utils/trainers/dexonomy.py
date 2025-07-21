@@ -149,6 +149,7 @@ class DexonomyTrainTester:
             lv2_batch_size=self.args.lv2_batch_size,
             visualize_denoising_steps=self.args.visualize_denoising_steps,
             accurate_joint_pos=self.args.accurate_joint_pos,
+            guidance_weight=self.args.guidance_weight,
         )
 
         # Print basic modules' parameters
@@ -360,18 +361,26 @@ class DexonomyTrainTester:
         # print(sample["pregrasp_qpos"].shape)
         # print(sample["squeeze_qpos"].shape)
         # print(sample["grasp_type_id"].shape)
-        sample['partial_points'] = sample['partial_points'].cuda(non_blocking=True).float()
-        sample['grasp_qpos'] = sample['grasp_qpos'].cuda(non_blocking=True)
-        sample['pregrasp_qpos'] = sample['pregrasp_qpos'].cuda(non_blocking=True)
-        sample['squeeze_qpos'] = sample['squeeze_qpos'].cuda(non_blocking=True)
-        sample['grasp_type_id'] = sample['grasp_type_id'].cuda(non_blocking=True)
+        out = {}
+        out['partial_points'] = sample['partial_points'].cuda(non_blocking=True).float()
+        out['grasp_qpos'] = sample['grasp_qpos'].cuda(non_blocking=True)
+        out['pregrasp_qpos'] = sample['pregrasp_qpos'].cuda(non_blocking=True)
+        out['squeeze_qpos'] = sample['squeeze_qpos'].cuda(non_blocking=True)
+        # out['grasp_type_id'] = sample['grasp_type_id'].cuda(non_blocking=True)
+        gtype = sample['grasp_type_id']
+        # If it comes as shape (B,1), squeeze; if already (B,), leave it.
+        if gtype.dim() == 2 and gtype.size(-1) == 1:
+            gtype = gtype.squeeze(-1)
+        out['grasp_type_id'] = gtype.to(device='cuda', dtype=torch.long, non_blocking=True)
         # print(sample['anchor_visible'].shape, sample['anchor_visible'])
-        sample['anchor_visible'] = sample['anchor_visible'].cuda(non_blocking=True)
+        out['anchor_visible'] = sample['anchor_visible'].cuda(non_blocking=True)
+        out['obj_pose'] = sample['obj_pose'].cuda(non_blocking=True)
+        out['obj_scale'] = sample['obj_scale'].cuda(non_blocking=True)
+        out['obj_path'] = sample['obj_path']
         
-        
-        sample = self.preprocessor.wild_parallel_augment(sample)
-        # sample = self.preprocessor.translate_to_center_frame(sample)
-        return sample
+        # out = self.preprocessor.translate_to_center_frame(out)
+        out = self.preprocessor.wild_parallel_augment(out)
+        return out
 
     def _model_forward(self, model, batch, training=True):
 
@@ -385,11 +394,18 @@ class DexonomyTrainTester:
                 print("Saved batch for inspection at", self.args.log_dir / "batch_inspect.pt")
         
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            
+            if self.args.condition_on_grasp_type_id:
+                grasp_type_id = batch['grasp_type_id']
+            else:
+                grasp_type_id = None
+                print('not using grasp type id, pure unconditional path')
             out = model(batch['grasp_qpos'],
                         batch['pregrasp_qpos'],
                         batch['squeeze_qpos'],
                         batch['partial_points'],
                         focus_idx=batch['anchor_visible'],
+                        grasp_type_id=grasp_type_id,
                         run_inference=not training
                         )
         return out  # loss if training, else action
@@ -435,12 +451,70 @@ class DexonomyTrainTester:
         model.eval()
 
         mujoco_succ_num, mujoco_fail_num = 0, 0
+        mujoco_succ_num_anchor, mujoco_fail_num_anchor = 0, 0
+        mujoco_succ_num_multitype, mujoco_fail_num_multitype = 0, 0
         for i, sample in tqdm(enumerate(loader)):
             if i == val_iters:
                 break
             
             sample = self.prepare_batch(sample)
+            
+            if self.args.val_set_all_anchor and self.args.test_mujoco and step_id >= 1 and split == 'val':
+                print('Anchor conditioned validation...')
+                anchor_sample = deepcopy(sample)
+                anchor_sample['anchor_visible'] = torch.ones_like(anchor_sample['anchor_visible'], dtype=torch.bool)
+                pred_anchored_grasp, pred_anchored_pregrasp, pred_anchored_squeeze = self._model_forward(model, anchor_sample, training=False)
+                
+                anchor_sample_to_save = {}
+                anchor_sample_to_save["grasp_qpos"] = pred_anchored_grasp.cpu().numpy()
+                anchor_sample_to_save["pregrasp_qpos"] = pred_anchored_pregrasp.cpu().numpy()
+                anchor_sample_to_save["squeeze_qpos"] = pred_anchored_squeeze.cpu().numpy()
+                anchor_sample_to_save["partial_points"] = anchor_sample["partial_points"].cpu().numpy()
+                anchor_sample_to_save["anchor_visible"] = anchor_sample["anchor_visible"].cpu().numpy()
+                anchor_sample_to_save["grasp_type_id"] = anchor_sample["grasp_type_id"].cpu().numpy()
+                anchor_sample_to_save["obj_path"] = anchor_sample["obj_path"]
+                anchor_sample_to_save["obj_scale"] = anchor_sample["obj_scale"].cpu().numpy()
+                anchor_sample_to_save["obj_pose"] = anchor_sample["obj_pose"].cpu().numpy()
+                
+                succ_num_batch_anchor, fail_num_batch_anchor = val_batch(anchor_sample_to_save, self.args.log_dir, self.args.vis_freq)
+                mujoco_succ_num_anchor += succ_num_batch_anchor
+                mujoco_fail_num_anchor += fail_num_batch_anchor
+                    
+            if True and self.args.test_mujoco and step_id >= 1 and split == 'val':
+                print('Multitype validation...')
+                anchor_sample = deepcopy(sample)
+                orig = anchor_sample["grasp_type_id"]
+                grasp_type_ids = torch.tensor(
+                    [10, 11, 12, 13, 14, 15, 16, 17, 18, 1, 20, 22, 23, 24, 25, 26,
+                    27, 28, 29, 2, 30, 31, 32, 33, 3, 4, 5, 6, 7, 8, 9],
+                    dtype=orig.dtype,
+                    device=orig.device
+                )
+                rand_indices = torch.randint(
+                    low=0,
+                    high=grasp_type_ids.shape[0],
+                    size=orig.shape,
+                    device=orig.device
+                )
+                anchor_sample["grasp_type_id"] = grasp_type_ids[rand_indices]
+                pred_anchored_grasp, pred_anchored_pregrasp, pred_anchored_squeeze = self._model_forward(model, anchor_sample, training=False)
+                
+                anchor_sample_to_save = {}
+                anchor_sample_to_save["grasp_qpos"] = pred_anchored_grasp.cpu().numpy()
+                anchor_sample_to_save["pregrasp_qpos"] = pred_anchored_pregrasp.cpu().numpy()
+                anchor_sample_to_save["squeeze_qpos"] = pred_anchored_squeeze.cpu().numpy()
+                anchor_sample_to_save["partial_points"] = anchor_sample["partial_points"].cpu().numpy()
+                anchor_sample_to_save["anchor_visible"] = anchor_sample["anchor_visible"].cpu().numpy()
+                anchor_sample_to_save["grasp_type_id"] = anchor_sample["grasp_type_id"].cpu().numpy()
+                anchor_sample_to_save["obj_path"] = anchor_sample["obj_path"]
+                anchor_sample_to_save["obj_scale"] = anchor_sample["obj_scale"].cpu().numpy()
+                anchor_sample_to_save["obj_pose"] = anchor_sample["obj_pose"].cpu().numpy()
+                
+                succ_num_batch_multitype, fail_num_batch_multitype = val_batch(anchor_sample_to_save, self.args.log_dir, self.args.vis_freq)
+                mujoco_succ_num_multitype += succ_num_batch_multitype
+                mujoco_fail_num_multitype += fail_num_batch_multitype
 
+            print('Regular validation...')
             pred_grasp, pred_pregrasp, pred_squeeze = self._model_forward(model, sample, training=False)
             
             if self.args.visualize_denoising_steps:
@@ -488,6 +562,7 @@ class DexonomyTrainTester:
                 succ_num_batch, fail_num_batch = val_batch(sample_to_save, self.args.log_dir, self.args.vis_freq)
                 mujoco_succ_num += succ_num_batch
                 mujoco_fail_num += fail_num_batch
+            
             
             if self.args.save_for_mujoco:
                 # Save the sample to a file
@@ -553,6 +628,14 @@ class DexonomyTrainTester:
                     f"({mujoco_succ_num}/{mujoco_fail_num})")
                 self.writer.add_scalar(f"{split}-losses/mujoco_success_rate", 
                                     mujoco_succ_num / (mujoco_succ_num + mujoco_fail_num), step_id)
+                print(f"Mujoco success rate (anchor): {mujoco_succ_num_anchor / (mujoco_succ_num_anchor + mujoco_fail_num_anchor + 1e-3):.03f} "
+                    f"({mujoco_succ_num_anchor}/{mujoco_fail_num_anchor})")
+                self.writer.add_scalar(f"{split}-losses/mujoco_success_rate_anchor",
+                                    mujoco_succ_num_anchor / (mujoco_succ_num_anchor + mujoco_fail_num_anchor + 1e-3), step_id)
+                print(f"Mujoco success rate (multitype): {mujoco_succ_num_multitype / (mujoco_succ_num_multitype + mujoco_fail_num_multitype + 1e-3):.03f} "
+                    f"({mujoco_succ_num_multitype}/{mujoco_fail_num_multitype})")
+                self.writer.add_scalar(f"{split}-losses/mujoco_success_rate_multitype",
+                                    mujoco_succ_num_multitype / (mujoco_succ_num_multitype + mujoco_fail_num_multitype + 1e-3), step_id)
 
         return -values[f'{split}-losses/mean/grasp_pos_acc_001']
 

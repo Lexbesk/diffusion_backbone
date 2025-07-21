@@ -75,6 +75,9 @@ def parse_arguments():
         ('save_for_mujoco', str2bool, False),
         ('test_mujoco', str2bool, False),
         ('vis_freq', int, 100),
+        ('val_set_all_anchor', str2bool, False),
+        ('condition_on_grasp_type_id', str2bool, True),
+        ('guidance_weight', float, None),  # e.g., 1.5 for classifier-free guidance
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
