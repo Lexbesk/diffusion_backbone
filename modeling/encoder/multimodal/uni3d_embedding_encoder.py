@@ -16,7 +16,7 @@ from uni3d.utils.tokenizer import SimpleTokenizer
 
 import logging
 
-from collections.abc import Sequence
+from typing import Sequence
 from abc import ABC, abstractmethod
 import torch
 from PIL.Image import Image

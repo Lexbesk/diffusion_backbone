@@ -25,8 +25,8 @@ from huggingface_hub import hf_hub_download
 import time
 from collections import defaultdict
 
-from utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path
-from utils.forward_kinematics.pytorchfk import get_joint_positions
+from diffusion_backbone.utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path
+from diffusion_backbone.utils.forward_kinematics.pytorchfk import get_joint_positions
 
 from pytorch3d.ops import sample_farthest_points
 

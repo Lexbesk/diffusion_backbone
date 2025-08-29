@@ -19,7 +19,7 @@ from ..utils.fk_layer import FKLayer
 import time
 from collections import defaultdict
 
-from utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
+from diffusion_backbone.utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
 from pytorch3d.ops import sample_farthest_points
 
 
@@ -265,7 +265,7 @@ class DexterousActor(nn.Module):
         q_hist = batch['q_hist']                    # (B, nhist, 31)
         v_hist = batch['v_hist']                    # (B, nhist, 31)
         ee_fingers = batch['ee_fingers']            # (B, nhist, 6, 3)
-        obj_pose_hist = batch['obj_pose_hist']      # (B, nhist, 7)
+        # obj_pose_hist = batch['obj_pose_hist']      # (B, nhist, 7)
         act_hist = batch['act_hist']                # (B, nhist, 31)
         depth_hist = batch['depth_hist']            # (B, nhist, H, W, 1)
         goal_pos = batch['goal_pos']                # (B, 3)
@@ -276,15 +276,15 @@ class DexterousActor(nn.Module):
         
         q_hist = self.normalize_actions(q_hist)
         act_hist = self.normalize_actions(act_hist)
-        obj_pose_hist = self.normalize_pos(obj_pose_hist)
-        obj_pose_hist = self.convert_rot(obj_pose_hist)
+        # obj_pose_hist = self.normalize_pos(obj_pose_hist)
+        # obj_pose_hist = self.convert_rot(obj_pose_hist)
         goal_pos = self.normalize_pos(goal_pos)
         grasp_cond = self.normalize_pos(grasp_cond)
         grasp_cond = self.convert_rot(grasp_cond)
         grasp_cond = self.normalize_finger_angles(grasp_cond)
         obj_init_pcl_cam = self.normalize_pos(obj_init_pcl_cam)
         
-        fixed_inputs = act_hist, obj_pose_hist, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond
+        fixed_inputs = act_hist, None, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond
 
         # Sample from learned model starting from noise
         out_dim = 9
