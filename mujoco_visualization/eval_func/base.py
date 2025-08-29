@@ -30,13 +30,17 @@ class BaseEval:
             input_npy_path = f'{self.grasp_data["obj_path"]}eval.npy'
         self.input_npy_path = input_npy_path
 
-        obj_info = load_json(
-            os.path.join(self.grasp_data["obj_path"], "info/simplified.json")
-        )
-        obj_coef = obj_info["mass"] / (obj_info["density"] * (obj_info["scale"] ** 3))
-        new_obj_density = configs.task.obj_mass / (
-            obj_coef * (self.grasp_data["obj_scale"] ** 3)
-        )
+        try:
+            obj_info = load_json(
+                os.path.join(self.grasp_data["obj_path"], "info/simplified.json")
+            )
+            obj_coef = obj_info["mass"] / (obj_info["density"] * (obj_info["scale"] ** 3))
+            new_obj_density = configs.task.obj_mass / (
+                obj_coef * (self.grasp_data["obj_scale"] ** 3)
+            )
+        except:
+            print('Make sure you are testing GraspXL or some external objects')
+            new_obj_density = -1
 
         # Build mj_spec
         self.mj_ho = MjHO(
@@ -152,9 +156,16 @@ class BaseEval:
                 debug_path = os.path.join(self.configs.vis_path, f'visuals/{self.num}.gif')
                 png_path = os.path.join(self.configs.vis_path, f'visuals/{self.num}.png')
                 os.makedirs(os.path.dirname(debug_path), exist_ok=True)
-                self.mj_ho.save_render(debug_path, png_path)
-                # imageio.mimsave(debug_path, self.mj_ho.debug_images)
-                print("Save GIF to ", debug_path)
+                success_only = True
+                if success_only:
+                    if succ_flag:
+                        self.mj_ho.save_render(debug_path, png_path)
+                        # imageio.mimsave(debug_path, self.mj_ho.debug_images)
+                        print("Save GIF to ", debug_path)
+                else:
+                    self.mj_ho.save_render(debug_path, png_path)
+                    # imageio.mimsave(debug_path, self.mj_ho.debug_images)
+                    print("Save GIF to ", debug_path)
 
         return succ_flag, delta_pos, delta_angle
 

@@ -529,6 +529,8 @@ class GraspDenoiser(nn.Module):
             # Implement Forward Kinematics (FK) to compute joint positions!
             xyz = get_joint_positions(self.chain, grasp, pose_normalized=False) # (B, 22, 3)
             # print(xyz.shape, 'xyz shape in fk_layer')
+            if len(xyz.shape) == 2:
+                xyz = xyz.unsqueeze(0)
             return xyz
         else:
             xyz = grasp[..., :3]
@@ -549,7 +551,9 @@ class GraspDenoiser(nn.Module):
         # print(actual_grasp.dtype, 'after unnorm')
         # print(actual_grasp.shape)
         assert actual_grasp.shape[-1] == 29
+        # print(actual_grasp.shape, 'actual grasp shape')
         actual_joint_xyz = self.fk_layer(actual_grasp, accurate_pos=self.accurate_joint_pos)           # (B, 22, 3)
+        # print(actual_joint_xyz.shape, 'actual joint xyz shape')
         grasp_feats = self.grasp_encoder(grasp[..., :3], grasp[..., 3:9], grasp[..., 9:]) # (B, 23, d) 
         # But use positions from unnormalized absolute trajectory
         grasp_xyzs = torch.cat([actual_grasp[..., :3].unsqueeze(1), actual_joint_xyz], dim=1)     # (B, 1+J, 3)

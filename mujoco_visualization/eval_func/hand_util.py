@@ -298,6 +298,19 @@ class MjHO:
                 pos=[0, 0, 0],
                 size=[0, 0, 1.0],
             )
+            
+        if obj_density == -1:
+            # If density is -1, we assume the object is a mesh and has no density
+            obj_body = self.spec.worldbody.add_body(name="object")
+            obj_body.add_freejoint(name="obj_freejoint")
+            self.spec.add_mesh(name="object_mesh", file=obj_path, scale=[obj_scale, obj_scale, obj_scale])
+            obj_body.add_geom(
+                name="object_visual",
+                type=mujoco.mjtGeom.mjGEOM_MESH,
+                meshname="object_mesh",
+                density=1000.0,
+            )
+            return
 
         obj_body = self.spec.worldbody.add_body(name="object")
         obj_body.add_freejoint(name="obj_freejoint")

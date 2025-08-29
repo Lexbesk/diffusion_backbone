@@ -67,7 +67,7 @@ class DexonomyDataPreprocessor:
         return DexonomyDataPreprocessor.quat_normalize(q)
 
     # ------------------------------------------------------------------- public
-    def wild_parallel_augment(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+    def wild_parallel_augment(self, batch: dict[str, Tensor], rot_aug=True) -> dict[str, Tensor]:
         # print(batch['partial_points'].shape, 'partial_points shape')  # Debugging line
         # print(batch['grasp_type_id'].shape, 'grasp_type_id shape')  # Debugging line
         # print(batch['anchor_visible'].shape, 'anchor_visible shape')  # Debugging line
@@ -95,8 +95,13 @@ class DexonomyDataPreprocessor:
         pts_centered = pts - center
 
         # ---------- 2. sample & apply random rotation ----------
-        rand_q = self.random_quaternion(B, device, dtype)          # (B,4)
-        R = self.quat_to_matrix(rand_q)                            # (B,3,3)
+        if rot_aug:
+            rand_q = self.random_quaternion(B, device, dtype)          # (B,4)
+            R = self.quat_to_matrix(rand_q)                            # (B,3,3)
+        else:
+            rand_q = torch.tensor([1.0, 0.0, 0.0, 0.0],      # (w, x, y, z)
+                      device=device, dtype=dtype).repeat(B, 1)
+            R = self.quat_to_matrix(rand_q)                  # (B, 3, 3) – all identity
 
         if batched:
             pts_rot = torch.einsum("bij,bnj->bni", R, pts_centered)

@@ -78,6 +78,10 @@ def parse_arguments():
         ('val_set_all_anchor', str2bool, False),
         ('condition_on_grasp_type_id', str2bool, True),
         ('guidance_weight', float, None),  # e.g., 1.5 for classifier-free guidance
+        ('sample_times', int, 1),
+        ('nhist', int, 8),
+        ('nfuture', int, 32),
+        ('K', int, 4),
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])

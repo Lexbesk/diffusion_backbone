@@ -113,3 +113,76 @@ class DexZarrDataset(BaseDataset):
 
         return sample
 
+
+# grasp_dataset.py
+from pathlib import Path
+from typing import List, Dict, Any, Callable, Optional
+import random
+import numpy as np
+import torch
+
+_DEFAULT_POSE = np.array([[0, 0, 0, 1, 0, 0, 0]], dtype=np.float32)
+_ZEROS29      = np.zeros((1, 29), dtype=np.float32)
+
+class GraspXLDataset(Dataset):
+    def __init__(
+        self,
+        root,
+        mem_limit=8,
+        copies=None,
+        chunk_size=1,
+        partial_choice: str | int | Callable[[List[Path]], Path] = 0,
+    ):
+        """
+        Parameters
+        ----------
+        root : str | Path
+            Folder that contains the GraspXL object sub-directories (e.g. .../mixed_train).
+        partial_choice : "random" | int | callable
+            • "random"   choose a random `view_*.npy` each time __getitem__ is called
+            • int        always choose that fixed index (0-8)
+            • callable   a function that maps `List[Path]` → chosen Path
+        """
+        self.root = Path(root).expanduser().resolve()
+        self.obj_dirs: List[Path] = [
+            d for d in sorted(self.root.iterdir()) if (d / "combined.obj").exists()
+        ]
+        if not self.obj_dirs:
+            raise RuntimeError(f"No object folders with combined.obj found in {self.root}")
+
+        self.partial_choice = partial_choice
+
+    def _pick_partial(self, view_files: List[Path]) -> Path:
+        if callable(self.partial_choice):
+            return self.partial_choice(view_files)
+        if self.partial_choice == "random":
+            return random.choice(view_files)
+        # assume int
+        idx = int(self.partial_choice) % len(view_files)
+        return view_files[idx]
+
+    def __len__(self) -> int:
+        return len(self.obj_dirs)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        folder = self.obj_dirs[idx]
+        view_files = sorted((folder / "partials").glob("view_*.npy"))
+        if not view_files:
+            raise FileNotFoundError(f"No partials in {folder}")
+        pcd = np.load(self._pick_partial(view_files)).astype(np.float32)[None]   # [4096,3]
+
+        sample = {
+            "grasp_qpos":    torch.from_numpy(_ZEROS29.copy()),    # placeholders
+            "pregrasp_qpos": torch.from_numpy(_ZEROS29.copy()),
+            "squeeze_qpos":  torch.from_numpy(_ZEROS29.copy()),
+
+            "partial_points": torch.from_numpy(pcd),               # [4096,3]
+            "anchor_visible": torch.tensor([0], dtype=torch.uint8),
+            "grasp_type_id":  torch.tensor([10], dtype=torch.uint8),
+
+            "obj_path":  [str(folder / "combined.obj")],             # keep as str
+            "obj_scale": torch.tensor([1.0], dtype=torch.float32),
+            "obj_pose":  torch.from_numpy(_DEFAULT_POSE.copy()),
+        }
+        return sample
+

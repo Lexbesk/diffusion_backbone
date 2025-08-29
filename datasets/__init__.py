@@ -12,6 +12,8 @@ from .rlbench import (
 )
 # from .base_dex import DexDataset
 from .dexonomy import DexZarrDataset as DexDataset
+from .dexterousact import DexterousActZarrDataset as DexterousActDataset
+from .dexonomy import GraspXLDataset
 from omegaconf import DictConfig, ListConfig
 from copy import deepcopy
 import torch
@@ -33,6 +35,8 @@ def fetch_dataset_class(dataset_name):
         "Peract2TCSingle": SinglePeract2Dataset,
         "Peract2All": Peract2AllDataset,
         "Dexonomy": DexDataset,
+        "GraspXL": GraspXLDataset,
+        "DexterousAct": DexterousActDataset,
     }
     
     if dataset_name not in dataset_classes:

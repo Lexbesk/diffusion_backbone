@@ -15,7 +15,10 @@ def fetch_data_preprocessor(dataset_name):
         return partial(RLBenchDataPreprocessor, orig_imsize=128)
     if 'calvin' in dataset_name:
         return partial(CALVINDataPreprocessor, orig_imsize=200)
-    if 'dexonomy' in dataset_name:
+    if 'dexonomy' in dataset_name or "graspxl" in dataset_name:
         from .dexonomy import DexonomyDataPreprocessor
         return DexonomyDataPreprocessor
+    if 'dexterousact' in dataset_name:
+        from .dexterousact import DexterousActDataPreprocessor
+        return DexterousActDataPreprocessor
     return None

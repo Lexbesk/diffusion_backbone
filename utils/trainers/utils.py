@@ -70,3 +70,34 @@ def compute_metrics(pred, gt):
     }
 
     return ret_1, ret_2
+
+
+def compute_metrics_action_objpose(pred_action, gt_action, q_future, gt_q_future, pred_objpose, gt_objpose):
+    # pred_action: (B, nfuture, 31)
+    # gt_action: (B, nfuture, 31)
+    # pred_objpose: (B, nfuture, 7)
+    # gt_objpose: (B, nfuture, 7)
+    action_l2 = ((pred_action - gt_action) ** 2).sum(-1).sqrt()
+    q_l2 = ((q_future - gt_q_future) ** 2).sum(-1).sqrt()
+    objpose_pos_l2 = ((pred_objpose[..., :3] - gt_objpose[..., :3]) ** 2).sum(-1).sqrt()
+    objpose_rot_l1 = (pred_objpose[..., 3:7] - gt_objpose[..., 3:7]).abs().sum(-1)    
+    
+    tr = ''
+
+    # Trajectory metrics
+    ret_1, ret_2 = {
+        tr + 'action_l2': action_l2.mean(),
+        tr + 'action_acc_001': (action_l2 < 0.01).float().mean(),
+        tr + 'q_l2': q_l2.mean(),
+        tr + 'q_acc_001': (q_l2 < 0.01).float().mean(),
+        tr + 'objpose_pos_l2': objpose_pos_l2.mean(),
+        tr + 'objpose_pos_acc_001': (objpose_pos_l2 < 0.01).float().mean(),
+        tr + 'objpose_rot_l1': objpose_rot_l1.mean(),
+        tr + 'objpose_rot_acc_0025': (objpose_rot_l1 < 0.025).float().mean(),
+    }, {
+        tr + 'action_l2': action_l2.mean(-1),
+        tr + 'action_acc_001': (action_l2 < 0.01).float().mean(-1),
+        
+    }
+
+    return ret_1, ret_2

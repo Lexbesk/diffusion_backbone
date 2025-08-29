@@ -49,7 +49,7 @@ raw_cfg = {
         "simulation_metrics": {
             "max_pene": 0.01,
             "trans_thre": 0.05,
-            "angle_thre": 90,
+            "angle_thre": 15,
         },
         "analytic_fc_metrics": {
             "contact_tip_only": True,
@@ -101,11 +101,15 @@ def safe_eval_one(params, grasp_data=None):
         logging.warning(f"{error_traceback}")
         return
     
-COUNT = 0
-def val_batch(batch, vis_path, vis_freq=100): # numpy batch
+COUNT = -1
+def val_batch(batch, vis_path, vis_freq=100, number=-1, obj_path=""): # numpy batch
     global CONFIGS
     configs = CONFIGS
     configs.vis_path = vis_path
+    os.makedirs(vis_path, exist_ok=True)
+    output_file = os.path.join(vis_path, "obj_path.txt")
+    with open(output_file, 'w') as f:
+        f.write(obj_path + "\n")  # optional newline at the end
     batch_len = batch['grasp_qpos'].shape[0]
     success_count = 0
     failure_count = 0
@@ -119,8 +123,10 @@ def val_batch(batch, vis_path, vis_freq=100): # numpy batch
             else:
                 item = val[j]
             grasp_data[key] = item  
-        visualize = True if COUNT % vis_freq == 0 else False
-        ip = (grasp_data, configs, f'sample_grasp_{COUNT}', visualize)
+        visualize = True if number % vis_freq == 0 else False
+        # if number >= 0:
+        #     visualize = True
+        ip = (grasp_data, configs, f'sample_grasp_{number}', visualize)
         succ = safe_eval_one(ip)
         if succ:
             # print(f"Grasp {j} succeeded")

@@ -15,13 +15,13 @@ val_instructions=instructions/calvin/val_keypose_instructions.json
 dataset=Dexonomy
 memory_limit=6
 lv2_batch_size=4 # equally divides the batch size B=64
-B=32
-B_val=64
+B=16
+B_val=8
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
 eval_only=false
-lr=1e-4
+lr=1e-6
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
@@ -49,7 +49,7 @@ denoise_timesteps=10
 denoise_model=rectified_flow
 
 num_shared_attn_layers=30
-embedding_dim=256
+embedding_dim=512
 accurate_joint_pos=true
 test_mujoco=true
 condition_on_grasp_type_id=true
@@ -64,16 +64,16 @@ val_set_all_anchor=true
 
 # # training choice
 val_freq=1000
-vis_freq=100
+vis_freq=10000000000
 ngpus=4
 num_workers=4
 
 
-run_log_dir=run_alltypes_Jul20-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-ajp$accurate_joint_pos-embed$embedding_dim-C$C-nlayers$num_shared_attn_layers-visfreq$vis_freq-typecond$condition_on_grasp_type_id
+run_log_dir=run_alltypes_Jul26-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-ajp$accurate_joint_pos-embed$embedding_dim-C$C-nlayers$num_shared_attn_layers-visfreq$vis_freq-typecond$condition_on_grasp_type_id
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
-# run_log_dir=run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20
-# checkpoint=train_logs/DEXONOMY_type1_pcdcentric/run_Jul17_grasp_denoiser-Dexonomy-lr1e-4-constant-rectified_flow-B16-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers20/last.pth
+# run_log_dir=run_alltypes_Jul20-B32-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers30-visfreq100-typecondtrue
+# checkpoint=train_logs/Dexonomy_zarr_prime/run_alltypes_Jul20-B32-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers30-visfreq100-typecondtrue/last.pth
 
 
 
