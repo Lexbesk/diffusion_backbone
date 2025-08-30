@@ -242,7 +242,7 @@ class DiffusionPlayer(BasePlayer):
             self.input_dict['act_hist'] = torch.cat([self.input_dict['act_hist'][:, 1:], obs[:, :31].unsqueeze(1)], dim=1)
             self.input_dict['depth_hist'] = torch.cat([self.input_dict['depth_hist'][:, 1:], obs[:, 121 : 121 + IMAGE_HEIGHT * IMAGE_WIDTH].unsqueeze(1).reshape(-1, 1, IMAGE_HEIGHT, IMAGE_WIDTH, 1)], dim=1)
             self.input_dict['goal_pos'] = obs[:, 80:83]
-            self.input_dict['grasp_cond'] = obs[:, 83:112]\
+            self.input_dict['grasp_cond'] = obs[:, 83:112]
 
         action_future, q_future, obj_pose_future = self.model(self.input_dict, run_inference=False)
         print(action_future.shape, 'action future shape')
