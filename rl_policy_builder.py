@@ -244,7 +244,7 @@ class DiffusionPlayer(BasePlayer):
             self.input_dict['goal_pos'] = obs[:, 80:83]
             self.input_dict['grasp_cond'] = obs[:, 83:112]\
 
-        action_future, q_future, obj_pose_future = self.model(self.input_dict, run_inference=False)
+        action_future, q_future, obj_pose_future = self.model(self.input_dict, run_inference=True)
         print(action_future.shape, 'action future shape')
         print(q_future.shape, 'q future shape')
         print(obj_pose_future.shape, 'obj future shape')
