@@ -15,7 +15,7 @@ val_instructions=instructions/calvin/val_keypose_instructions.json
 dataset=DexterousAct
 memory_limit=6
 lv2_batch_size=4 # equally divides the batch size B=64
-B=16 # actual batch size is B * lv2_batch_size * K
+B=2 # actual batch size is B * lv2_batch_size * K
 B_val=8
 chunk_size=1
 
@@ -48,7 +48,7 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-num_shared_attn_layers=30
+num_shared_attn_layers=4
 embedding_dim=256
 accurate_joint_pos=true
 test_mujoco=true
@@ -58,7 +58,7 @@ val_set_all_anchor=true
 
 nhist=4
 nfuture=4
-K=4 # number of timesteps sampled per episode during training
+K=1 # number of timesteps sampled per episode during training
 
 # # debugging choice
 # val_freq=10
@@ -73,7 +73,7 @@ ngpus=1
 num_workers=4
 
 
-run_log_dir=run_Aug24-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K
+run_log_dir=run_Aug24-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K-numlayers${num_shared_attn_layers}-embedding_dim$embedding_dim
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 # run_log_dir=run_alltypes_Jul20-B32-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers30-visfreq100-typecondtrue

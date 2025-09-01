@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from diffusion_backbone.utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
 from pytorch3d.ops import sample_farthest_points
-
+import time
 
 class DexterousActor(nn.Module):
     def __init__(self,
@@ -252,9 +252,10 @@ class DexterousActor(nn.Module):
         for t_ind, t in enumerate(timesteps):
             t_batch = t * torch.ones(len(denoise_content), device=device, dtype=torch.long)
             if self.guidance_weight is not None:  # e.g., 1.5
-                pred_uncond = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=False)[-1]
-                pred_cond   = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=True)[-1]
-                pred = pred_uncond + self.guidance_weight * (pred_cond - pred_uncond)
+                # pred_uncond = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=False)[-1]
+                # pred_cond   = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=True)[-1]
+                # pred = pred_uncond + self.guidance_weight * (pred_cond - pred_uncond)
+                pred = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=True)[-1]
             else:
                 pred = self.policy_forward_pass(denoise_content, t_batch, fixed_inputs, train=False, condition=True)[-1]
             denoise_content = self.position_scheduler.step(pred, t_ind, denoise_content).prev_sample
@@ -270,8 +271,8 @@ class DexterousActor(nn.Module):
         depth_hist = batch['depth_hist']            # (B, nhist, H, W, 1)
         goal_pos = batch['goal_pos']                # (B, 3)
         grasp_cond = batch['grasp_cond']            # (B, 29)
-        object_scale = batch['object_scale']  # (B, 1)
-        object_asset = batch['object_asset']  # text path
+        # object_scale = batch['object_scale']  # (B, 1)
+        # object_asset = batch['object_asset']  # text path
         obj_init_pcl_cam = batch['obj_init_pcl_cam']  # (B, 1024, 3)
         
         q_hist = self.normalize_actions(q_hist)
@@ -563,14 +564,27 @@ class DexterousActor(nn.Module):
             - loss: scalar, if run_inference is False
             - action: (B, nfuture, 31), at inference
         """
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # drain previous kernels
+        t0 = time.perf_counter()
+
         if run_inference:
-            return self.compute_grasp(
+            out = self.compute_grasp(
                 batch
             )
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()  # wait for this call to finish
+            dt = (time.perf_counter() - t0) * 1000.0  # ms
+            print(f"[step] model() took {dt:.2f} ms")
+
+            return out
 
         return self.compute_loss(
             batch
         )
+
 
 
 class TransformerHead(nn.Module):
@@ -616,6 +630,7 @@ class TransformerHead(nn.Module):
         self.num_token_types = max(self.token_type_ids.values()) + 1
         self.type_emb = nn.Embedding(self.num_token_types, embedding_dim)
 
+
         # Estimate attends to context (no subsampling)
         self.cross_attn = AttentionModule(
             num_layers=2,
@@ -644,6 +659,7 @@ class TransformerHead(nn.Module):
             )
             for _ in range(num_shared_attn_layers)
         ])
+
 
         self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
         
@@ -703,7 +719,7 @@ class TransformerHead(nn.Module):
                     if torch.rand(1).item() < self.class_dropout_prob:
                         s, e = token_groups["self_attn"]["k_slices"]["grasp"]
                         k_self[:, s:e, :] = self.null_grasp
-            
+        
 
         x = self.cross_attn(
             seq1=q,
@@ -726,6 +742,8 @@ class TransformerHead(nn.Module):
         act_future_pred     = self.to_actions(x[:, :self.nfuture, :])   
         q_future_pred = self.to_q(x[:, self.nfuture:2*self.nfuture, :])
         obj_pose_future_pred= self.to_obj_pose(x[:, 2*self.nfuture:, :])
+
+        
 
         return [
             torch.cat([act_future_pred, q_future_pred, obj_pose_future_pred], dim=-1)

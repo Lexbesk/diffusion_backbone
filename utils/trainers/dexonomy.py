@@ -460,12 +460,12 @@ class DexonomyTrainTester:
             if self.args.test_mujoco:
                 obj_path = sample["obj_path"][0]
                 obj_scale = sample["obj_scale"][0].cpu().numpy()
-                print(f"Testing object: {obj_path}, scale: {obj_scale}")
+                print(f"Testing object: {obj_path}, scale: {obj_scale}", "1011 3307")
                 
                 # if any(tag in obj_path.lower() for tag in ("basket", "beerbottle", "book", "bowl", "camera", "donut", "sodacan")):
                 #     print(f"Skipping {obj_path} as it is not a valid object for Mujoco testing.")
                 #     continue
-                if i <= 1011:
+                if i <= 1011 + 3307:
                     continue
             
             if self.args.sample_times > 1 and split == 'val':
