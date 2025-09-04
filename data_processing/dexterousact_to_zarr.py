@@ -141,7 +141,7 @@ def main():
             obj     = d['object_poses'].astype(np.float32)        # (T,7) world
             depth   = d['depth_image'].astype(np.float32)         # (T,H,W) kept as-is (possibly negative)
             seg     = d['seg_image'].astype(np.uint8)             # (H,W)
-            ext     = d['camera_extrinsic'].astype(np.float32)    # (4,4) world→camera
+            ext     = d['camera_pose_cv'].astype(np.float32)    # (4,4) world→camera
             intri   = d['camera_intrinsic'].astype(np.float32)    # (3,3)
             goal    = d['goal'].astype(np.float32)                # (3,) WORLD
             kps     = d['keypoints'].astype(np.float32)           # (T,6,3) WORLD

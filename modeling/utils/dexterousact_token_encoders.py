@@ -9,15 +9,15 @@ class ResidualFF(nn.Module):
         self.ln = nn.LayerNorm(d_model)
         self.fc1 = nn.Linear(d_model, d_hidden)
         self.fc2 = nn.Linear(d_hidden, d_model)
-        self.dropout = nn.Dropout(dropout)
+        # self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         h = self.ln(x)
         h = self.fc1(h)
         h = F.gelu(h)
-        h = self.dropout(h)
+        # h = self.dropout(h)
         h = self.fc2(h)
-        h = self.dropout(h)
+        # h = self.dropout(h)
         return x + h  # residual
 
 class TokenPredictor(nn.Module):
@@ -25,7 +25,7 @@ class TokenPredictor(nn.Module):
     Robust per-token predictor:
       x: (B, N, D) -> y: (B, N, out_dim)
     """
-    def __init__(self, d_model, out_dim, d_hidden=None, num_blocks=2, dropout=0.1):
+    def __init__(self, d_model, out_dim, d_hidden=None, num_blocks=1, dropout=0.1):
         super().__init__()
         d_hidden = d_hidden or (4 * d_model)
         self.blocks = nn.ModuleList([
@@ -67,7 +67,7 @@ class ActionTokenEncoder(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(in_dim, d),
             nn.GELU(),
-            nn.Dropout(dropout),
+            # nn.Dropout(dropout),
             nn.Linear(d, d),
         )
 
@@ -112,7 +112,7 @@ class ObjectPoseTokenEncoder(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(in_dim, d),
             nn.GELU(),
-            nn.Dropout(dropout),
+            # nn.Dropout(dropout),
             nn.Linear(d, d),
         )
 
@@ -145,7 +145,7 @@ class MLP(nn.Module):
         hs = [in_dim] + [hidden]*(layers-1) + [out_dim]
         mods = []
         for i in range(len(hs)-2):
-            mods += [nn.Linear(hs[i], hs[i+1]), nn.GELU(), nn.Dropout(dropout)]
+            mods += [nn.Linear(hs[i], hs[i+1]), nn.GELU()]
         mods += [nn.Linear(hs[-2], hs[-1])]
         self.net = nn.Sequential(*mods)
     def forward(self, x): return self.net(x)
@@ -208,3 +208,4 @@ def build_slices(named_list):
         slices[name] = (start, start + n)
         start += n
     return slices
+

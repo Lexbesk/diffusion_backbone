@@ -269,8 +269,11 @@ def transform_points(T: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
     Apply T (4x4, maps 'from'->'to') to points P[..., N, 3] in the 'from' frame.
     Row-vector convention: (x @ R^T + t).
     """
-    R = T[..., :3, :3]
-    t = T[..., :3, 3].unsqueeze(-2)
+    R = T[..., :3, :3] # [B, 3, 3]
+    t = T[..., :3, 3].unsqueeze(-2) # [B, 1, 3]
+    # P = P.unsqueeze(-1) if P.dim() == 2 else P  # [..., N, 3]
+    # print(P.shape, 'P shape in transform points')
+    # print(R.shape, 'R shape in transform points')
     return (P @ R.transpose(-2, -1)) + t
 
 # =========================

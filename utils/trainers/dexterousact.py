@@ -73,7 +73,7 @@ class DexterousActTrainTester:
         train_sampler = DistributedSampler(train_dataset, drop_last=True)
 
         collate_train = make_collate_train(self.args.nhist, self.args.nfuture, self.args.K, include_depth=True)
-        # collate_eval = make_collate_eval(self.args.nhist, include_depth=True)
+        collate_eval = make_collate_train(self.args.nhist, self.args.nfuture, self.args.K, include_depth=True, test_mode=True)
         
         train_loader = DataLoader(
             train_dataset,
@@ -96,7 +96,7 @@ class DexterousActTrainTester:
                 batch_size=self.args.batch_size_val // self.args.chunk_size,
                 shuffle=True,
                 num_workers=self.args.num_workers,
-                collate_fn=collate_train,  # same as training, because we just want to eval loss, and the roll-out testing is done in IsaacGym
+                collate_fn=collate_eval,  # same as training, because we just want to eval loss, and the roll-out testing is done in IsaacGym
                 pin_memory=True,
                 sampler=None,
                 drop_last=False,
@@ -341,10 +341,10 @@ class DexterousActTrainTester:
         out['grasp_cond'] = sample['grasp_cond'].cuda(non_blocking=True).float()
         out['intrinsics'] = sample['intrinsics'].cuda(non_blocking=True).float()
         out['extrinsics'] = sample['extrinsics'].cuda(non_blocking=True).float()
-        if 'obj_pose_future' in sample:
-            out['obj_pose_future'] = sample['obj_pose_future'].cuda(non_blocking=True).float()
-            out['act_future'] = sample['act_future'].cuda(non_blocking=True).float()
-            out['q_future'] = sample['q_future'].cuda(non_blocking=True).float()
+        # if 'obj_pose_future' in sample:
+        out['obj_pose_future'] = sample['obj_pose_future'].cuda(non_blocking=True).float()
+        out['act_future'] = sample['act_future'].cuda(non_blocking=True).float()
+        out['q_future'] = sample['q_future'].cuda(non_blocking=True).float()
         out['depth_hist'] = sample['depth_hist'].cuda(non_blocking=True).float()
         out['init_seg'] = sample['init_seg'].cuda(non_blocking=True).float()
         out['object_scale'] = sample['object_scale'].cuda(non_blocking=True).float()

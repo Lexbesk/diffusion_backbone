@@ -18,6 +18,7 @@ from ..utils.dexterousact_token_encoders import ActionTokenEncoder, ObjectPoseTo
 from ..utils.fk_layer import FKLayer
 import time
 from collections import defaultdict
+import numpy as np
 
 from diffusion_backbone.utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
 from pytorch3d.ops import sample_farthest_points
@@ -64,13 +65,17 @@ class DexterousActor(nn.Module):
         self.guidance_weight = guidance_weight
         
         self.urdf_path = urdf_path
-        joint_names, jmin, jmax = get_urdf_limits(urdf_path)
+        # joint_names, jmin, jmax = get_urdf_limits(urdf_path)
+        joint_names = ['panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7', 'WRJ2', 'WRJ1', 'FFJ4', 'FFJ3', 'FFJ2', 'FFJ1', 'LFJ5', 'LFJ4', 'LFJ3', 'LFJ2', 'LFJ1', 'MFJ4', 'MFJ3', 'MFJ2', 'MFJ1', 'RFJ4', 'RFJ3', 'RFJ2', 'RFJ1', 'THJ5', 'THJ4', 'THJ3', 'THJ2', 'THJ1']
+        jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973, -0.5235988, -0.7853982, -0.43633232, 0.0, 0.0, 0.0, 0.0, -0.43633232, 0.0, 0.0, 0.0, -0.43633232, 0.0, 0.0, 0.0, -0.43633232, 0.0, 0.0, 0.0, -1.047, 0.0, -0.2618, -0.5237, 0.0])
+        jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973, 0.17453292, 0.61086524, 0.43633232, 1.5707964, 1.5707964, 1.5707964, 0.6981317, 0.43633232, 1.5707964, 1.5707964, 1.5707964, 0.43633232, 1.5707964, 1.5707964, 1.5707964, 0.43633232, 1.5707964, 1.5707964, 1.5707964, 1.047, 1.309, 0.2618, 0.5237, 1.571])
         self.jmin = torch.from_numpy(jmin).to('cuda').to(dtype)  # (22,)
         self.jmax = torch.from_numpy(jmax).to('cuda').to(dtype)  # (22,)
         self.joint_names = joint_names
         print(joint_names, self.jmin, self.jmax, 'jmin, jmax from urdf')
 
         self.act_enc = ActionTokenEncoder(dof=len(self.jmin), d=embedding_dim, include_err=False, include_delta=False)
+        self.q_enc = ActionTokenEncoder(dof=len(self.jmin), d=embedding_dim, include_err=False, include_delta=False)
         self.obj_enc = ObjectPoseTokenEncoder(d=embedding_dim, include_delta=False, center_first=False)
         self.state_enc = HistoryStateTokenEncoder(dof=len(self.jmin), d=embedding_dim)
         self.depth_enc = DepthLightCNN(d=embedding_dim, add_validity_channel=True, robust_norm=True, dropout=0.1)
@@ -141,7 +146,8 @@ class DexterousActor(nn.Module):
         _t0 = self._start_timer()
         
         act_hist, obj_pose_hist, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond = fixed_inputs
-        
+        # print(q_hist.shape, 'q hist shape')
+        # print(q_hist, 'q hist')
         # crop depth to 0 to 10m
         depth_hist = torch.clamp(depth_hist, 0, 10)        
         
@@ -151,7 +157,8 @@ class DexterousActor(nn.Module):
         
         action_hist_tokens = self.act_enc(act_hist, q_hist=None)
         action_future_tokens = self.act_enc(noisy_act_future, q_hist=None)
-        q_future_tokens = self.act_enc(noisy_q_future, q_hist=None)
+        # q_future_tokens = self.act_enc(noisy_q_future, q_hist=None)
+        q_future_tokens = self.q_enc(noisy_q_future, q_hist=None)
         # obj_hist_tokens = self.obj_enc(obj_pose_hist) # obj history pose is encoded in history states
         obj_future_tokens = self.obj_enc(noisy_obj_pose_future)
         state_hist_tokens = self.state_enc(
@@ -199,9 +206,9 @@ class DexterousActor(nn.Module):
         k_ctx_list = [
             ("act_hist", action_hist_tokens),       # (B, nhist_act, D)
             ("state_hist", state_hist_tokens),      # (B, nhist_state, D)
-            ("depth_hist", depth_hist_tokens),      # (B, nhist_depth, D)
-            ("goal", goal_tok),                     # (B, 1, D)
-            ("grasp", grasp_tok),                   # (B, 1, D)
+            # ("depth_hist", depth_hist_tokens),      # (B, nhist_depth, D)
+            # ("goal", goal_tok),                     # (B, 1, D)
+            # ("grasp", grasp_tok),                   # (B, 1, D)
         ]
         k_tokens = torch.cat([t for _, t in k_ctx_list], dim=1).contiguous()   # (B, Nk, D)
         k_xyz = zeros_xyz(k_tokens)                                             # (B, Nk, 3)
@@ -344,11 +351,24 @@ class DexterousActor(nn.Module):
         object_scale = batch['object_scale']  # (B, 1)
         object_asset = batch['object_asset']  # text path
         obj_init_pcl_cam = batch['obj_init_pcl_cam']  # (B, 1024, 3)
+
+        # print(q_hist[:, 0], 'q hist')
+        # print(act_hist[:, 0], 'act hist')
         
         q_hist = self.normalize_actions(q_hist)
         act_hist = self.normalize_actions(act_hist)
+        assert torch.all(q_hist.abs() <= 1.02) and torch.all(act_hist.abs() <= 1.02), "History actions not normalized properly"
+        # print(act_future, 'act future before norm')
         act_future = self.normalize_actions(act_future)
         q_future = self.normalize_actions(q_future)
+        # print(act_future, 'act future')
+        # print(q_future, 'q future')
+        # print(act_future.abs().max(), 'max')
+        # print(act_future.abs().argmax(), 'argmax') 
+        # print(q_future.abs().max(), 'max')
+        # print(q_future.abs().argmax(), 'argmax')
+
+        assert torch.all(act_future.abs() <= 1.02) and torch.all(q_future.abs() <= 1.02), f"Future actions not normalized properly"
         obj_pose_hist = self.normalize_pos(obj_pose_hist)
         obj_pose_hist = self.convert_rot(obj_pose_hist)
         obj_pose_future = self.normalize_pos(obj_pose_future)
@@ -374,6 +394,9 @@ class DexterousActor(nn.Module):
                 num_noise=len(noise), device=noise.device
             )
 
+            # print(timesteps, 'timesteps for loss')
+            # print(noise, 'noise')
+
             noisy_actions = self.position_scheduler.add_noise(
                 denoise_content, noise,
                 timesteps
@@ -384,20 +407,32 @@ class DexterousActor(nn.Module):
                 noisy_actions,
                 timesteps, fixed_inputs, train=True
             )
+            # print(noisy_actions[0, 0], 'denoise content')
 
             # Compute loss
             for layer_pred in pred:
                 denoise_target = self.position_scheduler.prepare_target(
                     noise, denoise_content 
                 ) # default gt_grasp itself (or noise)
-                loss = F.mse_loss(layer_pred, denoise_target)
+                loss = 0
+                # print(denoise_target[0, 0], 'denoise target')
+                # print(layer_pred[0, 0], 'layer pred')
+                # print(layer_pred[:, :1, :len(self.jmin)], 'layer pred ')
+                # print(denoise_content[:, :1, :len(self.jmin)], 'denoise content ')
+                # loss_action = F.mse_loss(layer_pred[:, :, :len(self.jmin)], denoise_target[:, :, :len(self.jmin)])
+                loss_action_arm = F.mse_loss(layer_pred[:, :, :9], denoise_target[:, :, :9])
+                loss_action_finger = F.mse_loss(layer_pred[:, :, 9:len(self.jmin)], denoise_target[:, :, 9:len(self.jmin)])
+                loss_q = F.mse_loss(layer_pred[:, :, len(self.jmin):2*len(self.jmin)], denoise_target[:, :, len(self.jmin):2*len(self.jmin)])
+                loss_obj = F.mse_loss(layer_pred[:, :, 2*len(self.jmin):], denoise_target[:, :, 2*len(self.jmin):])
+                # loss = loss + 100 * loss_action + 100 * loss_q + loss_obj
+                loss = loss + loss_action_arm + loss_action_finger + loss_q
                 
                 total_loss = total_loss + loss
         return total_loss / self._lv2_batch_size
 
     def normalize_actions(self, q):
         normalized = (q - self.jmin) / (self.jmax - self.jmin) * 2.0 - 1.0
-        normalized = torch.clamp(normalized, min=-1.0, max=1.0)
+        # normalized = torch.clamp(normalized, min=-1.0, max=1.0)
         return normalized
     
     def unnormalize_actions(self, q_norm):
@@ -720,9 +755,9 @@ class TransformerHead(nn.Module):
                         s, e = token_groups["self_attn"]["k_slices"]["grasp"]
                         k_self[:, s:e, :] = self.null_grasp
         
-
+        x = q
         x = self.cross_attn(
-            seq1=q,
+            seq1=x,
             seq2=k_cross,
             seq1_pos=rel_grasp_pos,
             seq2_pos=rel_pcd_pos,

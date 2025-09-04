@@ -6,17 +6,17 @@ DATA_PATH="/data/user_data/austinz/Robots/manipulation"
 
 # train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1new/train.zarr
 # eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1/val.zarr
-train_data_dir=$DATA_PATH/zarr_datasets/dexterousact_1000/train.zarr
+train_data_dir=$DATA_PATH/zarr_datasets/dexterousact/train.zarr
 # train_data_dir=/data/group_data/katefgroup/datasets/austinz/zarr_datasets/Dexonomy_zarr_all/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/dexterousact_1000/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/dexterousact/train.zarr
 train_instructions=instructions/calvin/train_keypose_instructions.json
 val_instructions=instructions/calvin/val_keypose_instructions.json
 
 dataset=DexterousAct
 memory_limit=6
 lv2_batch_size=1 # equally divides the batch size B=64
-B=16 # actual batch size is B * lv2_batch_size * K
-B_val=8
+B=1 # actual batch size is B * lv2_batch_size * K
+B_val=1
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
@@ -48,7 +48,7 @@ relative_action=true
 denoise_timesteps=10
 denoise_model=rectified_flow
 
-num_shared_attn_layers=10
+num_shared_attn_layers=4
 embedding_dim=256
 accurate_joint_pos=true
 test_mujoco=true
@@ -56,9 +56,9 @@ condition_on_grasp_type_id=true
 guidance_weight=1.5  # e.g., 1.5 for classifier-free guidance
 val_set_all_anchor=true
 
-nhist=10
+nhist=4
 nfuture=4
-K=1 # number of timesteps sampled per episode during training
+K=16 # number of timesteps sampled per episode during training
 
 # # debugging choice
 # val_freq=10

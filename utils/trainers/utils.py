@@ -77,8 +77,16 @@ def compute_metrics_action_objpose(pred_action, gt_action, q_future, gt_q_future
     # gt_action: (B, nfuture, 31)
     # pred_objpose: (B, nfuture, 7)
     # gt_objpose: (B, nfuture, 7)
-    action_l2 = ((pred_action - gt_action) ** 2).sum(-1).sqrt()
-    q_l2 = ((q_future - gt_q_future) ** 2).sum(-1).sqrt()
+    print(pred_action[0][0], 'pred action')
+    print(gt_action[0][0], 'gt action')
+    print(q_future[0][0], 'pred q future')
+    print(gt_q_future[0][0], 'gt q future')
+    action_arm_l1 = ((pred_action[..., :9] - gt_action[..., :9]).abs()).mean(-1)
+    action_finger_l1 = ((pred_action[..., 9:31] - gt_action[..., 9:31]).abs()).mean(-1)
+    action_l1 = ((pred_action - gt_action).abs()).mean(-1)
+    q_l1 = (q_future - gt_q_future).abs().mean(-1)
+    q_arm_l1 = (q_future[..., :9] - gt_q_future[..., :9]).abs().mean(-1)
+    q_finger_l1 = (q_future[..., 9:31] - gt_q_future[..., 9:31]).abs().mean(-1)
     objpose_pos_l2 = ((pred_objpose[..., :3] - gt_objpose[..., :3]) ** 2).sum(-1).sqrt()
     objpose_rot_l1 = (pred_objpose[..., 3:7] - gt_objpose[..., 3:7]).abs().sum(-1)    
     
@@ -86,17 +94,25 @@ def compute_metrics_action_objpose(pred_action, gt_action, q_future, gt_q_future
 
     # Trajectory metrics
     ret_1, ret_2 = {
-        tr + 'action_l2': action_l2.mean(),
-        tr + 'action_acc_001': (action_l2 < 0.01).float().mean(),
-        tr + 'q_l2': q_l2.mean(),
-        tr + 'q_acc_001': (q_l2 < 0.01).float().mean(),
+        tr + 'action_arm_l1': action_arm_l1.mean(),
+        tr + 'action_arm_acc_001': (action_arm_l1 < 0.01).float().mean(),
+        tr + 'action_finger_l1': action_finger_l1.mean(),
+        tr + 'action_finger_acc_001': (action_finger_l1 < 0.01).float().mean(),
+        tr + 'action_l1': action_l1.mean(),
+        tr + 'action_acc_001': (action_l1 < 0.01).float().mean(),
+        tr + 'q_arm_l1': q_arm_l1.mean(),
+        tr + 'q_arm_acc_001': (q_arm_l1 < 0.01).float().mean(),
+        tr + 'q_finger_l1': q_finger_l1.mean(),
+        tr + 'q_finger_acc_001': (q_finger_l1 < 0.01).float().mean(),
+        tr + 'q_l1': q_l1.mean(),
+        tr + 'q_acc_001': (q_l1 < 0.01).float().mean(),
         tr + 'objpose_pos_l2': objpose_pos_l2.mean(),
         tr + 'objpose_pos_acc_001': (objpose_pos_l2 < 0.01).float().mean(),
         tr + 'objpose_rot_l1': objpose_rot_l1.mean(),
         tr + 'objpose_rot_acc_0025': (objpose_rot_l1 < 0.025).float().mean(),
     }, {
-        tr + 'action_l2': action_l2.mean(-1),
-        tr + 'action_acc_001': (action_l2 < 0.01).float().mean(-1),
+        tr + 'action_l1': action_l1.mean(-1),
+        tr + 'action_acc_001': (action_l1 < 0.01).float().mean(-1),
         
     }
 

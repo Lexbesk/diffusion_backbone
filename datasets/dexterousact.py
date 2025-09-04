@@ -135,7 +135,7 @@ def _unproject_masked(depth0: torch.Tensor, K: torch.Tensor, mask: torch.Tensor,
     return P
 
 
-def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = True, init_pcl_n=1024):
+def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = True, init_pcl_n=1024, test_mode=False):
     """
     Returns a collate_fn for DataLoader. Each episode contributes K random windows.
     """
@@ -147,10 +147,14 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
         for ep in episodes:
             T = ep["q_traj"].shape[0]
             hi = T - nfuture - 1
+            if test_mode:
+                hi = 0
             if hi < 0:
                 times.append([])
                 continue
-            idx = torch.randint(0, hi+1, (K,)).tolist()
+            # idx = torch.randint(0, hi+1, (K,)).tolist()
+            idx = torch.randint(10, 11, (K,)).tolist() # fix to 5
+            # print(idx, 'idx')
             times.append(idx)
             total += len(idx)
         if total == 0:
@@ -205,11 +209,18 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
             T_wb = pose7_wxyz_to_T(pose_wxyz).squeeze(0)  # BASE->WORLD
             T_bw = T_inv(T_wb)                                    # WORLD->BASE
 
+            # print(T_wc, 'T_w to c')
+            # print(T_wb, 'T_w to b')
+            # print(T_bw, 'T_b to w (should be robot pose)')
+
             # grasp_cond conversion: world wrist -> camera wrist (wxyz), keep hand_q
             gc_world = ep["grasp_cond"].float()
             wrist_w  = gc_world[:7].unsqueeze(0)                  # [1,7] world
             wrist_c  = T_to_pose7_wxyz(T_wc @ pose7_wxyz_to_T(pose7_xyzw_to_wxyz(wrist_w))).squeeze(0)  # [7]
             hand_q   = gc_world[7:]                               # [22]
+
+            # print(wrist_c, 'wrist in camera frame')
+            # print(hand_q, 'hand q')
             seg = ep["init_segmentation"]        # (H,W) uint8
             if seg.ndim == 2:
                 seg = seg.unsqueeze(-1)              # (H,W,1)
@@ -218,7 +229,7 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
             depth0 = ep["depth_traj"][0].float()  # first frame of the EPISODE (not slice)
             K_cam  = ep["intrinsics"].float()
             pcl_cam_ep = _unproject_masked(depth0, K_cam, seg, init_pcl_n)
-
+            # print(pcl_cam_ep, 'pcl cam ep')
             scale_val = float(ep["object_scale"]) if "object_scale" in ep else 1.0
             asset_val = str(ep["object_asset"]) if "object_asset" in ep else ""
             
@@ -244,6 +255,16 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
                 if include_depth:
                     first_dep = dep[0:1]
 
+                # if need > 0:
+                #     print(first_q, 'first q')
+                #     print(first_v, 'first v')
+                #     print(first_ee, 'first ee')
+                #     print(first_obj, 'first obj')
+                #     print(first_act, 'first act')
+                #     if include_depth:
+                #         print(first_dep, 'first dep')
+                #     # print(ep["act_traj"][0:4], 'act first two frames')
+
                 if need > 0:
                     q   = torch.cat([first_q.expand(need, *first_q.shape[1:]),   q],   0)
                     v   = torch.cat([first_v.expand(need, *first_v.shape[1:]),   v],   0)
@@ -262,6 +283,9 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
                 P = ee.reshape(nhist, -1, 3)                       # [nhist,6,3]
                 Pb = transform_points(T_bw, P)                     # [nhist,6,3]
                 ee_b = Pb.view(nhist, Dee, 3)
+
+                # if need > 0:
+                #     print(ee_b, 'ee_b')
 
                 # futures
                 flo, fhi = _future_indices(t, nfuture)
@@ -313,6 +337,8 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
             "object_scale":   object_scale,        # (B,)
             "object_asset":   object_asset,        # list[str] length B
         }
+
+
         if include_depth:
             batch["depth_hist"] = depth_hist       # (B,nhist,H,W,1)
         batch["obj_init_pcl_cam"] = obj_init_pcl_cam
@@ -446,6 +472,8 @@ def make_collate_eval(nhist: int, include_depth: bool = True, init_pcl_n=1024):
             "object_scale":   object_scale,        # (B,)
             "object_asset":   object_asset,        # list[str] length B
         }
+
+        
         if include_depth:
             batch["depth_hist"] = (depth_hist)      # (B,nhist,H,W,1)
         batch["obj_init_pcl_cam"] = obj_init_pcl_cam
