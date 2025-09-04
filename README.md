@@ -19,17 +19,33 @@ pip install -e .
 Install dependencies:
 pip install mujoco
 
-pip install diffusers easydict einops huggingface-hub hydra-core imageio kornia ninja numpy omegaconf open3d opencv-python pillow scikit-learn scipy tensorboard timm tokenizers tqdm transform3d transformers transforms3d trimesh zarr
+pip install diffusers easydict einops huggingface-hub hydra-core imageio kornia ninja numpy omegaconf open3d opencv-python pillow scikit-learn scipy tensorboard timm tokenizers tqdm transform3d transformers transforms3d trimesh zarr ipdb moviepy
+
+pip install git+https://github.com/openai/CLIP.git
+pip install open_clip_torch
+
+pip install "git+git://github.com/erikwijmans/Pointnet2_PyTorch.git#egg=pointnet2_ops&subdirectory=pointnet2_ops_lib"
 
 Finally, run in main directory:
 pip install -e .
 
-To run training:
+To run training for grasp diffuser (grasp pose generator):
 conda activate graspdiff
 module load cuda-12.4
 export MUJOCO_GL=egl
 export XDG_RUNTIME_DIR="tmp"
 bash scripts/dexonomy/train_general.sh
+
+To gather grasp poses for RL to train on:
+conda activate graspdiff
+module load cuda-12.4
+export MUJOCO_GL=egl
+bash scripts/dexonomy/test_mujoco.sh
+
+To run DexterousActor (our policy still under development):
+conda activate graspdiff
+module load cuda-12.4
+bash scripts/dexterousact/train_general.sh
 
 ```
 
