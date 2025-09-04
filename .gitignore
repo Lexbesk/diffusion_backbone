@@ -44,3 +44,4 @@ test*
 bdp
 debug.sh
 sbatch_script2.slurm
+sampled_data/
