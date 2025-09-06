@@ -11,7 +11,7 @@ class DDPMScheduler(BaseScheduler):
             self.config.num_train_timesteps,
             (num_noise,), device=device
         ).long()
-        print(self.config.num_train_timesteps, 'train steps')
+        # print(self.config.num_train_timesteps, 'train steps')
 
         return timesteps
 

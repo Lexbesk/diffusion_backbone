@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from ..noise_scheduler import fetch_schedulers
-from ..utils.layers import AttentionModule
+from ..utils.layers import AttentionModule, build_xattn_mask_modality_temporal, TorchCrossAttnBlock, plot_attn_mask
 from ..utils.position_encodings import SinusoidalPosEmb
 from ..utils.utils import (
     compute_rotation_matrix_from_ortho6d,
@@ -14,7 +14,7 @@ from ..utils.utils import (
 )
 from ..utils.position_encodings import RotaryPositionEncoding3D
 from ..utils.depth_encoder import DepthLightCNN, GoalGraspToken
-from ..utils.dexterousact_token_encoders import ActionTokenEncoder, ObjectPoseTokenEncoder, HistoryStateTokenEncoder, TokenPredictor, zeros_xyz, build_slices
+from ..utils.dexterousact_token_encoders import ActionTokenEncoder, ObjectPoseTokenEncoder, HistoryStateTokenEncoder, TokenPredictor, zeros_xyz, build_slices, TokenPredictorPlus, TimeProj
 from ..utils.fk_layer import FKLayer
 import time
 from collections import defaultdict
@@ -61,6 +61,7 @@ class DexterousActor(nn.Module):
         self.visualization_data = {} # "partial_points": [B, N, 3], "grasps": [B, M, 29]}
         self.accurate_joint_pos = accurate_joint_pos
         self.nfuture = nfuture
+        self.nhist = nhist
         
         self.guidance_weight = guidance_weight
         
@@ -86,6 +87,8 @@ class DexterousActor(nn.Module):
         self.out_links = ["lftip", "rftip", "mftip", "fftip", "thtip", "wrist"]
         probe_points_local = {
         }
+
+        self.debug_target_param = torch.nn.Parameter(torch.zeros(1, 4, 31+31+9))  # dummy param for .to(device) call
 
         self.fk = FKLayer(
             urdf_path=urdf_path,
@@ -147,10 +150,10 @@ class DexterousActor(nn.Module):
         
         act_hist, obj_pose_hist, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond = fixed_inputs
         # print(q_hist.shape, 'q hist shape')
-        # print(q_hist, 'q hist')
+        # print(ee_fingers, 'ee fingers')
+        # print(v_hist, 'v hist')
         # crop depth to 0 to 10m
-        depth_hist = torch.clamp(depth_hist, 0, 10)        
-        
+        depth_hist = torch.clamp(depth_hist, 0, 10)
         noisy_act_future = noisy_actions[:, :, :len(self.jmin)]          # (B, nfuture, 31)
         noisy_q_future = noisy_actions[:, :, len(self.jmin):2*len(self.jmin)]  # (B, nfuture, 31)
         noisy_obj_pose_future = noisy_actions[:, :, 2*len(self.jmin):]          # (B, nfuture, 7)
@@ -167,6 +170,26 @@ class DexterousActor(nn.Module):
             ee_fingers=ee_fingers,            # (B, nhist, 6, 3) in robot frame
         )
         depth_hist_tokens = self.depth_enc(depth_hist)
+
+        # crucial: add timestep embeddings
+        device = noisy_actions.device
+        B = action_hist_tokens.shape[0]
+        t_hist_ids   = torch.arange(-self.nhist, 0,  device=device, dtype=torch.float32)
+        t_future_ids = torch.arange(1, self.nfuture+1, device=device, dtype=torch.float32)
+        time_proj = TimeProj(d_model=action_hist_tokens.size(-1)).to(device)
+        temb_hist   = time_proj(t_hist_ids)[None, :, :].expand(B, self.nhist, -1)
+        temb_future = time_proj(t_future_ids)[None, :, :].expand(B, self.nfuture, -1)
+
+        # add to *every* modality at the same time index so they align
+        action_hist_tokens   = action_hist_tokens   + temb_hist
+        state_hist_tokens    = state_hist_tokens    + temb_hist
+        depth_hist_tokens    = depth_hist_tokens    + temb_hist
+
+        action_future_tokens = action_future_tokens + temb_future
+        q_future_tokens      = q_future_tokens      + temb_future
+        obj_future_tokens    = obj_future_tokens    + temb_future
+
+        # print(action_future_tokens, 'actions future tokens')
         
         # condition signals
         goal_tok = self.goal_proj(goal_pos)
@@ -179,68 +202,51 @@ class DexterousActor(nn.Module):
         B = action_hist_tokens.shape[0]
         device = action_hist_tokens.device
         D = action_hist_tokens.shape[-1]
-        
-        to_check = {
-            "action_future": action_future_tokens,
-            "q_future": q_future_tokens,
-            "obj_future": obj_future_tokens,
-            "action_hist": action_hist_tokens,
-            "state_hist": state_hist_tokens,
-            "depth_hist": depth_hist_tokens,
-            "goal_tok": goal_tok,
-            "grasp_tok": grasp_tok,
-        }
-        for name, t in to_check.items():
-            assert t is not None and t.shape[-1] == D, f"{name} has dim {t.shape[-1]} != {D}"
-        
         q_list = [
-            ("act_future", action_future_tokens),   # (B, nfuture_act, D)
-            ("q_future", q_future_tokens),         # (B, nfuture_q, D)
-            ("obj_future", obj_future_tokens),      # (B, nfuture_obj, D)
+            ("act_future", action_future_tokens),
+            ("q_future", q_future_tokens),
+            ("obj_future", obj_future_tokens),
         ]
-        q_tokens = torch.cat([t for _, t in q_list], dim=1).contiguous()       # (B, Nq, D)
-        q_xyz = zeros_xyz(q_tokens)                                              # (B, Nq, 3)
-        q_slices = build_slices(q_list)
+        q_tokens = torch.cat([t for _, t in q_list], dim=1)
 
-        # Context keys for CROSS-ATTN = observations + conditions (no future tokens)
         k_ctx_list = [
-            ("act_hist", action_hist_tokens),       # (B, nhist_act, D)
-            ("state_hist", state_hist_tokens),      # (B, nhist_state, D)
-            # ("depth_hist", depth_hist_tokens),      # (B, nhist_depth, D)
-            # ("goal", goal_tok),                     # (B, 1, D)
-            # ("grasp", grasp_tok),                   # (B, 1, D)
+            ("act_hist", action_hist_tokens),       
+            ("state_hist", state_hist_tokens),     
+            ("depth_hist", depth_hist_tokens), 
+            ("goal", goal_tok),                  
+            ("grasp", grasp_tok),                
         ]
-        k_tokens = torch.cat([t for _, t in k_ctx_list], dim=1).contiguous()   # (B, Nk, D)
-        k_xyz = zeros_xyz(k_tokens)                                             # (B, Nk, 3)
-        k_slices = build_slices(k_ctx_list)
-
-        # Keys for SELF-ATTN = context + the denoising tokens themselves
+        k_tokens = torch.cat([t for _, t in k_ctx_list], dim=1)
         k_self_list = k_ctx_list + q_list
-        k_self_tokens = torch.cat([t for _, t in k_self_list], dim=1).contiguous()  # (B, Nk+Nq, D)
-        k_self_xyz = zeros_xyz(k_self_tokens)                                        # (B, Nk+Nq, 3)
-        k_self_slices = build_slices(k_self_list)
-        
-        token_groups = {
-            "cross_attn": {
-                "q": q_tokens,         # (B, Nq, D)   future-only
-                "k": k_tokens,         # (B, Nk, D)   obs + conditions
-                "q_xyz": q_xyz,        # (B, Nq, 3)   zeros
-                "k_xyz": k_xyz,        # (B, Nk, 3)   zeros
-                "q_slices": q_slices,  # dict of name -> (start, end)
-                "k_slices": k_slices,
-            },
-            "self_attn": {
-                "q": q_tokens,            # (B, Nq, D)   same queries
-                "k": k_self_tokens,       # (B, Nk+Nq, D) context + queries
-                "q_xyz": q_xyz.clone(),   # (B, Nq, 3)
-                "k_xyz": k_self_xyz,      # (B, Nk+Nq, 3)
-                "q_slices": q_slices,
-                "k_slices": k_self_slices,
-            },
-        }
-    
+        k_self_tokens = torch.cat([t for _, t in k_self_list], dim=1)
+
+        nh_act   = action_hist_tokens.size(1)
+        nh_state = state_hist_tokens.size(1)
+        nh_depth = depth_hist_tokens.size(1)
+        n_goal   = goal_tok.size(1)
+        n_grasp  = grasp_tok.size(1)
+        nf_act   = action_future_tokens.size(1)
+        nf_state = q_future_tokens.size(1)
+        nf_obj   = obj_future_tokens.size(1)
+
+        attn_mask, q_off, kv_off = build_xattn_mask_modality_temporal(
+            nh_act, nh_state, nh_depth, n_goal, n_grasp,
+            nf_act, nf_state, nf_obj,
+            device=device,
+            allow_state_to_see_objects=False,
+            constrain_obj=True
+        )
+
+        # plot_attn_mask(attn_mask, q_off, kv_off,
+        #        q_labels=("Af_q","Sf_q","Of_q"),
+        #        kv_labels=("Ah","Sh","Dh","G","GR","Af","Sf","Of"),
+        #        savepath='attn_mask.png')
+
         out = self.prediction_head(
-            token_groups,
+            q_tokens, # query
+            k_tokens, # k and v for cross-attn
+            k_self_tokens, # k and v for self-attn
+            attn_mask,
             timestep,
             train=train,
             condition=condition
@@ -361,7 +367,7 @@ class DexterousActor(nn.Module):
         # print(act_future, 'act future before norm')
         act_future = self.normalize_actions(act_future)
         q_future = self.normalize_actions(q_future)
-        # print(act_future, 'act future')
+        # print(act_future[:, 0], 'act future')
         # print(q_future, 'q future')
         # print(act_future.abs().max(), 'max')
         # print(act_future.abs().argmax(), 'argmax') 
@@ -379,6 +385,7 @@ class DexterousActor(nn.Module):
         grasp_cond = self.normalize_finger_angles(grasp_cond)
         obj_init_pcl_cam = self.normalize_pos(obj_init_pcl_cam)
         denoise_content = torch.cat([act_future, q_future, obj_pose_future], dim=-1)  # (B, nfuture, 31+31+7)
+        # print(denoise_content.shape, 'denoise content shape')
         
         fixed_inputs = act_hist, obj_pose_hist, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond
         
@@ -392,7 +399,7 @@ class DexterousActor(nn.Module):
             # breakpoint()
             timesteps = self.position_scheduler.sample_noise_step(
                 num_noise=len(noise), device=noise.device
-            )
+            ) 
 
             # print(timesteps, 'timesteps for loss')
             # print(noise, 'noise')
@@ -415,8 +422,10 @@ class DexterousActor(nn.Module):
                     noise, denoise_content 
                 ) # default gt_grasp itself (or noise)
                 loss = 0
-                # print(denoise_target[0, 0], 'denoise target')
-                # print(layer_pred[0, 0], 'layer pred')
+
+                # layer_pred = self.debug_target_param
+                # print(denoise_target[0, :2], 'denoise target')
+                # print(layer_pred[0, :2], 'layer pred')
                 # print(layer_pred[:, :1, :len(self.jmin)], 'layer pred ')
                 # print(denoise_content[:, :1, :len(self.jmin)], 'denoise content ')
                 # loss_action = F.mse_loss(layer_pred[:, :, :len(self.jmin)], denoise_target[:, :, :len(self.jmin)])
@@ -425,18 +434,22 @@ class DexterousActor(nn.Module):
                 loss_q = F.mse_loss(layer_pred[:, :, len(self.jmin):2*len(self.jmin)], denoise_target[:, :, len(self.jmin):2*len(self.jmin)])
                 loss_obj = F.mse_loss(layer_pred[:, :, 2*len(self.jmin):], denoise_target[:, :, 2*len(self.jmin):])
                 # loss = loss + 100 * loss_action + 100 * loss_q + loss_obj
-                loss = loss + loss_action_arm + loss_action_finger + loss_q
+                loss = loss + loss_action_finger + loss_q
+                loss = loss + loss_action_arm
+                loss = loss + loss_obj
                 
                 total_loss = total_loss + loss
         return total_loss / self._lv2_batch_size
 
     def normalize_actions(self, q):
-        normalized = (q - self.jmin) / (self.jmax - self.jmin) * 2.0 - 1.0
+        # normalized = (q - self.jmin) / (self.jmax - self.jmin) * 2.0 - 1.0
+        normalized = (q - self.jmin) / (self.jmax - self.jmin) * 1.0 - 0.5
         # normalized = torch.clamp(normalized, min=-1.0, max=1.0)
         return normalized
     
     def unnormalize_actions(self, q_norm):
-        unnormalized = (q_norm + 1.0) / 2.0 * (self.jmax - self.jmin) + self.jmin
+        # unnormalized = (q_norm + 1.0) / 2.0 * (self.jmax - self.jmin) + self.jmin
+        unnormalized = (q_norm + 0.5) / 1.0 * (self.jmax - self.jmin) + self.jmin
         return unnormalized
 
     def normalize_pos(self, signal):
@@ -631,7 +644,7 @@ class TransformerHead(nn.Module):
                  num_shared_attn_layers_head=20,
                  nhist=4,
                  nfuture=4,
-                 rotary_pe=True,
+                 rotary_pe=False,
                  rot_dim=6,
                  angle_dim=22,
                  type_embed_mode="conditions_only"  # {"conditions_only", "all", "none"}
@@ -666,112 +679,139 @@ class TransformerHead(nn.Module):
         self.type_emb = nn.Embedding(self.num_token_types, embedding_dim)
 
 
-        # Estimate attends to context (no subsampling)
-        self.cross_attn = AttentionModule(
-            num_layers=2,
-            d_model=embedding_dim,
-            dim_fw=embedding_dim_fw,
-            dropout=0.1,
-            n_heads=num_attn_heads,
-            pre_norm=False,
-            rotary_pe=rotary_pe,
-            use_adaln=True,
-            is_self=False
-        )
+        # # Estimate attends to context (no subsampling)
+        # self.cross_attn = AttentionModule(
+        #     num_layers=2,
+        #     d_model=embedding_dim,
+        #     dim_fw=embedding_dim_fw,
+        #     dropout=0.1,
+        #     n_heads=num_attn_heads,
+        #     pre_norm=False,
+        #     rotary_pe=rotary_pe,
+        #     use_adaln=True,
+        #     is_self=False
+        # )
 
-        # Shared attention layers
-        self.self_attn = nn.ModuleList([
-            AttentionModule(
-                num_layers=1,
-                d_model=embedding_dim,
-                dim_fw=embedding_dim_fw,
-                dropout=0.1,
-                n_heads=num_attn_heads,
-                pre_norm=False,
-                rotary_pe=rotary_pe,
-                use_adaln=True,
-                is_self=False
-            )
+        # # Shared attention layers
+        # self.self_attn = nn.ModuleList([
+        #     AttentionModule(
+        #         num_layers=1,
+        #         d_model=embedding_dim,
+        #         dim_fw=embedding_dim_fw,
+        #         dropout=0.1,
+        #         n_heads=num_attn_heads,
+        #         pre_norm=False,
+        #         rotary_pe=rotary_pe,
+        #         use_adaln=True,
+        #         is_self=False
+        #     )
+        #     for _ in range(num_shared_attn_layers)
+        # ])
+
+        # self.cross_blocks = nn.ModuleList([
+        #     TorchCrossAttnBlock(d_model=embedding_dim, n_heads=num_attn_heads, dropout=0.1)
+        #     for _ in range(num_shared_attn_layers)
+        # ])
+
+        d_cond  = self.encode_denoising_timestep(torch.ones(1)).shape[-1]
+
+        self.cross_blocks = nn.ModuleList([
+            TorchCrossAttnBlock(d_model=embedding_dim, n_heads=num_attn_heads, dropout=0.1, d_cond=d_cond)
             for _ in range(num_shared_attn_layers)
         ])
 
 
-        self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
+        # self.relative_pe_layer = RotaryPositionEncoding3D(embedding_dim)
         
-        self.to_actions   = TokenPredictor(embedding_dim, out_dim=31, num_blocks=2, dropout=0.1)
-        self.to_q         = TokenPredictor(embedding_dim, out_dim=31, num_blocks=2, dropout=0.1)
-        self.to_obj_pose  = TokenPredictor(embedding_dim, out_dim=9,  num_blocks=2, dropout=0.1)
+        # self.to_actions   = TokenPredictor(embedding_dim, out_dim=31, num_blocks=2, dropout=0.1)
+        # self.to_q         = TokenPredictor(embedding_dim, out_dim=31, num_blocks=2, dropout=0.1)
+        # self.to_obj_pose  = TokenPredictor(embedding_dim, out_dim=9,  num_blocks=2, dropout=0.1)
+
+        self.to_actions = TokenPredictorPlus(d_model=embedding_dim, out_dim=31, num_blocks=6, expansion=6.0, drop_path=0.1)
+        self.to_q = TokenPredictorPlus(d_model=embedding_dim, out_dim=31, num_blocks=6, expansion=6.0, drop_path=0.1)
+        self.to_obj_pose = TokenPredictorPlus(d_model=embedding_dim, out_dim=9, num_blocks=6, expansion=6.0, drop_path=0.1)
 
 
-    def forward(self, token_groups, timesteps, train=True, condition=True):
 
-        time_embs = self.encode_denoising_timestep(timesteps)
-        rel_grasp_pos, rel_pcd_pos, rel_pos = self.get_positional_embeddings(token_groups["cross_attn"]["q_xyz"], token_groups["cross_attn"]["k_xyz"])
+    def forward(self, q_tokens, k_tokens, k_self_tokens, attn_mask, timesteps, train=True, condition=True):
+        time_embs = self.encode_denoising_timestep(timesteps)        
+
+        x = q_tokens
+
+        for cross_layer in self.cross_blocks:
+            # x = cross_layer(x, k_self_tokens, attn_mask=attn_mask, key_padding_mask=None)
+            x = cross_layer(x, k_self_tokens, attn_mask=attn_mask, key_padding_mask=None, cond=time_embs)
+        # q_out = self.cross_block(q_tokens, k_tokens, attn_mask=attn_mask, key_padding_mask=None)  # (B,S_Q,D)
+
         
-        q = token_groups["cross_attn"]["q"].clone()
-        k_cross = token_groups["cross_attn"]["k"].clone()
-        k_self = token_groups["self_attn"]["k"].clone()
+        # self._add_type_embeddings_(q, token_groups["cross_attn"]["q_slices"],
+        #                            list(token_groups["cross_attn"]["q_slices"].keys()))
+        # # Cross-attn keys: obs + conditions
+        # self._add_type_embeddings_(k_cross, token_groups["cross_attn"]["k_slices"],
+        #                            list(token_groups["cross_attn"]["k_slices"].keys()))
+        # # Self-attn keys: obs + conditions + future
+        # self._add_type_embeddings_(k_self, token_groups["self_attn"]["k_slices"],
+        #                            list(token_groups["self_attn"]["k_slices"].keys()))
         
-        self._add_type_embeddings_(q, token_groups["cross_attn"]["q_slices"],
-                                   list(token_groups["cross_attn"]["q_slices"].keys()))
-        # Cross-attn keys: obs + conditions
-        self._add_type_embeddings_(k_cross, token_groups["cross_attn"]["k_slices"],
-                                   list(token_groups["cross_attn"]["k_slices"].keys()))
-        # Self-attn keys: obs + conditions + future
-        self._add_type_embeddings_(k_self, token_groups["self_attn"]["k_slices"],
-                                   list(token_groups["self_attn"]["k_slices"].keys()))
+        # if not train:
+        #     if not condition:
+        #         if "goal" in token_groups["cross_attn"]["k_slices"]:
+        #             s, e = token_groups["cross_attn"]["k_slices"]["goal"]
+        #             k_cross[:, s:e, :] = self.null_goal
+        #         if "grasp" in token_groups["cross_attn"]["k_slices"]:
+        #             s, e = token_groups["cross_attn"]["k_slices"]["grasp"]
+        #             k_cross[:, s:e, :] = self.null_grasp
+        #         if "goal" in token_groups["self_attn"]["k_slices"]:
+        #             s, e = token_groups["self_attn"]["k_slices"]["goal"]
+        #             k_self[:, s:e, :] = self.null_goal
+        #         if "grasp" in token_groups["self_attn"]["k_slices"]:
+        #             s, e = token_groups["self_attn"]["k_slices"]["grasp"]
+        #             k_self[:, s:e, :] = self.null_grasp
+        # else:
+        #     # During training, randomly drop conditions for classifier-free guidance
+        #     if self.class_dropout_prob > 0:
+        #         if "goal" in token_groups["cross_attn"]["k_slices"]:
+        #             if torch.rand(1).item() < self.class_dropout_prob:
+        #                 s, e = token_groups["cross_attn"]["k_slices"]["goal"]
+        #                 k_cross[:, s:e, :] = self.null_goal
+        #         if "grasp" in token_groups["cross_attn"]["k_slices"]:
+        #             if torch.rand(1).item() < self.class_dropout_prob:
+        #                 s, e = token_groups["cross_attn"]["k_slices"]["grasp"]
+        #                 k_cross[:, s:e, :] = self.null_grasp
+        #         if "goal" in token_groups["self_attn"]["k_slices"]:
+        #             if torch.rand(1).item() < self.class_dropout_prob:
+        #                 s, e = token_groups["self_attn"]["k_slices"]["goal"]
+        #                 k_self[:, s:e, :] = self.null_goal
+        #         if "grasp" in token_groups["self_attn"]["k_slices"]:
+        #             if torch.rand(1).item() < self.class_dropout_prob:
+        #                 s, e = token_groups["self_attn"]["k_slices"]["grasp"]
+        #                 k_self[:, s:e, :] = self.null_grasp
         
-        if not train:
-            if not condition:
-                if "goal" in token_groups["cross_attn"]["k_slices"]:
-                    s, e = token_groups["cross_attn"]["k_slices"]["goal"]
-                    k_cross[:, s:e, :] = self.null_goal
-                if "grasp" in token_groups["cross_attn"]["k_slices"]:
-                    s, e = token_groups["cross_attn"]["k_slices"]["grasp"]
-                    k_cross[:, s:e, :] = self.null_grasp
-                if "goal" in token_groups["self_attn"]["k_slices"]:
-                    s, e = token_groups["self_attn"]["k_slices"]["goal"]
-                    k_self[:, s:e, :] = self.null_goal
-                if "grasp" in token_groups["self_attn"]["k_slices"]:
-                    s, e = token_groups["self_attn"]["k_slices"]["grasp"]
-                    k_self[:, s:e, :] = self.null_grasp
-        else:
-            # During training, randomly drop conditions for classifier-free guidance
-            if self.class_dropout_prob > 0:
-                if "goal" in token_groups["cross_attn"]["k_slices"]:
-                    if torch.rand(1).item() < self.class_dropout_prob:
-                        s, e = token_groups["cross_attn"]["k_slices"]["goal"]
-                        k_cross[:, s:e, :] = self.null_goal
-                if "grasp" in token_groups["cross_attn"]["k_slices"]:
-                    if torch.rand(1).item() < self.class_dropout_prob:
-                        s, e = token_groups["cross_attn"]["k_slices"]["grasp"]
-                        k_cross[:, s:e, :] = self.null_grasp
-                if "goal" in token_groups["self_attn"]["k_slices"]:
-                    if torch.rand(1).item() < self.class_dropout_prob:
-                        s, e = token_groups["self_attn"]["k_slices"]["goal"]
-                        k_self[:, s:e, :] = self.null_goal
-                if "grasp" in token_groups["self_attn"]["k_slices"]:
-                    if torch.rand(1).item() < self.class_dropout_prob:
-                        s, e = token_groups["self_attn"]["k_slices"]["grasp"]
-                        k_self[:, s:e, :] = self.null_grasp
+        # x = self.cross_attn(
+        #     seq1=x,
+        #     seq2=k_cross,
+        #     seq1_pos=rel_grasp_pos,
+        #     seq2_pos=rel_pcd_pos,
+        #     ada_sgnl=time_embs
+        # )[-1]
+
+        # x = self.cross_attn(
+        #     seq1=x,
+        #     seq2=k_cross,
+        #     # seq1_pos=rel_grasp_pos,
+        #     # seq2_pos=rel_pcd_pos,
+        #     ada_sgnl=time_embs
+        # )[-1]
         
-        x = q
-        x = self.cross_attn(
-            seq1=x,
-            seq2=k_cross,
-            seq1_pos=rel_grasp_pos,
-            seq2_pos=rel_pcd_pos,
-            ada_sgnl=time_embs
-        )[-1]
-        
-        for layer in self.self_attn:
-            x = layer(
-                seq1=x,
-                seq2=k_self,
-                seq1_pos=rel_grasp_pos,
-                seq2_pos=torch.cat((rel_pcd_pos, rel_grasp_pos), 1),
-                ada_sgnl=time_embs
-            )[-1]
+        # for layer in self.self_attn:
+        #     x = layer(
+        #         seq1=x,
+        #         seq2=k_self,
+        #         # seq1_pos=rel_grasp_pos,
+        #         # seq2_pos=torch.cat((rel_pcd_pos, rel_grasp_pos), 1),
+        #         ada_sgnl=time_embs
+        #     )[-1]
+
         
         # print(x.shape, 'transformer output x shape')
         act_future_pred     = self.to_actions(x[:, :self.nfuture, :])   

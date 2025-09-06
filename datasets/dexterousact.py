@@ -147,13 +147,13 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
         for ep in episodes:
             T = ep["q_traj"].shape[0]
             hi = T - nfuture - 1
-            if test_mode:
-                hi = 0
+            # if test_mode:
+            #     hi = 0
             if hi < 0:
                 times.append([])
                 continue
-            # idx = torch.randint(0, hi+1, (K,)).tolist()
-            idx = torch.randint(10, 11, (K,)).tolist() # fix to 5
+            idx = torch.randint(0, hi+1, (K,)).tolist()
+            # idx = torch.randint(10, 11, (K,)).tolist() # fix to 5
             # print(idx, 'idx')
             times.append(idx)
             total += len(idx)

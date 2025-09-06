@@ -242,6 +242,7 @@ class DexterousActTrainTester:
 
         # Eval only
         if self.args.eval_only:
+            print("Testing.......", dist.get_rank())
             if dist.get_rank() == 0:
                 print("Test evaluation.......")
                 model.eval()
@@ -260,7 +261,7 @@ class DexterousActTrainTester:
                 self.evaluate_nsteps(
                     ema_model if self.args.use_ema else model,
                     train_loader, step_id=-1,
-                    val_iters=-1, split='train'
+                    val_iters=2, split='train'
                 )
             dist.barrier(device_ids=[torch.cuda.current_device()])
             return ema_model if self.args.use_ema else model

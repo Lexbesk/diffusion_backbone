@@ -1,6 +1,134 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
+
+def sinusoidal_time_embedding(t: torch.Tensor, dim: int, max_period: float = 10000.0):
+    """
+    t: (...,) float tensor of step indices (can be negative)
+    returns: (..., dim)
+    """
+    half = dim // 2
+    freqs = torch.exp(-math.log(max_period) * torch.arange(0, half, device=t.device) / max(half-1,1))
+    angles = t[..., None] * freqs[None, ...]  # broadcast
+    emb = torch.cat([torch.cos(angles), torch.sin(angles)], dim=-1)
+    if dim % 2 == 1:  # pad if odd
+        emb = torch.nn.functional.pad(emb, (0,1))
+    return emb
+
+class TimeProj(nn.Module):
+    def __init__(self, d_model, d_time=64):
+        super().__init__()
+        self.d_time = d_time
+        self.proj = nn.Sequential(
+            nn.Linear(d_time, d_model),
+            nn.SiLU(),
+            nn.Linear(d_model, d_model),
+        )
+
+    def forward(self, t_ids):  # (T,)
+        te = sinusoidal_time_embedding(t_ids, self.d_time)  # (T, d_time)
+        return self.proj(te)  # (T, d_model)
+
+class DropPath(nn.Module):
+    """Stochastic depth per sample (path drop)."""
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x):
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # broadcast over (N, D)
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+        random_tensor = random_tensor.floor()  # binarize
+        return x.div(keep_prob) * random_tensor
+
+
+class GatedResidualFF(nn.Module):
+    """
+    Pre-norm gated FFN block with GEGLU, LayerScale, and DropPath.
+    - Input/Output: (B, N, D)
+    """
+    def __init__(
+        self,
+        d_model: int,
+        d_hidden: int,
+        dropout: float = 0.1,
+        layerscale_init: float = 1e-5,
+        drop_path: float = 0.0,
+    ):
+        super().__init__()
+        self.ln = nn.LayerNorm(d_model)
+        self.fc_in = nn.Linear(d_model, 2 * d_hidden)  # for GEGLU (gate + value)
+        self.fc_out = nn.Linear(d_hidden, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
+        # LayerScale: learnable per-channel residual scaler
+        self.gamma = nn.Parameter(layerscale_init * torch.ones(d_model)) if layerscale_init > 0 else None
+
+    def forward(self, x):
+        h = self.ln(x)
+        h = self.fc_in(h)
+        g, v = h.chunk(2, dim=-1)           # (B, N, d_hidden) each
+        h = F.gelu(g) * v                   # GEGLU
+        h = self.fc_out(self.dropout(h))
+        h = self.dropout(h)
+        if self.gamma is not None:
+            h = h * self.gamma              # (B, N, D) * (D,)
+        h = self.drop_path(h)
+        return x + h
+
+
+class TokenPredictorPlus(nn.Module):
+    """
+    Beefier per-token predictor with gated blocks + stronger output MLP.
+    x: (B, N, D) -> y: (B, N, out_dim)
+    """
+    def __init__(
+        self,
+        d_model: int,
+        out_dim: int,
+        num_blocks: int = 6,
+        expansion: float = 6.0,     # hidden = expansion * d_model
+        dropout: float = 0.1,
+        drop_path: float = 0.1,     # total drop-path at last layer (linearly scaled across depth)
+        layerscale_init: float = 1e-5,
+        out_mlp_mult: float = 2.0,  # width of the small output head MLP
+        zero_init_head: bool = True # zero-init last linear for stable start
+    ):
+        super().__init__()
+        d_hidden = int(expansion * d_model)
+        dp_rates = torch.linspace(0, drop_path, steps=num_blocks).tolist()
+
+        self.blocks = nn.ModuleList([
+            GatedResidualFF(
+                d_model=d_model,
+                d_hidden=d_hidden,
+                dropout=dropout,
+                layerscale_init=layerscale_init,
+                drop_path=dp_rates[i],
+            )
+            for i in range(num_blocks)
+        ])
+
+        out_hidden = int(out_mlp_mult * d_model)
+        self.out = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, out_hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(out_hidden, out_dim),
+        )
+        if zero_init_head:
+            nn.init.zeros_(self.out[-1].weight)
+            nn.init.zeros_(self.out[-1].bias)
+
+    def forward(self, x):
+        for blk in self.blocks:
+            x = blk(x)
+        return self.out(x)
 
 
 class ResidualFF(nn.Module):
@@ -25,7 +153,7 @@ class TokenPredictor(nn.Module):
     Robust per-token predictor:
       x: (B, N, D) -> y: (B, N, out_dim)
     """
-    def __init__(self, d_model, out_dim, d_hidden=None, num_blocks=1, dropout=0.1):
+    def __init__(self, d_model, out_dim, d_hidden=None, num_blocks=4, dropout=0.1):
         super().__init__()
         d_hidden = d_hidden or (4 * d_model)
         self.blocks = nn.ModuleList([

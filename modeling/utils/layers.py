@@ -454,3 +454,219 @@ class StackCrossSelfAttentionModule(nn.Module):
             seq = seq_[:, :len_, :]
             seq1 = seq_[:, len_:, :]
         return output
+
+
+
+class AdaLayer(nn.Module):
+    """LayerNorm(x) -> FiLM with cond: (1+s)*LN(x) + b"""
+    def __init__(self, d_model, d_cond):
+        super().__init__()
+        self.ln = nn.LayerNorm(d_model, elementwise_affine=False)
+        self.to_scale = nn.Linear(d_cond, d_model)
+        self.to_shift = nn.Linear(d_cond, d_model)
+        # start as identity
+        nn.init.zeros_(self.to_scale.weight); nn.init.zeros_(self.to_scale.bias)
+        nn.init.zeros_(self.to_shift.weight); nn.init.zeros_(self.to_shift.bias)
+
+    def forward(self, x, cond):          # x: (B,S,D), cond: (B,Dc)
+        s = self.to_scale(cond).unsqueeze(1)   # (B,1,D)
+        b = self.to_shift(cond).unsqueeze(1)   # (B,1,D)
+        h = self.ln(x)
+        return h * (1 + s) + b
+
+
+# class TorchCrossAttnBlock(nn.Module):
+#     def __init__(self, d_model=256, n_heads=8, d_ff=None, dropout=0.1):
+#         super().__init__()
+#         self.mha = nn.MultiheadAttention(
+#             embed_dim=d_model, num_heads=n_heads, dropout=dropout, batch_first=True
+#         )
+#         self.do = nn.Dropout(dropout)
+#         self.norm1 = nn.LayerNorm(d_model)
+#         d_ff = d_ff or 4 * d_model
+#         self.ff = nn.Sequential(
+#             nn.Linear(d_model, d_ff), nn.GELU(), nn.Dropout(dropout),
+#             nn.Linear(d_ff, d_model), nn.Dropout(dropout),
+#         )
+#         self.norm2 = nn.LayerNorm(d_model)
+
+#     def forward(self, q, kv, attn_mask=None, key_padding_mask=None):
+#         """
+#         q:  (B, S_Q, D)
+#         kv: (B, S_KV, D)
+#         attn_mask: (S_Q, S_KV) bool or float (True / -inf == block)
+#         key_padding_mask: (B, S_KV) bool (True == pad/ignore)
+#         """
+#         h, _ = self.mha(q, kv, kv, attn_mask=attn_mask,
+#                         key_padding_mask=key_padding_mask, need_weights=False)
+#         x = self.norm1(q + self.do(h))
+#         h = self.ff(x)
+#         x = self.norm2(x + h)
+#         return x
+
+class TorchCrossAttnBlock(nn.Module):
+    def __init__(self, d_model=256, n_heads=8, d_ff=None, dropout=0.1, d_cond=None):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.do = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        d_ff = d_ff or 4 * d_model
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model), nn.Dropout(dropout),
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+
+        # optional: condition with AdaLN before attn and before FFN
+        self.d_cond = d_cond
+        if d_cond is not None:
+            self.ada_q = AdaLayer(d_model, d_cond)  # modulate queries
+            self.ada_kv = AdaLayer(d_model, d_cond) # (optional) modulate keys/values
+            self.ada_ff = AdaLayer(d_model, d_cond) # modulate stream before FFN
+        else:
+            self.ada_q = self.ada_kv = self.ada_ff = None
+
+    def forward(self, q, kv, attn_mask=None, key_padding_mask=None, cond=None):
+        """
+        q:  (B, S_Q, D)
+        kv: (B, S_KV, D)
+        cond: (B, D_cond)   # diffusion timestep embedding (global per batch)
+        """
+        if cond is not None and self.ada_q is not None:
+            q  = self.ada_q(q,  cond)
+            kv = self.ada_kv(kv, cond)
+
+        h, _ = self.mha(q, kv, kv, attn_mask=attn_mask,
+                        key_padding_mask=key_padding_mask, need_weights=False)
+        x = self.norm1(q + self.do(h))
+
+        if cond is not None and self.ada_ff is not None:
+            x = self.ada_ff(x, cond)
+
+        h = self.ff(x)
+        x = self.norm2(x + h)
+        return x
+
+
+def build_xattn_mask_modality_temporal(
+    nh_act, nh_state, nh_depth, n_goal, n_grasp,
+    nf_act, nf_state, nf_obj,
+    device, dtype=torch.bool,
+    allow_state_to_see_objects=True,   # you said "state blocks only actions"
+    constrain_obj=False                # set True if you also want to limit object queries
+):
+    """
+    Q layout:   [Af_q | Sf_q | Of_q]                lengths = (nf_act, nf_state, nf_obj)
+    KV layout:  [Ah | Sh | Dh | G | GR | Af | Sf | Of]
+                lengths = (nh_act, nh_state, nh_depth, n_goal, n_grasp, nf_act, nf_state, nf_obj)
+
+    Returns a (S_Q, S_KV) bool mask (True=BLOCK).
+    """
+    # Build KV offsets
+    kv_groups = [
+        ("Ah", nh_act), ("Sh", nh_state), ("Dh", nh_depth),
+        ("G", n_goal), ("GR", n_grasp),
+        ("Af", nf_act), ("Sf", nf_state), ("Of", nf_obj),
+    ]
+    kv_off, s = {}, 0
+    for name, n in kv_groups:
+        kv_off[name] = (s, s + n); s += n
+    S_KV = s
+
+    # Build Q offsets
+    q_groups = [("Af_q", nf_act), ("Sf_q", nf_state), ("Of_q", nf_obj)]
+    q_off, s = {}, 0
+    for name, n in q_groups:
+        q_off[name] = (s, s + n); s += n
+    S_Q = s
+
+    mask = torch.zeros((S_Q, S_KV), dtype=dtype, device=device)  # False=allow
+
+    def block(q_name, kv_name):
+        qs, qe = q_off[q_name]; ks, ke = kv_off[kv_name]
+        if qe > qs and ke > ks:
+            mask[qs:qe, ks:ke] = True
+
+    def causal_upper(q_name, kv_name):
+        # Block keys with step > query step (upper triangle) inside future blocks.
+        qs, qe = q_off[q_name]; ks, ke = kv_off[kv_name]
+        Fq, Fk = qe - qs, ke - ks
+        F = min(Fq, Fk)
+        if F <= 0: return
+        tri = torch.triu(torch.ones((F, F), dtype=dtype, device=device), diagonal=1)  # True=BLOCK
+        mask[qs:qs+F, ks:ks+F] = tri
+
+    Ah, Sh, Dh, G, GR, Af, Sf, Of = "Ah","Sh","Dh","G","GR","Af","Sf","Of"
+
+    # ===== Rules =====
+    # (1) State-future queries: block ALL future actions; allow everything else (including all states).
+    block("Sf_q", Af)
+    if not allow_state_to_see_objects:
+        block("Sf_q", Of)
+    # No causal on Sf_q→Sf: states can see all future states.
+
+    # (2) Action-future queries: causal to Af and Sf; block Of entirely.
+    causal_upper("Af_q", Af)
+    causal_upper("Af_q", Sf)
+    block("Af_q", Of)
+
+    # (3) Object-future queries (optional)
+    if constrain_obj:
+        causal_upper("Of_q", Of)
+        block("Of_q", Af)
+        block("Of_q", Sf)
+
+    return mask, q_off, kv_off
+
+
+import matplotlib.pyplot as plt
+
+def plot_attn_mask(mask, q_off, kv_off,
+                   q_labels=("Af_q","Sf_q","Of_q"),
+                   kv_labels=("Ah","Sh","Dh","G","GR","Af","Sf","Of"),
+                   title="Cross-Attention Mask (black = BLOCKED)",
+                   savepath=None, figsize=(7,5)):
+    """
+    mask: (S_Q, S_KV) torch.bool or float mask (True or -inf = block)
+    q_off, kv_off: dicts like {"Af_q": (start,end), ...} from your builder
+    """
+    # Normalize to boolean "blocked"
+    if mask.dtype == torch.bool:
+        blocked = mask
+    else:
+        # float/additive mask: assume -inf or very negative means blocked
+        blocked = ~torch.isfinite(mask) | (mask < -1e6)
+
+    arr = blocked.detach().cpu().numpy().astype(float)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(arr, cmap="gray_r", interpolation="nearest", aspect="auto")
+    # gray_r makes 1.0 (blocked) = black, 0.0 (allowed) = white
+
+    # Draw boundaries
+    # Horizontal (queries)
+    for name in q_labels:
+        s,e = q_off[name]
+        ax.hlines(e-0.5, -0.5, arr.shape[1]-0.5, lw=0.6, color="k")
+    # Vertical (KV)
+    for name in kv_labels:
+        s,e = kv_off[name]
+        ax.vlines(e-0.5, -0.5, arr.shape[0]-0.5, lw=0.6, color="k")
+
+    # Ticks at group centers
+    q_ticks = [ (q_off[n][0] + q_off[n][1] - 1) / 2 for n in q_labels ]
+    kv_ticks = [ (kv_off[n][0] + kv_off[n][1] - 1) / 2 for n in kv_labels ]
+    ax.set_yticks(q_ticks); ax.set_yticklabels(q_labels, fontsize=9)
+    ax.set_xticks(kv_ticks); ax.set_xticklabels(kv_labels, rotation=90, fontsize=9)
+
+    ax.set_ylabel("Queries (S_Q)")
+    ax.set_xlabel("Keys/Values (S_KV)")
+    ax.set_title(title)
+    ax.grid(False)
+
+    # Legend text
+    ax.text(1.01, 0.02, "white = allowed\nblack = blocked",
+            transform=ax.transAxes, va="bottom", ha="left", fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(savepath, dpi=220, bbox_inches="tight")
