@@ -6,22 +6,22 @@ DATA_PATH="/data/user_data/austinz/Robots/manipulation"
 
 # train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1new/train.zarr
 # eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1/val.zarr
-train_data_dir=$DATA_PATH/zarr_datasets/dexterousact/train.zarr
+train_data_dir=$DATA_PATH/zarr_datasets/dexterousact_1000/train.zarr
 # train_data_dir=/data/group_data/katefgroup/datasets/austinz/zarr_datasets/Dexonomy_zarr_all/train.zarr
-eval_data_dir=$DATA_PATH/zarr_datasets/dexterousact/train.zarr
+eval_data_dir=$DATA_PATH/zarr_datasets/dexterousact_1000/train.zarr
 train_instructions=instructions/calvin/train_keypose_instructions.json
 val_instructions=instructions/calvin/val_keypose_instructions.json
 
 dataset=DexterousAct
 memory_limit=6
 lv2_batch_size=1 # equally divides the batch size B=64
-B=1 # actual batch size is B * lv2_batch_size * K
+B=32 # actual batch size is B * lv2_batch_size * K
 B_val=64
 chunk_size=1
 
 # Training/testing arguments, change these for HPT
 eval_only=false
-lr=1e-4
+lr=1e-5
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
@@ -57,8 +57,8 @@ guidance_weight=1.5  # e.g., 1.5 for classifier-free guidance
 val_set_all_anchor=true
 
 nhist=4
-nfuture=4
-K=32 # number of timesteps sampled per episode during training
+nfuture=25
+K=1 # number of timesteps sampled per episode during training
 
 # # debugging choice
 # val_freq=10
@@ -69,11 +69,11 @@ K=32 # number of timesteps sampled per episode during training
 # # training choice
 val_freq=1000
 vis_freq=10000000000
-ngpus=1
+ngpus=4
 num_workers=4
 
 
-run_log_dir=run_Sep6-6:02pm-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K-numlayers${num_shared_attn_layers}-embedding_dim$embedding_dim
+run_log_dir=run_Sep7_10am_1000-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K-numlayers${num_shared_attn_layers}-embedding_dim$embedding_dim
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 # run_log_dir=run_alltypes_Jul20-B32-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers30-visfreq100-typecondtrue

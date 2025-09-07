@@ -14,7 +14,7 @@ from ..utils.utils import (
 )
 from ..utils.position_encodings import RotaryPositionEncoding3D
 from ..utils.depth_encoder import DepthLightCNN, GoalGraspToken
-from ..utils.dexterousact_token_encoders import ActionTokenEncoder, ObjectPoseTokenEncoder, HistoryStateTokenEncoder, TokenPredictor, zeros_xyz, build_slices, TokenPredictorPlus, TimeProj
+from ..utils.dexterousact_token_encoders import ActionTokenEncoder, ObjectPoseTokenEncoder, HistoryStateTokenEncoder, TokenPredictor, zeros_xyz, build_slices, TokenPredictorPlus, TimeProj, sinusoidal_time_embedding
 from ..utils.fk_layer import FKLayer
 import time
 from collections import defaultdict
@@ -82,6 +82,15 @@ class DexterousActor(nn.Module):
         self.depth_enc = DepthLightCNN(d=embedding_dim, add_validity_channel=True, robust_norm=True, dropout=0.1)
         self.goal_proj = nn.Linear(3, embedding_dim)
         self.goal_grasp_tokener = GoalGraspToken(d_token=embedding_dim, n_heads=4)
+
+        self.time_proj = TimeProj(d_model=embedding_dim)
+        self.type_vocab = {
+            "act_hist": 0, "state_hist": 1, "depth_hist": 2,
+            "goal": 3, "grasp": 4, "act_future": 5, "q_future": 6, "obj_future": 7
+        }
+        self.type_emb = nn.Embedding(len(self.type_vocab), embedding_dim)
+        self.emb_ln = nn.LayerNorm(embedding_dim)
+
         
         # for FK layer
         self.out_links = ["lftip", "rftip", "mftip", "fftip", "thtip", "wrist"]
@@ -126,82 +135,54 @@ class DexterousActor(nn.Module):
                 torch.Tensor([[-distance, -distance, -distance], [distance, distance, distance]]),
                 requires_grad=False
             )
-                        
-    def fk_layer(self, joint_angles):
-        (B, nhist, J) = joint_angles.shape
-        pos_hist, _, _ = self.fk(joint_angles, need_rot=False)  # dict of link->(B, nhist, 3)
-
-        # Example: stack 6 points (wrist + 5 fingertips) to match your ee_fingers layout
-        ee_hist = torch.stack([pos_hist["wrist"],
-                            pos_hist["lftip"],
-                            pos_hist["fftip"],
-                            pos_hist["mftip"],
-                            pos_hist["rftip"],
-                            pos_hist["thtip"]
-                            ], dim=2)  # (B, nhist, 6, 3)
-        # # If you want orientations (for contact frames, etc.)
-        # pos_future, rot_future, _ = self.fk(q_future, need_rot=True)
-        # R_thumb = rot_future["rh_thtip"]    # (B, nfuture, 3, 3)
-        # p_thumb = pos_future["rh_thtip"]
-        return ee_hist[:, :, 0]
 
     def policy_forward_pass(self, noisy_actions, timestep, fixed_inputs, train, condition=True):
         _t0 = self._start_timer()
         
         act_hist, obj_pose_hist, q_hist, v_hist, ee_fingers, depth_hist, obj_init_pcl_cam, goal_pos, grasp_cond = fixed_inputs
-        # print(q_hist.shape, 'q hist shape')
-        # print(ee_fingers, 'ee fingers')
-        # print(v_hist, 'v hist')
-        # crop depth to 0 to 10m
         depth_hist = torch.clamp(depth_hist, 0, 10)
         noisy_act_future = noisy_actions[:, :, :len(self.jmin)]          # (B, nfuture, 31)
         noisy_q_future = noisy_actions[:, :, len(self.jmin):2*len(self.jmin)]  # (B, nfuture, 31)
         noisy_obj_pose_future = noisy_actions[:, :, 2*len(self.jmin):]          # (B, nfuture, 7)
         
+        # Encoders
         action_hist_tokens = self.act_enc(act_hist, q_hist=None)
         action_future_tokens = self.act_enc(noisy_act_future, q_hist=None)
-        # q_future_tokens = self.act_enc(noisy_q_future, q_hist=None)
         q_future_tokens = self.q_enc(noisy_q_future, q_hist=None)
-        # obj_hist_tokens = self.obj_enc(obj_pose_hist) # obj history pose is encoded in history states
         obj_future_tokens = self.obj_enc(noisy_obj_pose_future)
-        state_hist_tokens = self.state_enc(
-            q_hist=q_hist,                    # (B, nhist, 31)  already normalized
-            v_hist=v_hist,                    # (B, nhist, 31)  (ideally z-scored)
-            ee_fingers=ee_fingers,            # (B, nhist, 6, 3) in robot frame
-        )
+        state_hist_tokens = self.state_enc(q_hist=q_hist, v_hist=v_hist, ee_fingers=ee_fingers)
         depth_hist_tokens = self.depth_enc(depth_hist)
+        # condition signals
+        goal_tok = self.goal_proj(goal_pos).unsqueeze(1)
+        grasp_tok = self.goal_grasp_tokener(obj_init_pcl_cam, grasp_cond)  # (B,1,D)
 
-        # crucial: add timestep embeddings
         device = noisy_actions.device
-        B = action_hist_tokens.shape[0]
+        B, D  = action_hist_tokens.shape[0], action_hist_tokens.shape[-1]
+
+        # Future-history timestep embeddings
         t_hist_ids   = torch.arange(-self.nhist, 0,  device=device, dtype=torch.float32)
         t_future_ids = torch.arange(1, self.nfuture+1, device=device, dtype=torch.float32)
-        time_proj = TimeProj(d_model=action_hist_tokens.size(-1)).to(device)
-        temb_hist   = time_proj(t_hist_ids)[None, :, :].expand(B, self.nhist, -1)
-        temb_future = time_proj(t_future_ids)[None, :, :].expand(B, self.nfuture, -1)
-
-        # add to *every* modality at the same time index so they align
+        temb_hist   = self.time_proj(t_hist_ids)[None, :, :].expand(B, self.nhist, -1)
+        temb_future = self.time_proj(t_future_ids)[None, :, :].expand(B, self.nfuture, -1)
         action_hist_tokens   = action_hist_tokens   + temb_hist
         state_hist_tokens    = state_hist_tokens    + temb_hist
         depth_hist_tokens    = depth_hist_tokens    + temb_hist
-
         action_future_tokens = action_future_tokens + temb_future
         q_future_tokens      = q_future_tokens      + temb_future
         obj_future_tokens    = obj_future_tokens    + temb_future
 
-        # print(action_future_tokens, 'actions future tokens')
-        
-        # condition signals
-        goal_tok = self.goal_proj(goal_pos)
-        goal_tok = goal_tok.unsqueeze(1)  # (B, 1, d)
-        grasp_tok = self.goal_grasp_tokener(obj_init_pcl_cam, grasp_cond)  # (B,1,D)
-        
-        # action_xyz = self.fk_layer(noisy_act_future)  # (B, nfuture, 6, 3)
-        # print(action_xyz.shape, 'action xyz shape')
+        # Add type embeddings
+        # print(self.type_emb.weight.shape, 'shape of type emb')
+        # print(self.type_emb.weight, 'weight of type emb')
+        action_hist_tokens   = action_hist_tokens   + self.type_emb.weight[self.type_vocab["act_hist"]][None, None, :]
+        state_hist_tokens    = state_hist_tokens    + self.type_emb.weight[self.type_vocab["state_hist"]][None, None, :]
+        depth_hist_tokens    = depth_hist_tokens    + self.type_emb.weight[self.type_vocab["depth_hist"]][None, None, :]
+        goal_tok             = goal_tok             + self.type_emb.weight[self.type_vocab["goal"]][None, None, :]
+        grasp_tok            = grasp_tok            + self.type_emb.weight[self.type_vocab["grasp"]][None, None, :]
+        action_future_tokens = action_future_tokens + self.type_emb.weight[self.type_vocab["act_future"]][None, None, :]
+        q_future_tokens      = q_future_tokens      + self.type_emb.weight[self.type_vocab["q_future"]][None, None, :]
+        obj_future_tokens    = obj_future_tokens    + self.type_emb.weight[self.type_vocab["obj_future"]][None, None, :]
 
-        B = action_hist_tokens.shape[0]
-        device = action_hist_tokens.device
-        D = action_hist_tokens.shape[-1]
         q_list = [
             ("act_future", action_future_tokens),
             ("q_future", q_future_tokens),
@@ -216,9 +197,18 @@ class DexterousActor(nn.Module):
             ("goal", goal_tok),                  
             ("grasp", grasp_tok),                
         ]
-        k_tokens = torch.cat([t for _, t in k_ctx_list], dim=1)
         k_self_list = k_ctx_list + q_list
         k_self_tokens = torch.cat([t for _, t in k_self_list], dim=1)
+
+        # Absolute sinusoidal positional embeddings
+        S_Q  = q_tokens.size(1)
+        S_KS = k_self_tokens.size(1)
+
+        q_pos  = sinusoidal_time_embedding(torch.arange(S_Q,  device=device), D).unsqueeze(0).expand(B, -1, -1)
+        ks_pos = sinusoidal_time_embedding(torch.arange(S_KS, device=device), D).unsqueeze(0).expand(B, -1, -1)
+
+        q_tokens      = self.emb_ln(q_tokens      + q_pos)    # optional LN to stabilize
+        k_self_tokens = self.emb_ln(k_self_tokens + ks_pos)
 
         nh_act   = action_hist_tokens.size(1)
         nh_state = state_hist_tokens.size(1)
@@ -244,7 +234,6 @@ class DexterousActor(nn.Module):
 
         out = self.prediction_head(
             q_tokens, # query
-            k_tokens, # k and v for cross-attn
             k_self_tokens, # k and v for self-attn
             attn_mask,
             timestep,
@@ -647,7 +636,6 @@ class TransformerHead(nn.Module):
                  rotary_pe=False,
                  rot_dim=6,
                  angle_dim=22,
-                 type_embed_mode="conditions_only"  # {"conditions_only", "all", "none"}
                  ):
         super().__init__()
         
@@ -668,17 +656,6 @@ class TransformerHead(nn.Module):
         self.null_goal = nn.Parameter(torch.zeros(1, 1, embedding_dim))
         self.null_grasp = nn.Parameter(torch.zeros(1, 1, embedding_dim))
         
-        
-        self.type_embed_mode = type_embed_mode
-        self.token_type_ids = {
-            "act_hist": 0, "state_hist": 1, "depth_hist": 2,
-            "goal": 3, "grasp": 4,
-            "act_future": 5, "obj_future": 7, "q_future": 6,
-        }
-        self.num_token_types = max(self.token_type_ids.values()) + 1
-        self.type_emb = nn.Embedding(self.num_token_types, embedding_dim)
-
-
         # # Estimate attends to context (no subsampling)
         # self.cross_attn = AttentionModule(
         #     num_layers=2,
@@ -733,25 +710,14 @@ class TransformerHead(nn.Module):
 
 
 
-    def forward(self, q_tokens, k_tokens, k_self_tokens, attn_mask, timesteps, train=True, condition=True):
+    def forward(self, q_tokens, k_self_tokens, attn_mask, timesteps, train=True, condition=True):
         time_embs = self.encode_denoising_timestep(timesteps)        
 
         x = q_tokens
 
         for cross_layer in self.cross_blocks:
-            # x = cross_layer(x, k_self_tokens, attn_mask=attn_mask, key_padding_mask=None)
             x = cross_layer(x, k_self_tokens, attn_mask=attn_mask, key_padding_mask=None, cond=time_embs)
-        # q_out = self.cross_block(q_tokens, k_tokens, attn_mask=attn_mask, key_padding_mask=None)  # (B,S_Q,D)
 
-        
-        # self._add_type_embeddings_(q, token_groups["cross_attn"]["q_slices"],
-        #                            list(token_groups["cross_attn"]["q_slices"].keys()))
-        # # Cross-attn keys: obs + conditions
-        # self._add_type_embeddings_(k_cross, token_groups["cross_attn"]["k_slices"],
-        #                            list(token_groups["cross_attn"]["k_slices"].keys()))
-        # # Self-attn keys: obs + conditions + future
-        # self._add_type_embeddings_(k_self, token_groups["self_attn"]["k_slices"],
-        #                            list(token_groups["self_attn"]["k_slices"].keys()))
         
         # if not train:
         #     if not condition:
@@ -823,33 +789,6 @@ class TransformerHead(nn.Module):
         return [
             torch.cat([act_future_pred, q_future_pred, obj_pose_future_pred], dim=-1)
         ]
-        
-    def _add_type_embeddings_(self, toks, slices, which_keys):
-        """
-        In-place add type embeddings to specified token segments.
-        toks: (B, N, D)
-        slices: dict name -> (start, end)
-        which_keys: iterable of token names to mark
-        """
-        if self.type_embed_mode == "none":
-            return toks
-        if self.type_embed_mode == "conditions_only":
-            # keep only goal/grasp even if more provided
-            which_keys = [k for k in which_keys if k in ("goal", "grasp")]
-        # else "all": use all in which_keys
-
-        if not which_keys:
-            return toks
-
-        B, _, D = toks.shape
-        for name in which_keys:
-            if name not in slices:
-                continue
-            s, e = slices[name]
-            type_id = self.token_type_ids[name]
-            # (1, 1, D) -> (1, e-s, D) -> (B, e-s, D)
-            toks[:, s:e, :] += self.type_emb.weight[type_id].view(1, 1, D)
-        return toks
 
     def encode_denoising_timestep(self, timestep):
         """
@@ -864,15 +803,6 @@ class TransformerHead(nn.Module):
         time_feats = self.time_emb(timestep)
         return time_feats
 
-    def get_positional_embeddings(
-        self,
-        q_xyzs, k_xyzs # in cross attention
-    ):
-        rel_grasp_pos = self.relative_pe_layer(q_xyzs)
-        rel_pcd_pos = self.relative_pe_layer(k_xyzs)
-        # rel_fps_pos = self.relative_pe_layer(fps_scene_pos)
-        rel_pos = torch.cat([rel_grasp_pos, rel_pcd_pos], 1)
-        return rel_grasp_pos, rel_pcd_pos, rel_pos
 
 
 

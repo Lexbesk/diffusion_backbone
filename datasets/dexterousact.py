@@ -147,8 +147,8 @@ def make_collate_train(nhist: int, nfuture: int, K: int, include_depth: bool = T
         for ep in episodes:
             T = ep["q_traj"].shape[0]
             hi = T - nfuture - 1
-            # if test_mode:
-            #     hi = 0
+            if nfuture >= 20 and nhist <= 5:
+                hi = 0
             if hi < 0:
                 times.append([])
                 continue

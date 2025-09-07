@@ -21,7 +21,7 @@ chunk_size=1
 
 # Training/testing arguments, change these for HPT
 eval_only=false
-lr=1e-4
+lr=1e-6
 lr_scheduler=constant
 wd=5e-10
 train_iters=600000
@@ -73,7 +73,7 @@ ngpus=4
 num_workers=4
 
 
-run_log_dir=run_Sep6_1000-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K-numlayers${num_shared_attn_layers}-embedding_dim$embedding_dim
+run_log_dir=run_Sep6_6:12pm_1000-B$B-lv2bs$lv2_batch_size-Bval$B_val-DT$denoise_timesteps-nhist$nhist-nfuture$nfuture-K$K-numlayers${num_shared_attn_layers}-embedding_dim$embedding_dim
 checkpoint=train_logs/${main_dir}/${run_log_dir}/last.pth
 
 # run_log_dir=run_alltypes_Jul20-B32-lv2bs4-Bval64-DT10-ajptrue-embed256-C192-nlayers30-visfreq100-typecondtrue

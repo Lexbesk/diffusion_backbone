@@ -131,7 +131,7 @@ class GraspXLDataset(Dataset):
         mem_limit=8,
         copies=None,
         chunk_size=1,
-        partial_choice: str | int | Callable[[List[Path]], Path] = 0,
+        partial_choice=0,
     ):
         """
         Parameters
