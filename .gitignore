@@ -46,3 +46,5 @@ debug.sh
 sbatch_script2.slurm
 sampled_data/
 submodules/
+/submodules/Pointnet2_PyTorch
+/submodules/uni3d
