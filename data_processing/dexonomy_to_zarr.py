@@ -36,9 +36,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     # Tuples: (name, type, default)
     arguments = [
-        ('root', str, '/data/group_data/katefgroup/VLA/pe/'),
+        ('root', str, '/home/austinz/Projects/manipulation/Regrasping/diffusion_backbone/assets/object'),
         # ('tgt', str, '/data/group_data/katefgroup/datasets/austinz/zarr_datasets/Dexonomy_zarr_all')
-        ('tgt', str, '/data/user_data/austinz/Robots/manipulation/zarr_datasets/Dexonomy_zarr_prime')
+        ('tgt', str, '/home/austinz/Projects/datasets/manipulation/zarr_datasets/Dexonomy_zarr_prime')
     ]
     for arg in arguments:
         parser.add_argument(f'--{arg[0]}', type=arg[1], default=arg[2])
@@ -48,7 +48,7 @@ def parse_arguments():
 def get_datasets(dataset_cls):
     """Initialize datasets."""
 
-    object_paths = ['assets/object/DGN_5k', 'assets/object/objaverse_5k']
+    object_paths = ['DGN_5k', 'objaverse_5k']
     dataset_config = {
         'num_workers': 0,
         'num_points': 1024,
@@ -67,7 +67,7 @@ def get_datasets(dataset_cls):
         # 'grasp_type_lst': ["1_Large_Diameter", "6_Prismatic_4_Finger", "9_Palmar_Pinch", "18_Extensior_Type", "22_Parallel_Extension",
         #                    "26_Sphere_4_Finger", "31_Ring", "33_Inferior_Pincer"
         #                     ],
-        'grasp_path': 'assets/grasp/Dexonomy_GRASP_shadow/succ_collect',
+        'grasp_path': '/home/austinz/Projects/datasets/manipulation/Dexonomy/Dexonomy_GRASP_shadow/succ_collect',
         'object_path': None,
         'split_path': 'valid_split',
         'pc_path': 'vision_data/azure_kinect_dk',  # relative to object_path
@@ -78,7 +78,7 @@ def get_datasets(dataset_cls):
     val_dataset_lst = []
     for p in object_paths:
         object_path = p
-        dataset_config.object_path = object_path
+        dataset_config.object_path = os.path.join(ROOT, object_path)
         dataset_config.batch_size = 1
         train_dataset_lst.append(dataset_cls(dataset_config, "train"))
         dataset_config.batch_size = 1
@@ -243,8 +243,8 @@ if __name__ == "__main__":
     # Create zarr data
     for split in ['val']:
         all_tasks_main(split)
-    # for split in ['train']:
-    #     all_tasks_main(split)
+    for split in ['train']:
+        all_tasks_main(split)
     # # Store instructions as json (can be run independently)
     # os.makedirs('instructions/peract', exist_ok=True)
     # instr_dict = store_instructions(ROOT, tasks)

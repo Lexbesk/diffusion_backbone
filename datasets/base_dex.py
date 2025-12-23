@@ -150,7 +150,7 @@ class DexDataset(Dataset):
             self.init_test()
         
 
-        MODEL_PATH = '/data/user_data/austinz/Robots/DexGraspBench/assets/hand/shadow/right_hand.xml'
+        MODEL_PATH = '/home/austinz/Projects/manipulation/Regrasping/diffusion_backbone/DexGraspBench/assets/hand/shadow/right_hand.xml'
         self.hand_model = mujoco.MjModel.from_xml_path(MODEL_PATH)
         self.hand_model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
         self.sid_palm  = mujoco.mj_name2id(self.hand_model, mujoco.mjtObj.mjOBJ_SITE, b"palm_centre")

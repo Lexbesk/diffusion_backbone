@@ -20,7 +20,7 @@ import time
 from collections import defaultdict
 import numpy as np
 
-from diffusion_backbone.utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
+from utils.forward_kinematics.pk_utils import build_chain_from_mjcf_path, get_urdf_limits
 from pytorch3d.ops import sample_farthest_points
 import time
 

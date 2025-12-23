@@ -2,7 +2,7 @@
 main_dir=Dexonomy_zarr_prime
 
 
-DATA_PATH="/data/user_data/austinz/Robots/manipulation"
+DATA_PATH="/home/austinz/Projects/datasets/manipulation"
 
 # train_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1new/train.zarr
 # eval_data_dir=$DATA_PATH/zarr_datasets/Dexonomy_zarr_type1/val.zarr
@@ -65,7 +65,7 @@ val_set_all_anchor=true
 # # training choice
 val_freq=1000
 vis_freq=10000000000
-ngpus=4
+ngpus=1
 num_workers=4
 
 
